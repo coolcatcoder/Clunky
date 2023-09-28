@@ -145,18 +145,6 @@ fn main() {
     // start creating buffers
     let memory_allocator = Arc::new(StandardMemoryAllocator::new_default(device.clone()));
 
-    let vertices = [
-        vertex_data::VertexData {
-            position: [-1.0, 1.0],
-        },
-        vertex_data::VertexData {
-            position: [1.0, 1.0],
-        },
-        vertex_data::VertexData {
-            position: [1.0, -1.0],
-        },
-    ];
-
     let vertex_buffer = Buffer::from_iter(
         &memory_allocator,
         BufferCreateInfo {
@@ -167,11 +155,9 @@ fn main() {
             usage: MemoryUsage::Upload,
             ..Default::default()
         },
-        vertices,
+        events::STARTING_VERTICES,
     )
     .unwrap();
-
-    let indices: [u16; 3] = [0, 1, 2];
 
     let index_buffer = Buffer::from_iter(
         &memory_allocator,
@@ -183,7 +169,7 @@ fn main() {
             usage: MemoryUsage::Upload,
             ..Default::default()
         },
-        indices,
+        events::STARTING_INDICES,
     )
     .unwrap();
 
@@ -349,11 +335,11 @@ fn main() {
                 }
 
                 let uniform_buffer_subbuffer = {
-                    let uniform_data = vertex_shader::Data { // Why is this have the type of unknown? That doesn't seem good...
+                    let uniform_data : vertex_shader::Data = vertex_shader::Data { // Why is this have the type of unknown? That doesn't seem good...
                         scale: swapchain.image_extent()[0] as f32 / swapchain.image_extent()[1] as f32,
                     };
 
-                    let subbuffer = uniform_data.allocate_sized().unwrap(); // I reckon this line is actually ok, despite giving me an error. Check above comment.
+                    let subbuffer = uniform_buffer.allocate_sized().unwrap(); // I reckon this line is actually ok, despite giving me an error. Check above comment.
                     //let subbuffer = SubbufferAllocator::allocate_sized(&uniform_data as &SubbufferAllocator<_>).unwrap();
                     *subbuffer.write().unwrap() = uniform_data;
 
@@ -414,7 +400,7 @@ fn main() {
                     )
                     .bind_vertex_buffers(0, vertex_buffer.clone())
                     .bind_index_buffer(index_buffer.clone())
-                    .draw_indexed(indices.len() as u32, 1, 0, 0, 0)
+                    .draw_indexed(index_buffer.len() as u32, 1, 0, 0, 0)
                     .unwrap()
                     .end_render_pass()
                     .unwrap();
