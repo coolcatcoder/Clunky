@@ -1,13 +1,13 @@
 use std::{sync::Arc, time::Instant};
 use vulkano::{
-    buffer::{Buffer, BufferContents, BufferCreateInfo, BufferUsage, BufferError},
+    buffer::{Buffer, BufferCreateInfo, BufferError, BufferUsage, allocator::{SubbufferAllocator, SubbufferAllocatorCreateInfo}},
     command_buffer::{
         allocator::StandardCommandBufferAllocator, AutoCommandBufferBuilder, CommandBufferUsage,
         RenderPassBeginInfo, SubpassContents,
     },
     device::{
-        physical::PhysicalDeviceType, Device, DeviceCreateInfo, DeviceExtensions, QueueCreateInfo,
-        QueueFlags,
+        physical::PhysicalDeviceType, Device, DeviceCreateInfo, DeviceExtensions, DeviceOwned,
+        QueueCreateInfo, QueueFlags,
     },
     image::{view::ImageView, ImageAccess, ImageUsage, SwapchainImage},
     instance::{Instance, InstanceCreateInfo},
@@ -18,15 +18,16 @@ use vulkano::{
             vertex_input::Vertex,
             viewport::{Viewport, ViewportState},
         },
-        GraphicsPipeline,
+        GraphicsPipeline, Pipeline, PipelineBindPoint,
     },
     render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass, Subpass},
+    shader::ShaderModule,
     swapchain::{
         acquire_next_image, AcquireError, Swapchain, SwapchainCreateInfo, SwapchainCreationError,
         SwapchainPresentInfo,
     },
     sync::{self, FlushError, GpuFuture},
-    VulkanLibrary,
+    VulkanLibrary, descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet, allocator::StandardDescriptorSetAllocator},
 };
 use vulkano_win::VkSurfaceBuild;
 use winit::{
@@ -35,10 +36,11 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
-use vulkano::buffer::subbuffer::BufferWriteGuard;
+mod vertex_data;
 
-fn main()
-{
+mod events;
+
+fn main() {
     // start initialization
     let library = VulkanLibrary::new().unwrap();
     let required_extensions = vulkano_win::required_extensions(&library);
@@ -144,10 +146,16 @@ fn main()
     let memory_allocator = Arc::new(StandardMemoryAllocator::new_default(device.clone()));
 
     let vertices = [
-        VertexData{position:[-1.0, 1.0]},
-        VertexData{position:[1.0, 1.0]},
-        VertexData{position:[1.0, -1.0]},
-        ];
+        vertex_data::VertexData {
+            position: [-1.0, 1.0],
+        },
+        vertex_data::VertexData {
+            position: [1.0, 1.0],
+        },
+        vertex_data::VertexData {
+            position: [1.0, -1.0],
+        },
+    ];
 
     let vertex_buffer = Buffer::from_iter(
         &memory_allocator,
@@ -163,7 +171,7 @@ fn main()
     )
     .unwrap();
 
-    let indices: [u16; 3] = [0,1,2];
+    let indices: [u16; 3] = [0, 1, 2];
 
     let index_buffer = Buffer::from_iter(
         &memory_allocator,
@@ -178,36 +186,28 @@ fn main()
         indices,
     )
     .unwrap();
+
+    let uniform_buffer = SubbufferAllocator::new(
+        memory_allocator.clone(),
+        SubbufferAllocatorCreateInfo {
+            buffer_usage: BufferUsage::UNIFORM_BUFFER,
+            ..Default::default()
+        },
+    );
     // end of creating buffers
 
     // start creating shaders
     mod vertex_shader {
         vulkano_shaders::shader! {
             ty: "vertex",
-            src: r"
-                #version 450
-
-                layout(location = 0) in vec2 position;
-
-                void main() {
-                    gl_Position = vec4(position, 0.0, 1.0);
-                }
-            ",
+            path: "src/vertex_shader.glsl",
         }
     }
 
     mod fragment_shader {
         vulkano_shaders::shader! {
             ty: "fragment",
-            src: r"
-                #version 450
-
-                layout(location = 0) out vec4 f_color;
-
-                void main() {
-                    f_color = vec4(1.0, 1.0, 0.0, 1.0);
-                }
-            ",
+            path: "src/fragment_shader.glsl",
         }
     }
 
@@ -234,32 +234,19 @@ fn main()
     .unwrap();
     // end of creating render pass
 
-    // start creating pipeline
-    let pipeline = GraphicsPipeline::start()
-        .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
-        .vertex_input_state(VertexData::per_vertex())
-        .input_assembly_state(InputAssemblyState::new())
-        .vertex_shader(vertex_shader.entry_point("main").unwrap(), ())
-        .viewport_state(ViewportState::viewport_dynamic_scissor_irrelevant())
-        .fragment_shader(fragment_shader.entry_point("main").unwrap(), ())
-        .build(device.clone())
-        .unwrap();
-    // end creating pipeline
+    let (mut pipeline, mut framebuffers) = window_size_dependent_setup(
+        &memory_allocator,
+        &vertex_shader,
+        &fragment_shader,
+        &images,
+        render_pass.clone(),
+    );
 
-    // start creating viewport
-    let mut viewport = Viewport {
-        origin: [0.0, 0.0],
-        dimensions: [0.0, 0.0],
-        depth_range: 0.0..1.0,
-    };
-    // end creating viewport
-
-    // start creating framebuffers
-    let mut framebuffers = window_size_dependent_setup(&images, render_pass.clone(), &mut viewport);
-    // end creating framebuffers
+    let descriptor_set_allocator = StandardDescriptorSetAllocator::new(device.clone());
 
     // start creating allocator for command buffer
-    let command_buffer_allocator = StandardCommandBufferAllocator::new(device.clone(), Default::default());
+    let command_buffer_allocator =
+        StandardCommandBufferAllocator::new(device.clone(), Default::default());
     // end creating allocator for command buffer
 
     let mut recreate_swapchain = false; // sometimes the swapchain is broken, and need to be fixed
@@ -273,6 +260,8 @@ fn main()
     let mut time = Instant::now();
 
     let mut skip_update = false; // Sometimes when the window is being resized or moved, you can't access the buffers and as such must skip an update.
+
+    let mut storage = events::start();
 
     // start event loop
     event_loop.run(move |event, _, control_flow| {
@@ -291,11 +280,13 @@ fn main()
                 recreate_swapchain = true;
             }
 
-            Event::RedrawEventsCleared => { // This should run once per frame.
+            Event::RedrawEventsCleared => {
+                // This should run once per frame.
                 let window = surface.object().unwrap().downcast_ref::<Window>().unwrap();
 
                 let dimensions = window.inner_size();
-                if dimensions.width == 0 || dimensions.height == 0 { // If the window is 0 in size, don't bother drawing the frame.
+                if dimensions.width == 0 || dimensions.height == 0 {
+                    // If the window is 0 in size, don't bother drawing the frame.
                     return;
                 }
 
@@ -303,8 +294,7 @@ fn main()
 
                 let vertex_writer = vertex_buffer.write();
 
-                skip_update = match vertex_writer
-                {
+                skip_update = match vertex_writer {
                     Ok(_) => skip_update,
                     Err(BufferError::InUseByDevice) => true,
                     Err(e) => panic!("couldn't write to the vertex buffer: {e}"),
@@ -312,96 +302,122 @@ fn main()
 
                 let index_writer = index_buffer.write();
 
-                skip_update = match index_writer
-                {
+                skip_update = match index_writer {
                     Ok(_) => skip_update,
                     Err(BufferError::InUseByDevice) => true,
                     Err(e) => panic!("couldn't write to the index buffer: {e}"),
                 };
 
-                if skip_update
-                {
+                if skip_update {
                     println!("Skipping update!");
-                    skip_update = false;
-                }
-                else
-                {
-                    update(vertex_writer.unwrap(), index_writer.unwrap(), delta_time, average_fps); // call update once per frame
-
-                    // Start calculating time.
-                    if delta_time_sum > 1.0 {
-                        average_fps = frame_count / delta_time_sum;
-                        frame_count = 0.0;
-                        delta_time_sum = 0.0;
-                    }
-
-                    delta_time = time.elapsed().as_secs_f32();
-                    delta_time_sum += delta_time;
-                    frame_count += 1.0;
-                    time = Instant::now();
-                    // End calculating time.
+                } else {
+                    events::update(
+                        &mut storage,
+                        vertex_writer.unwrap(),
+                        index_writer.unwrap(),
+                        delta_time,
+                        average_fps,
+                    ); // call update once per frame
                 }
 
-                if recreate_swapchain { // When the window resizes we need to recreate everything dependent on the window size.
-                    let (new_swapchain, new_images) = match swapchain.recreate(SwapchainCreateInfo {
-                        image_extent: dimensions.into(),
-                        ..swapchain.create_info()
-                    }) {
-                        Ok(r) => r,
-                        Err(SwapchainCreationError::ImageExtentNotSupported {..}) => return,
-                        Err(e) => panic!("failed to recreate swapchain: {e}"),
-                    };
+                if recreate_swapchain {
+                    // When the window resizes we need to recreate everything dependent on the window size.
+                    let (new_swapchain, new_images) =
+                        match swapchain.recreate(SwapchainCreateInfo {
+                            image_extent: dimensions.into(),
+                            ..swapchain.create_info()
+                        }) {
+                            Ok(r) => r,
+                            Err(SwapchainCreationError::ImageExtentNotSupported { .. }) => return,
+                            Err(e) => panic!("failed to recreate swapchain: {e}"),
+                        };
 
                     swapchain = new_swapchain;
 
-                    framebuffers = window_size_dependent_setup(
+                    let (new_pipeline, new_framebuffers) = window_size_dependent_setup(
+                        &memory_allocator,
+                        &vertex_shader,
+                        &fragment_shader,
                         &new_images,
                         render_pass.clone(),
-                        &mut viewport,
                     );
+
+                    pipeline = new_pipeline;
+                    framebuffers = new_framebuffers;
 
                     recreate_swapchain = false;
                 }
 
-                // Aquire image to draw on.
-                let (image_index, suboptimal, acquire_future) = match acquire_next_image(swapchain.clone(), None) {
-                    Ok(r) => r,
-                    Err(AcquireError::OutOfDate) => {
-                        recreate_swapchain = true;
-                        return;
-                    }
-                    Err(e) => panic!("failed to acquire next image: {e}"),
+                let uniform_buffer_subbuffer = {
+                    let uniform_data = vertex_shader::Data { // Why is this have the type of unknown? That doesn't seem good...
+                        scale: swapchain.image_extent()[0] as f32 / swapchain.image_extent()[1] as f32,
+                    };
+
+                    let subbuffer = uniform_data.allocate_sized().unwrap(); // I reckon this line is actually ok, despite giving me an error. Check above comment.
+                    //let subbuffer = SubbufferAllocator::allocate_sized(&uniform_data as &SubbufferAllocator<_>).unwrap();
+                    *subbuffer.write().unwrap() = uniform_data;
+
+                    subbuffer
                 };
 
-                if suboptimal { // Sometimes the image will be messed up. Recreate the swapchain if it is.
+                let layout = pipeline.layout().set_layouts().get(0).unwrap();
+                let set = PersistentDescriptorSet::new(
+                    &descriptor_set_allocator,
+                    layout.clone(),
+                    [WriteDescriptorSet::buffer(0,uniform_buffer_subbuffer)],
+                )
+                .unwrap();
+
+                // Aquire image to draw on.
+                let (image_index, suboptimal, acquire_future) =
+                    match acquire_next_image(swapchain.clone(), None) {
+                        Ok(r) => r,
+                        Err(AcquireError::OutOfDate) => {
+                            recreate_swapchain = true;
+                            return;
+                        }
+                        Err(e) => panic!("failed to acquire next image: {e}"),
+                    };
+
+                if suboptimal {
+                    // Sometimes the image will be messed up. Recreate the swapchain if it is.
                     recreate_swapchain = true;
                 }
 
-                let mut builder = AutoCommandBufferBuilder::primary( // Command buffers hold the list of commands.
+                let mut builder = AutoCommandBufferBuilder::primary(
+                    // Command buffers hold the list of commands.
                     &command_buffer_allocator,
                     queue.queue_family_index(),
                     CommandBufferUsage::OneTimeSubmit,
                 )
                 .unwrap();
 
-                builder.begin_render_pass( // begin the render pass so we can later draw
-                    RenderPassBeginInfo {
-                        clear_values: vec![Some([0.0, 0.0, 1.0, 1.0].into())], // Sets background colour.
-                        ..RenderPassBeginInfo::framebuffer(
-                            framebuffers[image_index as usize].clone()
-                        )
-                    },
-                    SubpassContents::Inline,
-                )
-                .unwrap()
-                .set_viewport(0, [viewport.clone()])
-                .bind_pipeline_graphics(pipeline.clone())
-                .bind_vertex_buffers(0, vertex_buffer.clone())
-                .bind_index_buffer(index_buffer.clone())
-                .draw_indexed(indices.len() as u32, 1, 0, 0, 0)
-                .unwrap()
-                .end_render_pass()
-                .unwrap();
+                builder
+                    .begin_render_pass(
+                        // begin the render pass so we can later draw
+                        RenderPassBeginInfo {
+                            clear_values: vec![Some([0.0, 0.0, 1.0, 1.0].into())], // Sets background colour.
+                            ..RenderPassBeginInfo::framebuffer(
+                                framebuffers[image_index as usize].clone(),
+                            )
+                        },
+                        SubpassContents::Inline,
+                    )
+                    .unwrap()
+                    //.set_viewport(0, [viewport.clone()])
+                    .bind_pipeline_graphics(pipeline.clone())
+                    .bind_descriptor_sets(
+                        PipelineBindPoint::Graphics,
+                        pipeline.layout().clone(),
+                        0,
+                        set,
+                    )
+                    .bind_vertex_buffers(0, vertex_buffer.clone())
+                    .bind_index_buffer(index_buffer.clone())
+                    .draw_indexed(indices.len() as u32, 1, 0, 0, 0)
+                    .unwrap()
+                    .end_render_pass()
+                    .unwrap();
 
                 let command_buffer = builder.build().unwrap(); // Finish building the command buffer.
 
@@ -431,6 +447,25 @@ fn main()
                         panic!("failed to flush future: {e}");
                     }
                 }
+
+                if skip_update {
+                    skip_update = false;
+                } else {
+                    events::late_update(&mut storage, delta_time, average_fps); // The goal of late update should be to do cpu work while the gpu is doing the hard work of rendering everything. This should save performance if done right.
+
+                    // Start calculating time.
+                    if delta_time_sum > 1.0 {
+                        average_fps = frame_count / delta_time_sum;
+                        frame_count = 0.0;
+                        delta_time_sum = 0.0;
+                    }
+
+                    delta_time = time.elapsed().as_secs_f32();
+                    delta_time_sum += delta_time;
+                    frame_count += 1.0;
+                    time = Instant::now();
+                    // End calculating time.
+                }
             }
             _ => (),
         }
@@ -439,14 +474,16 @@ fn main()
 }
 
 fn window_size_dependent_setup(
+    memory_allocator: &StandardMemoryAllocator,
+    vertex_shader: &ShaderModule,
+    fragment_shader: &ShaderModule,
     images: &[Arc<SwapchainImage>],
     render_pass: Arc<RenderPass>,
-    viewport: &mut Viewport,
-) -> Vec<Arc<Framebuffer>> {
+) -> (Arc<GraphicsPipeline>, Vec<Arc<Framebuffer>>) {
     let dimensions = images[0].dimensions().width_height();
-    viewport.dimensions = [dimensions[0] as f32, dimensions[1] as f32];
 
-    images.iter()
+    let framebuffers = images
+        .iter()
         .map(|image| {
             let view = ImageView::new_default(image.clone()).unwrap();
             Framebuffer::new(
@@ -458,24 +495,23 @@ fn window_size_dependent_setup(
             )
             .unwrap()
         })
-        .collect::<Vec<_>>()
-}
+        .collect::<Vec<_>>();
 
-fn update(
-    mut vertices: BufferWriteGuard<'_, [VertexData]>,
-    mut indices: BufferWriteGuard<'_, [u16]>,
-    delta_time: f32,
-    average_fps: f32,
-)
-{
-    //println!("delta time: {}", delta_time);
-    println!("average fps: {}", average_fps);
-    vertices[0].position[1] -= 1.0 * delta_time;
-}
+    let pipeline = GraphicsPipeline::start()
+        .render_pass(Subpass::from(render_pass, 0).unwrap())
+        .vertex_input_state(vertex_data::VertexData::per_vertex())
+        .input_assembly_state(InputAssemblyState::new())
+        .vertex_shader(vertex_shader.entry_point("main").unwrap(), ())
+        .viewport_state(ViewportState::viewport_fixed_scissor_irrelevant([
+            Viewport {
+                origin: [0.0, 0.0],
+                dimensions: [dimensions[0] as f32, dimensions[1] as f32],
+                depth_range: 0.0..1.0,
+            },
+        ]))
+        .fragment_shader(fragment_shader.entry_point("main").unwrap(), ())
+        .build(memory_allocator.device().clone())
+        .unwrap();
 
-#[derive(BufferContents, Vertex)]
-    #[repr(C)]
-    struct VertexData {
-        #[format(R32G32_SFLOAT)]
-        position: [f32; 2]
-    }
+    (pipeline, framebuffers)
+}
