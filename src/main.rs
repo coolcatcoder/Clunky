@@ -1,15 +1,21 @@
-use std::{sync::Arc, time::Instant};
+use std::{sync::Arc, time::Instant, io::Cursor};
 use vulkano::{
-    buffer::{Buffer, BufferCreateInfo, BufferError, BufferUsage, allocator::{SubbufferAllocator, SubbufferAllocatorCreateInfo}},
+    buffer::{
+        allocator::{SubbufferAllocator, SubbufferAllocatorCreateInfo},
+        Buffer, BufferCreateInfo, BufferError, BufferUsage,
+    },
     command_buffer::{
         allocator::StandardCommandBufferAllocator, AutoCommandBufferBuilder, CommandBufferUsage,
         RenderPassBeginInfo, SubpassContents,
+    },
+    descriptor_set::{
+        allocator::StandardDescriptorSetAllocator, PersistentDescriptorSet, WriteDescriptorSet,
     },
     device::{
         physical::PhysicalDeviceType, Device, DeviceCreateInfo, DeviceExtensions, DeviceOwned,
         QueueCreateInfo, QueueFlags,
     },
-    image::{view::ImageView, ImageAccess, ImageUsage, SwapchainImage},
+    image::{view::ImageView, ImageAccess, ImageUsage, SwapchainImage, ImmutableImage},
     instance::{Instance, InstanceCreateInfo},
     memory::allocator::{AllocationCreateInfo, MemoryUsage, StandardMemoryAllocator},
     pipeline::{
@@ -27,7 +33,7 @@ use vulkano::{
         SwapchainPresentInfo,
     },
     sync::{self, FlushError, GpuFuture},
-    VulkanLibrary, descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet, allocator::StandardDescriptorSetAllocator},
+    VulkanLibrary, sampler::{Filter, SamplerAddressMode},
 };
 use vulkano_win::VkSurfaceBuild;
 use winit::{
@@ -36,9 +42,17 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
+use vulkano::image::MipmapsCount;
+use vulkano::image::ImageDimensions;
+use vulkano::format::Format;
+use vulkano::sampler::Sampler;
+use vulkano::sampler::SamplerCreateInfo;
+
 mod vertex_data;
 
 mod events;
+
+mod biomes;
 
 fn main() {
     // start initialization
@@ -173,7 +187,7 @@ fn main() {
     )
     .unwrap();
 
-    let uniform_buffer = SubbufferAllocator::new(
+    let uniform_buffer_main = SubbufferAllocator::new(
         memory_allocator.clone(),
         SubbufferAllocatorCreateInfo {
             buffer_usage: BufferUsage::UNIFORM_BUFFER,
@@ -181,6 +195,56 @@ fn main() {
         },
     );
     // end of creating buffers
+
+    // start creating allocator for command buffer
+    let command_buffer_allocator =
+        StandardCommandBufferAllocator::new(device.clone(), Default::default());
+    // end creating allocator for command buffer
+
+    let mut uploads = AutoCommandBufferBuilder::primary(
+        &command_buffer_allocator,
+        queue.queue_family_index(),
+        CommandBufferUsage::OneTimeSubmit,
+    )
+    .unwrap();
+
+    let texture = {
+        let png_bytes = include_bytes!("image_img.png").to_vec();
+        let cursor = Cursor::new(png_bytes);
+        let decoder = png::Decoder::new(cursor);
+        let mut reader = decoder.read_info().unwrap();
+        let info = reader.info();
+        let dimensions = ImageDimensions::Dim2d {
+            width: info.width,
+            height: info.height,
+            array_layers: 1,
+        };
+        let mut image_data = Vec::new();
+        image_data.resize((info.width * info.height * 4) as usize, 0);
+        reader.next_frame(&mut image_data).unwrap();
+
+        let image = ImmutableImage::from_iter(
+            &memory_allocator,
+            image_data,
+            dimensions,
+            MipmapsCount::One,
+            Format::R8G8B8A8_SRGB,
+            &mut uploads,
+        )
+        .unwrap();
+        ImageView::new_default(image).unwrap()
+    };
+
+    let sampler = Sampler::new(
+        device.clone(),
+        SamplerCreateInfo {
+            mag_filter: Filter::Linear,
+            min_filter: Filter::Linear,
+            address_mode: [SamplerAddressMode::Repeat; 3],
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     // start creating shaders
     mod vertex_shader {
@@ -230,14 +294,17 @@ fn main() {
 
     let descriptor_set_allocator = StandardDescriptorSetAllocator::new(device.clone());
 
-    // start creating allocator for command buffer
-    let command_buffer_allocator =
-        StandardCommandBufferAllocator::new(device.clone(), Default::default());
-    // end creating allocator for command buffer
-
     let mut recreate_swapchain = false; // sometimes the swapchain is broken, and need to be fixed
 
     let mut previous_frame_end = Some(sync::now(device.clone()).boxed()); // store previous frame
+
+    let layout_images = pipeline.layout().set_layouts().get(0).unwrap();
+    let set_images = PersistentDescriptorSet::new(
+        &descriptor_set_allocator,
+        layout_images.clone(),
+        [WriteDescriptorSet::image_view_sampler(1, texture, sampler)],
+    )
+    .unwrap();
 
     let mut delta_time_sum = 0.0;
     let mut average_fps = 0.0;
@@ -248,6 +315,8 @@ fn main() {
     let mut skip_update = false; // Sometimes when the window is being resized or moved, you can't access the buffers and as such must skip an update.
 
     let mut storage = events::start();
+
+    let mut index_count = events::STARTING_INDEX_COUNT;
 
     // start event loop
     event_loop.run(move |event, _, control_flow| {
@@ -301,6 +370,7 @@ fn main() {
                         &mut storage,
                         vertex_writer.unwrap(),
                         index_writer.unwrap(),
+                        &mut index_count,
                         delta_time,
                         average_fps,
                     ); // call update once per frame
@@ -335,22 +405,24 @@ fn main() {
                 }
 
                 let uniform_buffer_subbuffer = {
-                    let uniform_data : vertex_shader::Data = vertex_shader::Data { // Why is this have the type of unknown? That doesn't seem good...
-                        scale: swapchain.image_extent()[0] as f32 / swapchain.image_extent()[1] as f32,
+                    let uniform_data: vertex_shader::Data = vertex_shader::Data {
+                        // Why is this have the type of unknown? That doesn't seem good...
+                        scale: swapchain.image_extent()[0] as f32
+                            / swapchain.image_extent()[1] as f32,
                     };
 
-                    let subbuffer = uniform_buffer.allocate_sized().unwrap(); // I reckon this line is actually ok, despite giving me an error. Check above comment.
-                    //let subbuffer = SubbufferAllocator::allocate_sized(&uniform_data as &SubbufferAllocator<_>).unwrap();
+                    let subbuffer = uniform_buffer_main.allocate_sized().unwrap();
+                                                                              
                     *subbuffer.write().unwrap() = uniform_data;
 
                     subbuffer
                 };
 
-                let layout = pipeline.layout().set_layouts().get(0).unwrap();
-                let set = PersistentDescriptorSet::new(
+                let layout_main = pipeline.layout().set_layouts().get(0).unwrap();
+                let set_main = PersistentDescriptorSet::new(
                     &descriptor_set_allocator,
-                    layout.clone(),
-                    [WriteDescriptorSet::buffer(0,uniform_buffer_subbuffer)],
+                    layout_main.clone(),
+                    [WriteDescriptorSet::buffer(0, uniform_buffer_subbuffer)],
                 )
                 .unwrap();
 
@@ -396,11 +468,17 @@ fn main() {
                         PipelineBindPoint::Graphics,
                         pipeline.layout().clone(),
                         0,
-                        set,
+                        set_main,
+                    )
+                    .bind_descriptor_sets(
+                        PipelineBindPoint::Graphics,
+                        pipeline.layout().clone(),
+                        1,
+                        set_images.clone(),
                     )
                     .bind_vertex_buffers(0, vertex_buffer.clone())
                     .bind_index_buffer(index_buffer.clone())
-                    .draw_indexed(index_buffer.len() as u32, 1, 0, 0, 0)
+                    .draw_indexed((index_buffer.len() - 6) as u32, 1, 0, 0, 0)
                     .unwrap()
                     .end_render_pass()
                     .unwrap();
