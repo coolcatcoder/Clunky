@@ -298,7 +298,7 @@ fn main() {
 
     let mut previous_frame_end = Some(sync::now(device.clone()).boxed()); // store previous frame
 
-    let layout_images = pipeline.layout().set_layouts().get(0).unwrap();
+    let layout_images = pipeline.layout().set_layouts().get(1).unwrap();
     let set_images = PersistentDescriptorSet::new(
         &descriptor_set_allocator,
         layout_images.clone(),
@@ -468,14 +468,14 @@ fn main() {
                         PipelineBindPoint::Graphics,
                         pipeline.layout().clone(),
                         0,
-                        set_main,
+                        vec![set_main,set_images.clone()],
                     )
-                    .bind_descriptor_sets(
-                        PipelineBindPoint::Graphics,
-                        pipeline.layout().clone(),
-                        1,
-                        set_images.clone(),
-                    )
+                    // .bind_descriptor_sets(
+                    //     PipelineBindPoint::Graphics,
+                    //     pipeline.layout().clone(),
+                    //     0,
+                    //     set_images.clone(),
+                    // )
                     .bind_vertex_buffers(0, vertex_buffer.clone())
                     .bind_index_buffer(index_buffer.clone())
                     .draw_indexed((index_buffer.len() - 6) as u32, 1, 0, 0, 0)
