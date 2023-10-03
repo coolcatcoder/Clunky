@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Instant, io::Cursor};
+use std::{io::Cursor, sync::Arc, time::Instant};
 use vulkano::{
     buffer::{
         allocator::{SubbufferAllocator, SubbufferAllocatorCreateInfo},
@@ -15,11 +15,12 @@ use vulkano::{
         physical::PhysicalDeviceType, Device, DeviceCreateInfo, DeviceExtensions, DeviceOwned,
         QueueCreateInfo, QueueFlags,
     },
-    image::{view::ImageView, ImageAccess, ImageUsage, SwapchainImage, ImmutableImage},
+    image::{view::ImageView, ImageAccess, ImageUsage, ImmutableImage, SwapchainImage},
     instance::{Instance, InstanceCreateInfo},
     memory::allocator::{AllocationCreateInfo, MemoryUsage, StandardMemoryAllocator},
     pipeline::{
         graphics::{
+            color_blend::ColorBlendState,
             input_assembly::InputAssemblyState,
             vertex_input::Vertex,
             viewport::{Viewport, ViewportState},
@@ -27,13 +28,14 @@ use vulkano::{
         GraphicsPipeline, Pipeline, PipelineBindPoint,
     },
     render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass, Subpass},
+    sampler::{Filter, SamplerAddressMode},
     shader::ShaderModule,
     swapchain::{
         acquire_next_image, AcquireError, Swapchain, SwapchainCreateInfo, SwapchainCreationError,
         SwapchainPresentInfo,
     },
     sync::{self, FlushError, GpuFuture},
-    VulkanLibrary, sampler::{Filter, SamplerAddressMode},
+    VulkanLibrary,
 };
 use vulkano_win::VkSurfaceBuild;
 use winit::{
@@ -42,11 +44,13 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
-use vulkano::image::MipmapsCount;
-use vulkano::image::ImageDimensions;
 use vulkano::format::Format;
+use vulkano::image::ImageDimensions;
+use vulkano::image::MipmapsCount;
 use vulkano::sampler::Sampler;
 use vulkano::sampler::SamplerCreateInfo;
+
+use vulkano::command_buffer::PrimaryCommandBufferAbstract;
 
 mod vertex_data;
 
@@ -296,7 +300,15 @@ fn main() {
 
     let mut recreate_swapchain = false; // sometimes the swapchain is broken, and need to be fixed
 
-    let mut previous_frame_end = Some(sync::now(device.clone()).boxed()); // store previous frame
+    //let mut previous_frame_end = Some(sync::now(device.clone()).boxed()); // store previous frame
+    let mut previous_frame_end = Some(
+        uploads
+            .build()
+            .unwrap()
+            .execute(queue.clone())
+            .unwrap()
+            .boxed(),
+    );
 
     let layout_images = pipeline.layout().set_layouts().get(1).unwrap();
     let set_images = PersistentDescriptorSet::new(
@@ -314,9 +326,14 @@ fn main() {
 
     let mut skip_update = false; // Sometimes when the window is being resized or moved, you can't access the buffers and as such must skip an update.
 
-    let mut storage = events::start();
-
     let mut index_count = events::STARTING_INDEX_COUNT;
+
+    let mut camera = events::Camera {
+        scale: 1.0,
+        position: (0.0,0.0),
+    };
+
+    let mut storage = events::start(&mut camera);
 
     // start event loop
     event_loop.run(move |event, _, control_flow| {
@@ -371,8 +388,10 @@ fn main() {
                         vertex_writer.unwrap(),
                         index_writer.unwrap(),
                         &mut index_count,
+                        swapchain.image_extent()[0] as f32 / swapchain.image_extent()[1] as f32,
                         delta_time,
                         average_fps,
+                        &mut camera,
                     ); // call update once per frame
                 }
 
@@ -406,13 +425,14 @@ fn main() {
 
                 let uniform_buffer_subbuffer = {
                     let uniform_data: vertex_shader::Data = vertex_shader::Data {
-                        // Why is this have the type of unknown? That doesn't seem good...
                         scale: swapchain.image_extent()[0] as f32
                             / swapchain.image_extent()[1] as f32,
+                        camera_scale: camera.scale,
+                        camera_position: [camera.position.0, camera.position.1],
                     };
 
                     let subbuffer = uniform_buffer_main.allocate_sized().unwrap();
-                                                                              
+
                     *subbuffer.write().unwrap() = uniform_data;
 
                     subbuffer
@@ -468,7 +488,7 @@ fn main() {
                         PipelineBindPoint::Graphics,
                         pipeline.layout().clone(),
                         0,
-                        vec![set_main,set_images.clone()],
+                        vec![set_main, set_images.clone()],
                     )
                     // .bind_descriptor_sets(
                     //     PipelineBindPoint::Graphics,
@@ -478,7 +498,7 @@ fn main() {
                     // )
                     .bind_vertex_buffers(0, vertex_buffer.clone())
                     .bind_index_buffer(index_buffer.clone())
-                    .draw_indexed((index_buffer.len() - 6) as u32, 1, 0, 0, 0)
+                    .draw_indexed(index_count, 1, 0, 0, 0)
                     .unwrap()
                     .end_render_pass()
                     .unwrap();
@@ -561,6 +581,7 @@ fn window_size_dependent_setup(
         })
         .collect::<Vec<_>>();
 
+    let subpass = Subpass::from(render_pass.clone(), 0).unwrap();
     let pipeline = GraphicsPipeline::start()
         .render_pass(Subpass::from(render_pass, 0).unwrap())
         .vertex_input_state(vertex_data::VertexData::per_vertex())
@@ -574,6 +595,7 @@ fn window_size_dependent_setup(
             },
         ]))
         .fragment_shader(fragment_shader.entry_point("main").unwrap(), ())
+        .color_blend_state(ColorBlendState::new(subpass.num_color_attachments()).blend_alpha())
         .build(memory_allocator.device().clone())
         .unwrap();
 
