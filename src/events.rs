@@ -10,6 +10,9 @@ use std::sync::mpsc::Sender;
 use std::sync::mpsc::TryRecvError;
 use std::thread;
 use vulkano::buffer::subbuffer::BufferWriteGuard;
+use winit::event::ElementState;
+use winit::event::KeyboardInput;
+use winit::event::VirtualKeyCode;
 
 use crate::biomes;
 use crate::vertex_data;
@@ -20,29 +23,24 @@ const FULL_GRID_WIDTH: u32 = 256;
 const FULL_GRID_WIDTH_SQUARED: u32 = FULL_GRID_WIDTH * FULL_GRID_WIDTH; // 256**2
 
 const CHUNK_WIDTH: u16 = 128;
-const CHUNK_WIDTH_SQUARED: u16 = CHUNK_WIDTH * CHUNK_WIDTH;
+pub const CHUNK_WIDTH_SQUARED: u16 = CHUNK_WIDTH * CHUNK_WIDTH;
 //const CHUNK_WIDTH_LOG2: u16 = (u16::BITS - CHUNK_WIDTH.leading_zeros()) as u16;
 
 const CHUNK_GRID_WIDTH: u32 = FULL_GRID_WIDTH / CHUNK_WIDTH as u32;
 
-pub static STARTING_VERTICES: &[vertex_data::VertexData; 32768] = &[vertex_data::VertexData {
-    position: [0.0, 0.0],
-    uv: [0.0, 0.0],
-}; 32768];
-
-pub static STARTING_INDICES: &[u16; 49152] = &[0; 49152];
-
 pub const STARTING_INDEX_COUNT: u32 = 0;
 
 pub fn start(camera: &mut Camera) -> Storage {
-    camera.scale = 0.1;
+    camera.scale = 0.05;
+    camera.position = (0.0, 0.0);
 
     let mut rng = thread_rng();
     let seed_range = Uniform::new(0u32, 1000);
 
     let (chunk_sender, chunk_receiver) = mpsc::channel();
 
-    let mut storage = Storage {
+    let storage = Storage {
+        wasd_held: (false, false, false, false),
         main_seed: seed_range.sample(&mut rng),
         percent_range: Uniform::new(0u8, 100),
         biome_noise: (
@@ -54,37 +52,8 @@ pub fn start(camera: &mut Camera) -> Storage {
         chunk_receiver,
     };
 
-    let test_position = (2u32, 1u32);
-
-    let test_generation = generate_position(
-        test_position,
-        &mut rng,
-        storage.biome_noise,
-        storage.percent_range,
-        storage.main_seed,
-    );
-
-    let test_index = full_index_from_full_position(test_position);
-
-    storage.map_objects[test_index] = test_generation;
-
-    match test_generation {
-        biomes::MapObject::RandomPattern(i) => {
-            println!("{:?}", biomes::RANDOM_PATTERN_MAP_OBJECTS[i as usize]);
-        }
-        biomes::MapObject::SimplexPattern(i) => {
-            println!("{:?}", biomes::SIMPLEX_PATTERN_MAP_OBJECTS[i as usize]);
-        }
-        biomes::MapObject::SimplexSmoothedPattern(i) => {
-            println!(
-                "{:?}",
-                biomes::SIMPLEX_SMOOTHED_PATTERN_MAP_OBJECTS[i as usize]
-            );
-        }
-        biomes::MapObject::None => {}
-    }
-
     generate_chunk(&storage, (0, 0));
+    //generate_chunk(&storage, (1,0));
 
     storage
 }
@@ -101,33 +70,45 @@ pub fn update(
 ) {
     //println!("delta time: {}", delta_time);
     //println!("average fps: {}", average_fps);
-    // vertices[0].position[1] += storage.direction * delta_time;
-    // vertices[0].uv[1] = (vertices[0].position[1] + 1.0) / 2.0;
 
-    // if vertices[0].position[1] < -1.0 {
-    //     storage.direction = 1.0;
-    // } else if vertices[0].position[1] > 1.0 {
-    //     storage.direction = -1.0;
-    // }
+    let motion = match storage.wasd_held {
+        (true, false, false, false) => (0.0, -1.0),
+        (false, false, true, false) => (0.0, 1.0),
+        (false, false, false, true) => (1.0, 0.0),
+        (false, true, false, false) => (-1.0, 0.0),
+        _ => (0.0, 0.0),
+    };
 
-    //println!("{}",scale);
+    camera.position.0 += motion.0 * delta_time * 10.0;
+    camera.position.1 += motion.1 * delta_time * 10.0;
+
+    //println!("scale:{}",scale);
+    //println!("camera position:{:?}",camera.position);
 
     let screen_width_as_world_units = 2.0 / camera.scale;
     let screen_height_as_world_units = 2.0 / camera.scale / scale;
 
-    let bottom_left_world_position_of_screen = (
-        (camera.position.0 - (screen_width_as_world_units * 0.5)).floor() as i32,
-        (camera.position.1 - (screen_height_as_world_units * 0.5)).floor() as i32,
-    );
-    let top_right_world_position_of_screen = (
-        (camera.position.0 + (screen_width_as_world_units * 0.5)).floor() as i32,
-        (camera.position.1 + (screen_height_as_world_units * 0.5)).floor() as i32,
-    );
+    //println!("screen width:{}, screen height:{}",screen_width_as_world_units,screen_height_as_world_units);
+
+    // let bottom_left_world_position_of_screen = (
+    //     (camera.position.0 - (screen_width_as_world_units * 0.5)).floor() as i32,
+    //     (camera.position.1 - (screen_height_as_world_units * 0.5)).floor() as i32,
+    // );
+    // let top_right_world_position_of_screen = (
+    //     (camera.position.0 + (screen_width_as_world_units * 0.5)).floor() as i32,
+    //     (camera.position.1 + (screen_height_as_world_units * 0.5)).floor() as i32,
+    // );
+
+    //println!("bottom left: {:?}, top right: {:?}",bottom_left_world_position_of_screen,top_right_world_position_of_screen);
 
     let mut simple_rendering_count = 0u32;
 
-    for x in bottom_left_world_position_of_screen.0..top_right_world_position_of_screen.0 {
-        for y in bottom_left_world_position_of_screen.1..top_right_world_position_of_screen.1 {
+    for x in (camera.position.0 - (screen_width_as_world_units * 0.5)).floor() as i32 - 1
+        ..(camera.position.0 + (screen_width_as_world_units * 0.5)).ceil() as i32 + 1
+    {
+        for y in (camera.position.1 - (screen_height_as_world_units * 0.5)).floor() as i32 - 1
+            ..(camera.position.1 + (screen_height_as_world_units * 0.5)).ceil() as i32 + 1
+        {
             if x < 0 || y < 0 {
                 continue;
             }
@@ -204,8 +185,70 @@ pub fn update(
 
                     simple_rendering_count += 1;
                 }
-                biomes::MapObject::SimplexPattern(_) => {
-                    todo!();
+                biomes::MapObject::SimplexPattern(i) => {
+                    let simplex_pattern_map_object =
+                        &biomes::SIMPLEX_PATTERN_MAP_OBJECTS[i as usize];
+
+                    let vertex_start = (simple_rendering_count * 4) as usize;
+                    let index_start = (simple_rendering_count * 6) as usize;
+
+                    vertices[vertex_start] = vertex_data::VertexData {
+                        // top right
+                        position: [
+                            x as f32 + (0.5 * simplex_pattern_map_object.rendering_size.0),
+                            y as f32 + (0.5 * simplex_pattern_map_object.rendering_size.1),
+                        ],
+                        uv: [
+                            simplex_pattern_map_object.uv.0 + SPRITE_SIZE.0,
+                            simplex_pattern_map_object.uv.1 + SPRITE_SIZE.1,
+                        ],
+                    };
+
+                    vertices[vertex_start + 1] = vertex_data::VertexData {
+                        // bottom right
+                        position: [
+                            x as f32 + (0.5 * simplex_pattern_map_object.rendering_size.0),
+                            y as f32 + (-0.5 * simplex_pattern_map_object.rendering_size.1),
+                        ],
+                        uv: [
+                            simplex_pattern_map_object.uv.0 + SPRITE_SIZE.0,
+                            simplex_pattern_map_object.uv.1,
+                        ],
+                    };
+
+                    vertices[vertex_start + 2] = vertex_data::VertexData {
+                        // top left
+                        position: [
+                            x as f32 + (-0.5 * simplex_pattern_map_object.rendering_size.0),
+                            y as f32 + (0.5 * simplex_pattern_map_object.rendering_size.1),
+                        ],
+                        uv: [
+                            simplex_pattern_map_object.uv.0,
+                            simplex_pattern_map_object.uv.1 + SPRITE_SIZE.1,
+                        ],
+                    };
+
+                    vertices[vertex_start + 3] = vertex_data::VertexData {
+                        // bottom left
+                        position: [
+                            x as f32 + (-0.5 * simplex_pattern_map_object.rendering_size.0),
+                            y as f32 + (-0.5 * simplex_pattern_map_object.rendering_size.1),
+                        ],
+                        uv: [
+                            simplex_pattern_map_object.uv.0,
+                            simplex_pattern_map_object.uv.1,
+                        ],
+                    };
+
+                    indices[index_start] = vertex_start as u16;
+                    indices[index_start + 1] = vertex_start as u16 + 1;
+                    indices[index_start + 2] = vertex_start as u16 + 2;
+
+                    indices[index_start + 3] = vertex_start as u16 + 1;
+                    indices[index_start + 4] = vertex_start as u16 + 3;
+                    indices[index_start + 5] = vertex_start as u16 + 2;
+
+                    simple_rendering_count += 1;
                 }
                 biomes::MapObject::SimplexSmoothedPattern(_) => {
                     todo!();
@@ -223,7 +266,8 @@ pub fn late_update(storage: &mut Storage, delta_time: f32, average_fps: f32) {
         Ok(chunk) => {
             println!("Got chunk!");
             let starting_index = full_index_from_full_position(chunk.1);
-            storage.map_objects[starting_index..starting_index+CHUNK_WIDTH_SQUARED as usize].copy_from_slice(&chunk.0);
+            storage.map_objects[starting_index..starting_index + CHUNK_WIDTH_SQUARED as usize]
+                .copy_from_slice(&chunk.0);
         }
         Err(TryRecvError::Empty) => {}
         Err(TryRecvError::Disconnected) => {
@@ -232,8 +276,28 @@ pub fn late_update(storage: &mut Storage, delta_time: f32, average_fps: f32) {
     }
 }
 
+pub fn on_keyboard_input(storage: &mut Storage, input: KeyboardInput) {
+    if let Some(key_code) = input.virtual_keycode {
+        match key_code {
+            VirtualKeyCode::W => storage.wasd_held.0 = is_pressed(input.state),
+            VirtualKeyCode::A => storage.wasd_held.1 = is_pressed(input.state),
+            VirtualKeyCode::S => storage.wasd_held.2 = is_pressed(input.state),
+            VirtualKeyCode::D => storage.wasd_held.3 = is_pressed(input.state),
+            _ => (),
+        }
+    }
+}
+
+fn is_pressed(state: ElementState) -> bool {
+    match state {
+        ElementState::Pressed => true,
+        ElementState::Released => false,
+    }
+}
+
 pub struct Storage {
     // This is for the user's stuff. The event loop should not touch this.
+    wasd_held: (bool, bool, bool, bool),
     main_seed: u32,
     percent_range: Uniform<u8>,
     biome_noise: (OpenSimplex, OpenSimplex),
@@ -317,7 +381,10 @@ fn generate_position(
     for i in biome.simplex_pattern.starting_index..biome.simplex_pattern.length {
         let simplex_pattern_map_object = &biomes::SIMPLEX_PATTERN_MAP_OBJECTS[i as usize];
         let simplex_noise = OpenSimplex::new(main_seed + simplex_pattern_map_object.seed as u32)
-            .get(position_as_float_array);
+            .get([
+                position_as_float_array[0] * simplex_pattern_map_object.noise_scale,
+                position_as_float_array[1] * simplex_pattern_map_object.noise_scale,
+            ]);
         if simplex_pattern_map_object.priority > highest_priority
             && percent_range.sample(&mut rng) < simplex_pattern_map_object.chance
             && simplex_noise > simplex_pattern_map_object.acceptable_noise.0
@@ -332,8 +399,10 @@ fn generate_position(
         let simplex_smoothed_pattern_map_object =
             &biomes::SIMPLEX_SMOOTHED_PATTERN_MAP_OBJECTS[i as usize];
         let simplex_noise =
-            OpenSimplex::new(main_seed + simplex_smoothed_pattern_map_object.seed as u32)
-                .get(position_as_float_array);
+            OpenSimplex::new(main_seed + simplex_smoothed_pattern_map_object.seed as u32).get([
+                position_as_float_array[0] * simplex_smoothed_pattern_map_object.noise_scale,
+                position_as_float_array[1] * simplex_smoothed_pattern_map_object.noise_scale,
+            ]);
         if simplex_smoothed_pattern_map_object.priority > highest_priority
             && percent_range.sample(&mut rng) < simplex_smoothed_pattern_map_object.chance
             && simplex_noise > simplex_smoothed_pattern_map_object.acceptable_noise.0

@@ -22,7 +22,7 @@ pub const BIOMES: [Biome; 1] = [Biome {
     },
     simplex_pattern: PatternArray {
         starting_index: 0,
-        length: 0,
+        length: 1,
     },
     simplex_smoothed_pattern: PatternArray {
         starting_index: 0,
@@ -31,15 +31,25 @@ pub const BIOMES: [Biome; 1] = [Biome {
 }];
 
 pub const RANDOM_PATTERN_MAP_OBJECTS: [RandomPatternMapObject; 1] = [RandomPatternMapObject {
-    chance: 100,
+    chance: 10,
     priority: 1,
     behaviour: CollisionBehaviour::None,
-    rendering_size: (1.0, 1.0),
+    rendering_size: (0.5, 0.5),
     collision_size: (1.0, 1.0),
     uv: (0.0, 0.0),
 }];
 
-pub const SIMPLEX_PATTERN_MAP_OBJECTS: [SimplexPatternMapObject; 0] = [];
+pub const SIMPLEX_PATTERN_MAP_OBJECTS: [SimplexPatternMapObject; 1] = [SimplexPatternMapObject {
+    chance: 100,
+    priority: 2,
+    behaviour: CollisionBehaviour::None,
+    rendering_size: (1.0, 1.0),
+    collision_size: (1.0, 1.0),
+    seed: 1,
+    acceptable_noise: (0.0, 1.0),
+    noise_scale: 0.2,
+    uv: (0.0, 0.0),
+}];
 
 pub const SIMPLEX_SMOOTHED_PATTERN_MAP_OBJECTS: [SimplexSmoothedPatternMapObject; 0] = [];
 
@@ -62,7 +72,8 @@ pub struct SimplexPatternMapObject {
     pub collision_size: (f32, f32),
     pub seed: u8,
     pub acceptable_noise: (f64, f64),
-    pub noise_scale: f32,
+    pub noise_scale: f64,
+    pub uv: (f32, f32),
 }
 
 #[derive(Debug)]
@@ -73,7 +84,7 @@ pub struct SimplexSmoothedPatternMapObject {
     pub size: f32, // Bad name? This is the size of a single square during marching squares.
     pub seed: u8,
     pub acceptable_noise: (f64, f64),
-    pub noise_scale: f32,
+    pub noise_scale: f64,
 }
 
 #[derive(Copy, Clone)]

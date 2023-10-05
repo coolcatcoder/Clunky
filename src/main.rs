@@ -59,11 +59,6 @@ mod events;
 mod biomes;
 
 fn main() {
-    println!("start of main() before fake_main()");
-    fake_main();
-}
-
-fn fake_main() {
     // start initialization
     let library = VulkanLibrary::new().unwrap();
     let required_extensions = vulkano_win::required_extensions(&library);
@@ -86,7 +81,6 @@ fn fake_main() {
         khr_swapchain: true,
         ..DeviceExtensions::empty()
     };
-    println!("Last known point.");
     let (physical_device, queue_family_index) = instance
         .enumerate_physical_devices()
         .unwrap()
@@ -110,7 +104,6 @@ fn fake_main() {
             _ => 5,
         })
         .unwrap();
-    println!("you shouldn't see this");
 
     println!(
         "Using device: {} (type: {:?})",
@@ -170,8 +163,6 @@ fn fake_main() {
     // start creating buffers
     let memory_allocator = Arc::new(StandardMemoryAllocator::new_default(device.clone()));
 
-    println!("Starting vertex and index allocation");
-
     let vertex_buffer = Buffer::from_iter(
         &memory_allocator,
         BufferCreateInfo {
@@ -182,7 +173,14 @@ fn fake_main() {
             usage: MemoryUsage::Upload,
             ..Default::default()
         },
-        *events::STARTING_VERTICES,
+        //*events::STARTING_VERTICES,
+        vec![
+            vertex_data::VertexData {
+                position: [0.0, 0.0],
+                uv: [0.0, 0.0],
+            };
+            events::CHUNK_WIDTH_SQUARED as usize * 4
+        ],
     )
     .unwrap();
 
@@ -196,11 +194,10 @@ fn fake_main() {
             usage: MemoryUsage::Upload,
             ..Default::default()
         },
-        *events::STARTING_INDICES,
+        //*events::STARTING_INDICES,
+        vec![0; events::CHUNK_WIDTH_SQUARED as usize * 6],
     )
     .unwrap();
-
-    println!("finished creating vertices and indices");
 
     let uniform_buffer_main = SubbufferAllocator::new(
         memory_allocator.clone(),
@@ -361,6 +358,13 @@ fn fake_main() {
                 ..
             } => {
                 recreate_swapchain = true;
+            }
+
+            Event::WindowEvent {
+                event: WindowEvent::KeyboardInput { input, .. },
+                ..
+            } => {
+                events::on_keyboard_input(&mut storage, input);
             }
 
             Event::RedrawEventsCleared => {
