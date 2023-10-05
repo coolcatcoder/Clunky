@@ -31,11 +31,12 @@ pub const BIOMES: [Biome; 1] = [Biome {
 }];
 
 pub const RANDOM_PATTERN_MAP_OBJECTS: [RandomPatternMapObject; 1] = [RandomPatternMapObject {
-    chance: 50,
+    chance: 100,
     priority: 1,
     behaviour: CollisionBehaviour::None,
     rendering_size: (1.0, 1.0),
     collision_size: (1.0, 1.0),
+    uv: (0.0, 0.0),
 }];
 
 pub const SIMPLEX_PATTERN_MAP_OBJECTS: [SimplexPatternMapObject; 0] = [];
@@ -49,6 +50,7 @@ pub struct RandomPatternMapObject {
     pub behaviour: CollisionBehaviour,
     pub rendering_size: (f32, f32),
     pub collision_size: (f32, f32),
+    pub uv: (f32, f32),
 }
 
 #[derive(Debug)]

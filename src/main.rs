@@ -59,6 +59,11 @@ mod events;
 mod biomes;
 
 fn main() {
+    println!("start of main() before fake_main()");
+    fake_main();
+}
+
+fn fake_main() {
     // start initialization
     let library = VulkanLibrary::new().unwrap();
     let required_extensions = vulkano_win::required_extensions(&library);
@@ -81,6 +86,7 @@ fn main() {
         khr_swapchain: true,
         ..DeviceExtensions::empty()
     };
+    println!("Last known point.");
     let (physical_device, queue_family_index) = instance
         .enumerate_physical_devices()
         .unwrap()
@@ -104,6 +110,7 @@ fn main() {
             _ => 5,
         })
         .unwrap();
+    println!("you shouldn't see this");
 
     println!(
         "Using device: {} (type: {:?})",
@@ -163,6 +170,8 @@ fn main() {
     // start creating buffers
     let memory_allocator = Arc::new(StandardMemoryAllocator::new_default(device.clone()));
 
+    println!("Starting vertex and index allocation");
+
     let vertex_buffer = Buffer::from_iter(
         &memory_allocator,
         BufferCreateInfo {
@@ -173,7 +182,7 @@ fn main() {
             usage: MemoryUsage::Upload,
             ..Default::default()
         },
-        events::STARTING_VERTICES,
+        *events::STARTING_VERTICES,
     )
     .unwrap();
 
@@ -187,9 +196,11 @@ fn main() {
             usage: MemoryUsage::Upload,
             ..Default::default()
         },
-        events::STARTING_INDICES,
+        *events::STARTING_INDICES,
     )
     .unwrap();
+
+    println!("finished creating vertices and indices");
 
     let uniform_buffer_main = SubbufferAllocator::new(
         memory_allocator.clone(),
@@ -330,7 +341,7 @@ fn main() {
 
     let mut camera = events::Camera {
         scale: 1.0,
-        position: (0.0,0.0),
+        position: (0.0, 0.0),
     };
 
     let mut storage = events::start(&mut camera);
