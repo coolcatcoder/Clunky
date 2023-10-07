@@ -221,7 +221,7 @@ fn main() {
     .unwrap();
 
     let texture = {
-        let png_bytes = include_bytes!("image_img.png").to_vec();
+        let png_bytes = include_bytes!("sprite_sheet.png").to_vec();
         let cursor = Cursor::new(png_bytes);
         let decoder = png::Decoder::new(cursor);
         let mut reader = decoder.read_info().unwrap();
@@ -240,7 +240,9 @@ fn main() {
             image_data,
             dimensions,
             MipmapsCount::One,
+            //Format::R8G8B8A8_SRGB,
             Format::R8G8B8A8_SRGB,
+            //Format::R32G32B32A32_UINT,
             &mut uploads,
         )
         .unwrap();
@@ -250,8 +252,8 @@ fn main() {
     let sampler = Sampler::new(
         device.clone(),
         SamplerCreateInfo {
-            mag_filter: Filter::Linear,
-            min_filter: Filter::Linear,
+            mag_filter: Filter::Nearest,
+            min_filter: Filter::Nearest,
             address_mode: [SamplerAddressMode::Repeat; 3],
             ..Default::default()
         },
@@ -341,7 +343,9 @@ fn main() {
         position: (0.0, 0.0),
     };
 
-    let mut storage = events::start(&mut camera);
+    let mut brightness = 1.0;
+
+    let mut storage = events::start(&mut camera, &mut brightness);
 
     // start event loop
     event_loop.run(move |event, _, control_flow| {
@@ -403,10 +407,11 @@ fn main() {
                         vertex_writer.unwrap(),
                         index_writer.unwrap(),
                         &mut index_count,
-                        swapchain.image_extent()[0] as f32 / swapchain.image_extent()[1] as f32,
+                        swapchain.image_extent()[1] as f32 / swapchain.image_extent()[0] as f32,
                         delta_time,
                         average_fps,
                         &mut camera,
+                        &mut brightness,
                     ); // call update once per frame
                 }
 
@@ -440,10 +445,11 @@ fn main() {
 
                 let uniform_buffer_subbuffer = {
                     let uniform_data: vertex_shader::Data = vertex_shader::Data {
-                        scale: swapchain.image_extent()[0] as f32
-                            / swapchain.image_extent()[1] as f32,
+                        scale: swapchain.image_extent()[1] as f32
+                            / swapchain.image_extent()[0] as f32,
                         camera_scale: camera.scale,
                         camera_position: [camera.position.0, camera.position.1],
+                        brightness,
                     };
 
                     let subbuffer = uniform_buffer_main.allocate_sized().unwrap();

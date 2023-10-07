@@ -9,6 +9,8 @@ pub fn get_biome(noise_x: f64, noise_y: f64) -> usize {
     0
 }
 
+pub const SPRITE_SIZE: (f32, f32) = (1.0 / 42.0, 1.0);
+
 pub const BIOMES: [Biome; 1] = [Biome {
     aabb: Aabb {
         size_x: 1.0,
@@ -22,7 +24,7 @@ pub const BIOMES: [Biome; 1] = [Biome {
     },
     simplex_pattern: PatternArray {
         starting_index: 0,
-        length: 1,
+        length: 3,
     },
     simplex_smoothed_pattern: PatternArray {
         starting_index: 0,
@@ -36,20 +38,47 @@ pub const RANDOM_PATTERN_MAP_OBJECTS: [RandomPatternMapObject; 1] = [RandomPatte
     behaviour: CollisionBehaviour::None,
     rendering_size: (0.5, 0.5),
     collision_size: (1.0, 1.0),
-    uv: (0.0, 0.0),
+    uv: (5.0 * SPRITE_SIZE.0, 0.0),
 }];
 
-pub const SIMPLEX_PATTERN_MAP_OBJECTS: [SimplexPatternMapObject; 1] = [SimplexPatternMapObject {
-    chance: 100,
-    priority: 2,
-    behaviour: CollisionBehaviour::None,
-    rendering_size: (1.0, 1.0),
-    collision_size: (1.0, 1.0),
-    seed: 1,
-    acceptable_noise: (0.0, 1.0),
-    noise_scale: 0.2,
-    uv: (0.0, 0.0),
-}];
+pub const SIMPLEX_PATTERN_MAP_OBJECTS: [SimplexPatternMapObject; 3] = [
+    SimplexPatternMapObject {
+        // circus rock
+        chance: 100,
+        priority: 2,
+        behaviour: CollisionBehaviour::None,
+        rendering_size: (1.0, 1.0),
+        collision_size: (1.0, 1.0),
+        seed: 1,
+        acceptable_noise: (0.0, 1.0),
+        noise_scale: 0.2,
+        uv: (7.0 * SPRITE_SIZE.0, 0.0),
+    },
+    SimplexPatternMapObject {
+        // flower test
+        chance: 75,
+        priority: 1,
+        behaviour: CollisionBehaviour::None,
+        rendering_size: (1.0, 1.0),
+        collision_size: (1.0, 1.0),
+        seed: 2,
+        acceptable_noise: (0.2, 0.5),
+        noise_scale: 0.1,
+        uv: (16.0 * SPRITE_SIZE.0, 0.0),
+    },
+    SimplexPatternMapObject {
+        // Large test
+        chance: 100,
+        priority: 3,
+        behaviour: CollisionBehaviour::None,
+        rendering_size: (1.0, 1.0),
+        collision_size: (1.0, 1.0),
+        seed: 3,
+        acceptable_noise: (-1.0, -0.6),
+        noise_scale: 0.05,
+        uv: (9.0 * SPRITE_SIZE.0, 0.0),
+    },
+];
 
 pub const SIMPLEX_SMOOTHED_PATTERN_MAP_OBJECTS: [SimplexSmoothedPatternMapObject; 0] = [];
 

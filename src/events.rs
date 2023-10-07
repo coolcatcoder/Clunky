@@ -3,7 +3,7 @@ use noise::OpenSimplex;
 use rand::distributions::{Distribution, Uniform};
 use rand::rngs::ThreadRng;
 use rand::thread_rng;
-use std::ops::{Add, Div, Mul, Rem};
+use std::ops::{Add, Mul};
 use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::Sender;
@@ -17,8 +17,6 @@ use winit::event::VirtualKeyCode;
 use crate::biomes;
 use crate::vertex_data;
 
-const SPRITE_SIZE: (f32, f32) = (1.0, 1.0);
-
 const FULL_GRID_WIDTH: u32 = 256;
 const FULL_GRID_WIDTH_SQUARED: u32 = FULL_GRID_WIDTH * FULL_GRID_WIDTH; // 256**2
 
@@ -30,9 +28,10 @@ const CHUNK_GRID_WIDTH: u32 = FULL_GRID_WIDTH / CHUNK_WIDTH as u32;
 
 pub const STARTING_INDEX_COUNT: u32 = 0;
 
-pub fn start(camera: &mut Camera) -> Storage {
-    camera.scale = 0.05;
-    camera.position = (0.0, 0.0);
+pub fn start(camera: &mut Camera, brightness: &mut f32) -> Storage {
+    camera.scale = 0.12;
+
+    *brightness = 2.5;
 
     let mut rng = thread_rng();
     let seed_range = Uniform::new(0u32, 1000);
@@ -50,23 +49,30 @@ pub fn start(camera: &mut Camera) -> Storage {
         map_objects: [biomes::MapObject::None; FULL_GRID_WIDTH_SQUARED as usize],
         chunk_sender,
         chunk_receiver,
+        player_position: (10.0, 10.0),
+        previous_player_position: (5.0, 5.0),
+        sprinting: false,
+        collision_debug: false,
     };
 
     generate_chunk(&storage, (0, 0));
-    //generate_chunk(&storage, (1,0));
+    generate_chunk(&storage, (1, 1));
+
+    camera.position = storage.player_position;
 
     storage
 }
 
 pub fn update(
     storage: &mut Storage,
-    mut vertices: BufferWriteGuard<'_, [vertex_data::VertexData]>,
-    mut indices: BufferWriteGuard<'_, [u16]>,
+    vertices: BufferWriteGuard<'_, [vertex_data::VertexData]>,
+    indices: BufferWriteGuard<'_, [u16]>,
     index_count: &mut u32,
     scale: f32,
     delta_time: f32,
     average_fps: f32,
     camera: &mut Camera,
+    brightness: &mut f32,
 ) {
     //println!("delta time: {}", delta_time);
     //println!("average fps: {}", average_fps);
@@ -79,186 +85,34 @@ pub fn update(
         _ => (0.0, 0.0),
     };
 
-    camera.position.0 += motion.0 * delta_time * 10.0;
-    camera.position.1 += motion.1 * delta_time * 10.0;
+    let speed = match storage.sprinting {
+        false => 10.0,
+        true => 50.0,
+    };
 
-    //println!("scale:{}",scale);
-    //println!("camera position:{:?}",camera.position);
+    storage.previous_player_position = storage.player_position;
 
-    let screen_width_as_world_units = 2.0 / camera.scale;
-    let screen_height_as_world_units = 2.0 / camera.scale / scale;
+    storage.player_position.0 += motion.0 * delta_time * speed;
+    storage.player_position.1 += motion.1 * delta_time * speed;
 
-    //println!("screen width:{}, screen height:{}",screen_width_as_world_units,screen_height_as_world_units);
-
-    // let bottom_left_world_position_of_screen = (
-    //     (camera.position.0 - (screen_width_as_world_units * 0.5)).floor() as i32,
-    //     (camera.position.1 - (screen_height_as_world_units * 0.5)).floor() as i32,
-    // );
-    // let top_right_world_position_of_screen = (
-    //     (camera.position.0 + (screen_width_as_world_units * 0.5)).floor() as i32,
-    //     (camera.position.1 + (screen_height_as_world_units * 0.5)).floor() as i32,
-    // );
-
-    //println!("bottom left: {:?}, top right: {:?}",bottom_left_world_position_of_screen,top_right_world_position_of_screen);
-
-    let mut simple_rendering_count = 0u32;
-
-    for x in (camera.position.0 - (screen_width_as_world_units * 0.5)).floor() as i32 - 1
-        ..(camera.position.0 + (screen_width_as_world_units * 0.5)).ceil() as i32 + 1
-    {
-        for y in (camera.position.1 - (screen_height_as_world_units * 0.5)).floor() as i32 - 1
-            ..(camera.position.1 + (screen_height_as_world_units * 0.5)).ceil() as i32 + 1
-        {
-            if x < 0 || y < 0 {
-                continue;
-            }
-
-            let map_object =
-                storage.map_objects[full_index_from_full_position((x as u32, y as u32))];
-
-            match map_object {
-                biomes::MapObject::RandomPattern(i) => {
-                    let random_pattern_map_object = &biomes::RANDOM_PATTERN_MAP_OBJECTS[i as usize];
-                    // println!(
-                    //     "Position:({},{}), Map Object:{:?}",
-                    //     x, y, random_pattern_map_object,
-                    // );
-
-                    let vertex_start = (simple_rendering_count * 4) as usize;
-                    let index_start = (simple_rendering_count * 6) as usize;
-
-                    vertices[vertex_start] = vertex_data::VertexData {
-                        // top right
-                        position: [
-                            x as f32 + (0.5 * random_pattern_map_object.rendering_size.0),
-                            y as f32 + (0.5 * random_pattern_map_object.rendering_size.1),
-                        ],
-                        uv: [
-                            random_pattern_map_object.uv.0 + SPRITE_SIZE.0,
-                            random_pattern_map_object.uv.1 + SPRITE_SIZE.1,
-                        ],
-                    };
-
-                    vertices[vertex_start + 1] = vertex_data::VertexData {
-                        // bottom right
-                        position: [
-                            x as f32 + (0.5 * random_pattern_map_object.rendering_size.0),
-                            y as f32 + (-0.5 * random_pattern_map_object.rendering_size.1),
-                        ],
-                        uv: [
-                            random_pattern_map_object.uv.0 + SPRITE_SIZE.0,
-                            random_pattern_map_object.uv.1,
-                        ],
-                    };
-
-                    vertices[vertex_start + 2] = vertex_data::VertexData {
-                        // top left
-                        position: [
-                            x as f32 + (-0.5 * random_pattern_map_object.rendering_size.0),
-                            y as f32 + (0.5 * random_pattern_map_object.rendering_size.1),
-                        ],
-                        uv: [
-                            random_pattern_map_object.uv.0,
-                            random_pattern_map_object.uv.1 + SPRITE_SIZE.1,
-                        ],
-                    };
-
-                    vertices[vertex_start + 3] = vertex_data::VertexData {
-                        // bottom left
-                        position: [
-                            x as f32 + (-0.5 * random_pattern_map_object.rendering_size.0),
-                            y as f32 + (-0.5 * random_pattern_map_object.rendering_size.1),
-                        ],
-                        uv: [
-                            random_pattern_map_object.uv.0,
-                            random_pattern_map_object.uv.1,
-                        ],
-                    };
-
-                    indices[index_start] = vertex_start as u16;
-                    indices[index_start + 1] = vertex_start as u16 + 1;
-                    indices[index_start + 2] = vertex_start as u16 + 2;
-
-                    indices[index_start + 3] = vertex_start as u16 + 1;
-                    indices[index_start + 4] = vertex_start as u16 + 3;
-                    indices[index_start + 5] = vertex_start as u16 + 2;
-
-                    simple_rendering_count += 1;
-                }
-                biomes::MapObject::SimplexPattern(i) => {
-                    let simplex_pattern_map_object =
-                        &biomes::SIMPLEX_PATTERN_MAP_OBJECTS[i as usize];
-
-                    let vertex_start = (simple_rendering_count * 4) as usize;
-                    let index_start = (simple_rendering_count * 6) as usize;
-
-                    vertices[vertex_start] = vertex_data::VertexData {
-                        // top right
-                        position: [
-                            x as f32 + (0.5 * simplex_pattern_map_object.rendering_size.0),
-                            y as f32 + (0.5 * simplex_pattern_map_object.rendering_size.1),
-                        ],
-                        uv: [
-                            simplex_pattern_map_object.uv.0 + SPRITE_SIZE.0,
-                            simplex_pattern_map_object.uv.1 + SPRITE_SIZE.1,
-                        ],
-                    };
-
-                    vertices[vertex_start + 1] = vertex_data::VertexData {
-                        // bottom right
-                        position: [
-                            x as f32 + (0.5 * simplex_pattern_map_object.rendering_size.0),
-                            y as f32 + (-0.5 * simplex_pattern_map_object.rendering_size.1),
-                        ],
-                        uv: [
-                            simplex_pattern_map_object.uv.0 + SPRITE_SIZE.0,
-                            simplex_pattern_map_object.uv.1,
-                        ],
-                    };
-
-                    vertices[vertex_start + 2] = vertex_data::VertexData {
-                        // top left
-                        position: [
-                            x as f32 + (-0.5 * simplex_pattern_map_object.rendering_size.0),
-                            y as f32 + (0.5 * simplex_pattern_map_object.rendering_size.1),
-                        ],
-                        uv: [
-                            simplex_pattern_map_object.uv.0,
-                            simplex_pattern_map_object.uv.1 + SPRITE_SIZE.1,
-                        ],
-                    };
-
-                    vertices[vertex_start + 3] = vertex_data::VertexData {
-                        // bottom left
-                        position: [
-                            x as f32 + (-0.5 * simplex_pattern_map_object.rendering_size.0),
-                            y as f32 + (-0.5 * simplex_pattern_map_object.rendering_size.1),
-                        ],
-                        uv: [
-                            simplex_pattern_map_object.uv.0,
-                            simplex_pattern_map_object.uv.1,
-                        ],
-                    };
-
-                    indices[index_start] = vertex_start as u16;
-                    indices[index_start + 1] = vertex_start as u16 + 1;
-                    indices[index_start + 2] = vertex_start as u16 + 2;
-
-                    indices[index_start + 3] = vertex_start as u16 + 1;
-                    indices[index_start + 4] = vertex_start as u16 + 3;
-                    indices[index_start + 5] = vertex_start as u16 + 2;
-
-                    simple_rendering_count += 1;
-                }
-                biomes::MapObject::SimplexSmoothedPattern(_) => {
-                    todo!();
-                }
-                biomes::MapObject::None => {}
-            }
-        }
+    if !storage.collision_debug {
+        collisions(storage);
     }
 
-    *index_count = simple_rendering_count * 6;
+    if storage.player_position.0 < 0.0 {
+        storage.player_position.0 = 0.0;
+    } else if storage.player_position.0 > FULL_GRID_WIDTH as f32 {
+        storage.player_position.0 = FULL_GRID_WIDTH as f32;
+    }
+    if storage.player_position.1 < 0.0 {
+        storage.player_position.1 = 0.0;
+    } else if storage.player_position.1 > FULL_GRID_WIDTH as f32 {
+        storage.player_position.1 = FULL_GRID_WIDTH as f32;
+    }
+
+    camera.position = storage.player_position;
+
+    render_map(storage, vertices, indices, index_count, scale, camera);
 }
 
 pub fn late_update(storage: &mut Storage, delta_time: f32, average_fps: f32) {
@@ -283,6 +137,27 @@ pub fn on_keyboard_input(storage: &mut Storage, input: KeyboardInput) {
             VirtualKeyCode::A => storage.wasd_held.1 = is_pressed(input.state),
             VirtualKeyCode::S => storage.wasd_held.2 = is_pressed(input.state),
             VirtualKeyCode::D => storage.wasd_held.3 = is_pressed(input.state),
+            VirtualKeyCode::F => {
+                if is_pressed(input.state) {
+                    storage.sprinting = !storage.sprinting;
+                }
+            }
+            VirtualKeyCode::R => {
+                if is_pressed(input.state) {
+                    generate_chunk(
+                        &storage,
+                        (
+                            (storage.player_position.0 / CHUNK_WIDTH as f32).floor() as u32,
+                            (storage.player_position.1 / CHUNK_WIDTH as f32).floor() as u32,
+                        ),
+                    );
+                }
+            }
+            VirtualKeyCode::E => {
+                if is_pressed(input.state) {
+                    storage.collision_debug = !storage.collision_debug;
+                }
+            }
             _ => (),
         }
     }
@@ -310,6 +185,10 @@ pub struct Storage {
         [biomes::MapObject; CHUNK_WIDTH_SQUARED as usize],
         (u32, u32),
     )>,
+    player_position: (f32, f32),
+    previous_player_position: (f32, f32),
+    sprinting: bool,
+    collision_debug: bool,
 }
 
 // Block generation:
@@ -335,7 +214,7 @@ fn generate_chunk(storage: &Storage, chunk_position: (u32, u32)) {
             for x in 0..CHUNK_WIDTH as u32 {
                 for y in 0..CHUNK_WIDTH as u32 {
                     let full_pos = (full_pos_start.0 + x, full_pos_start.1 + y);
-                    chunk_array[index_from_position(full_pos, CHUNK_WIDTH as u32) as usize] =
+                    chunk_array[index_from_position((x, y), CHUNK_WIDTH as u32) as usize] =
                         generate_position(
                             full_pos,
                             &mut rng,
@@ -440,14 +319,309 @@ where
     position.1 * width + position.0
 }
 
-fn position_from_index<T>(index: T, width: T) -> (T, T)
-where
-    T: Rem<T, Output = T> + Div<T, Output = T> + Copy,
-{
-    (index % width, index / width)
-}
-
 pub struct Camera {
     pub scale: f32,
     pub position: (f32, f32),
+}
+
+fn render_map(
+    storage: &mut Storage,
+    mut vertices: BufferWriteGuard<'_, [vertex_data::VertexData]>,
+    mut indices: BufferWriteGuard<'_, [u16]>,
+    index_count: &mut u32,
+    scale: f32,
+    camera: &mut Camera,
+) {
+    let screen_width_as_world_units = 2.0 / camera.scale / scale;
+    let screen_height_as_world_units = 2.0 / camera.scale;
+
+    let mut simple_rendering_count = 0u32;
+
+    for x in (camera.position.0 - (screen_width_as_world_units * 0.5)).floor() as i32 - 1
+        ..(camera.position.0 + (screen_width_as_world_units * 0.5)).ceil() as i32 + 1
+    {
+        for y in (camera.position.1 - (screen_height_as_world_units * 0.5)).floor() as i32 - 1
+            ..(camera.position.1 + (screen_height_as_world_units * 0.5)).ceil() as i32 + 1
+        {
+            if x < 0 || y < 0 {
+                continue;
+            }
+
+            let full_index = full_index_from_full_position((x as u32, y as u32));
+
+            if full_index >= FULL_GRID_WIDTH_SQUARED as usize {
+                continue;
+            }
+
+            let map_object = storage.map_objects[full_index];
+
+            match map_object {
+                biomes::MapObject::RandomPattern(i) => {
+                    let random_pattern_map_object = &biomes::RANDOM_PATTERN_MAP_OBJECTS[i as usize];
+                    // println!(
+                    //     "Position:({},{}), Map Object:{:?}",
+                    //     x, y, random_pattern_map_object,
+                    // );
+
+                    let vertex_start = (simple_rendering_count * 4) as usize;
+                    let index_start = (simple_rendering_count * 6) as usize;
+
+                    vertices[vertex_start] = vertex_data::VertexData {
+                        // top right
+                        position: [
+                            x as f32 + (0.5 * random_pattern_map_object.rendering_size.0),
+                            y as f32 + (0.5 * random_pattern_map_object.rendering_size.1),
+                        ],
+                        uv: [
+                            random_pattern_map_object.uv.0 + biomes::SPRITE_SIZE.0,
+                            random_pattern_map_object.uv.1 + biomes::SPRITE_SIZE.1,
+                        ],
+                    };
+
+                    vertices[vertex_start + 1] = vertex_data::VertexData {
+                        // bottom right
+                        position: [
+                            x as f32 + (0.5 * random_pattern_map_object.rendering_size.0),
+                            y as f32 + (-0.5 * random_pattern_map_object.rendering_size.1),
+                        ],
+                        uv: [
+                            random_pattern_map_object.uv.0 + biomes::SPRITE_SIZE.0,
+                            random_pattern_map_object.uv.1,
+                        ],
+                    };
+
+                    vertices[vertex_start + 2] = vertex_data::VertexData {
+                        // top left
+                        position: [
+                            x as f32 + (-0.5 * random_pattern_map_object.rendering_size.0),
+                            y as f32 + (0.5 * random_pattern_map_object.rendering_size.1),
+                        ],
+                        uv: [
+                            random_pattern_map_object.uv.0,
+                            random_pattern_map_object.uv.1 + biomes::SPRITE_SIZE.1,
+                        ],
+                    };
+
+                    vertices[vertex_start + 3] = vertex_data::VertexData {
+                        // bottom left
+                        position: [
+                            x as f32 + (-0.5 * random_pattern_map_object.rendering_size.0),
+                            y as f32 + (-0.5 * random_pattern_map_object.rendering_size.1),
+                        ],
+                        uv: [
+                            random_pattern_map_object.uv.0,
+                            random_pattern_map_object.uv.1,
+                        ],
+                    };
+
+                    indices[index_start] = vertex_start as u16;
+                    indices[index_start + 1] = vertex_start as u16 + 1;
+                    indices[index_start + 2] = vertex_start as u16 + 2;
+
+                    indices[index_start + 3] = vertex_start as u16 + 1;
+                    indices[index_start + 4] = vertex_start as u16 + 3;
+                    indices[index_start + 5] = vertex_start as u16 + 2;
+
+                    simple_rendering_count += 1;
+                }
+                biomes::MapObject::SimplexPattern(i) => {
+                    let simplex_pattern_map_object =
+                        &biomes::SIMPLEX_PATTERN_MAP_OBJECTS[i as usize];
+
+                    let vertex_start = (simple_rendering_count * 4) as usize;
+                    let index_start = (simple_rendering_count * 6) as usize;
+
+                    vertices[vertex_start] = vertex_data::VertexData {
+                        // top right
+                        position: [
+                            x as f32 + (0.5 * simplex_pattern_map_object.rendering_size.0),
+                            y as f32 + (0.5 * simplex_pattern_map_object.rendering_size.1),
+                        ],
+                        uv: [
+                            simplex_pattern_map_object.uv.0 + biomes::SPRITE_SIZE.0,
+                            simplex_pattern_map_object.uv.1 + biomes::SPRITE_SIZE.1,
+                        ],
+                    };
+
+                    vertices[vertex_start + 1] = vertex_data::VertexData {
+                        // bottom right
+                        position: [
+                            x as f32 + (0.5 * simplex_pattern_map_object.rendering_size.0),
+                            y as f32 + (-0.5 * simplex_pattern_map_object.rendering_size.1),
+                        ],
+                        uv: [
+                            simplex_pattern_map_object.uv.0 + biomes::SPRITE_SIZE.0,
+                            simplex_pattern_map_object.uv.1,
+                        ],
+                    };
+
+                    vertices[vertex_start + 2] = vertex_data::VertexData {
+                        // top left
+                        position: [
+                            x as f32 + (-0.5 * simplex_pattern_map_object.rendering_size.0),
+                            y as f32 + (0.5 * simplex_pattern_map_object.rendering_size.1),
+                        ],
+                        uv: [
+                            simplex_pattern_map_object.uv.0,
+                            simplex_pattern_map_object.uv.1 + biomes::SPRITE_SIZE.1,
+                        ],
+                    };
+
+                    vertices[vertex_start + 3] = vertex_data::VertexData {
+                        // bottom left
+                        position: [
+                            x as f32 + (-0.5 * simplex_pattern_map_object.rendering_size.0),
+                            y as f32 + (-0.5 * simplex_pattern_map_object.rendering_size.1),
+                        ],
+                        uv: [
+                            simplex_pattern_map_object.uv.0,
+                            simplex_pattern_map_object.uv.1,
+                        ],
+                    };
+
+                    indices[index_start] = vertex_start as u16;
+                    indices[index_start + 1] = vertex_start as u16 + 1;
+                    indices[index_start + 2] = vertex_start as u16 + 2;
+
+                    indices[index_start + 3] = vertex_start as u16 + 1;
+                    indices[index_start + 4] = vertex_start as u16 + 3;
+                    indices[index_start + 5] = vertex_start as u16 + 2;
+
+                    simple_rendering_count += 1;
+                }
+                biomes::MapObject::SimplexSmoothedPattern(_) => {
+                    todo!();
+                }
+                biomes::MapObject::None => {}
+            }
+        }
+    }
+
+    let vertex_start = (simple_rendering_count * 4) as usize;
+    let index_start = (simple_rendering_count * 6) as usize;
+
+    vertices[vertex_start] = vertex_data::VertexData {
+        // top right
+        position: [
+            storage.player_position.0 + 0.5,
+            storage.player_position.1 + 0.5,
+        ],
+        uv: [biomes::SPRITE_SIZE.0, biomes::SPRITE_SIZE.1],
+    };
+
+    vertices[vertex_start + 1] = vertex_data::VertexData {
+        // bottom right
+        position: [
+            storage.player_position.0 + 0.5,
+            storage.player_position.1 + -0.5,
+        ],
+        uv: [biomes::SPRITE_SIZE.0, 0.0],
+    };
+
+    vertices[vertex_start + 2] = vertex_data::VertexData {
+        // top left
+        position: [
+            storage.player_position.0 + -0.5,
+            storage.player_position.1 + 0.5,
+        ],
+        uv: [0.0, biomes::SPRITE_SIZE.1],
+    };
+
+    vertices[vertex_start + 3] = vertex_data::VertexData {
+        // bottom left
+        position: [
+            storage.player_position.0 + -0.5,
+            storage.player_position.1 + -0.5,
+        ],
+        uv: [0.0, 0.0],
+    };
+
+    indices[index_start] = vertex_start as u16;
+    indices[index_start + 1] = vertex_start as u16 + 1;
+    indices[index_start + 2] = vertex_start as u16 + 2;
+
+    indices[index_start + 3] = vertex_start as u16 + 1;
+    indices[index_start + 4] = vertex_start as u16 + 3;
+    indices[index_start + 5] = vertex_start as u16 + 2;
+
+    *index_count = simple_rendering_count * 6 + 6;
+}
+
+fn collisions(storage: &mut Storage) {
+    for x in -1..1 {
+        for y in -1..1 {
+            let full_position = (
+                storage.player_position.0.round() + x as f32,
+                storage.player_position.1.round() + y as f32,
+            );
+            if full_position.0 < 0.0 || full_position.1 < 0.0 {
+                continue;
+            }
+
+            let map_object = storage.map_objects
+                [full_index_from_full_position((full_position.0 as u32, full_position.1 as u32))];
+
+            match map_object {
+                biomes::MapObject::RandomPattern(i) => {
+                    let random_pattern_map_object = &biomes::RANDOM_PATTERN_MAP_OBJECTS[i as usize];
+                    if is_colliding(
+                        (storage.player_position.0 + 1.0 * -0.5 , storage.player_position.1 + 1.0 * -0.5), // This is nonsense.
+                        //storage.player_position,
+                        (0.5, 0.5),
+                        (full_position.0 + random_pattern_map_object.collision_size.0 * -0.5, full_position.1 + random_pattern_map_object.collision_size.1 * -0.5),
+                        //full_position
+                        //random_pattern_map_object.collision_size,
+                        (0.5,0.5)
+                    ) {
+                        storage.player_position = storage.previous_player_position;
+                    }
+                }
+                biomes::MapObject::SimplexPattern(i) => {
+                    let simplex_pattern_map_object =
+                        &biomes::SIMPLEX_PATTERN_MAP_OBJECTS[i as usize];
+                    if is_colliding(
+                        (storage.player_position.0 + 1.0 * -0.5 + 0.5, storage.player_position.1 + 1.0 * -0.5 + 0.5), // This is nonsense.
+                        //storage.player_position,
+                        (1.0, 1.0),
+                        (full_position.0 + simplex_pattern_map_object.collision_size.0 * -0.5 + 0.5, full_position.1 + simplex_pattern_map_object.collision_size.1 * -0.5 + 0.5),
+                        //full_position
+                        simplex_pattern_map_object.collision_size,
+                    ) {
+                        storage.player_position = storage.previous_player_position;
+                        println!("Collision!");
+                    }
+                }
+                biomes::MapObject::SimplexSmoothedPattern(i) => {
+                    todo!();
+                }
+                biomes::MapObject::None => {
+                    continue;
+                }
+            }
+        }
+    }
+}
+
+fn is_colliding( // assumes origin is bottom left
+    position1: (f32, f32),
+    size1: (f32, f32),
+    position2: (f32, f32),
+    size2: (f32, f32),
+) -> bool {
+    position1.0 < position2.0 + size2.0
+        && position1.0 + size1.0 > position2.0
+        && position1.1 < position2.1 + size2.1
+        && position1.1 + size1.1 > position2.1
+}
+
+fn is_colliding_centred( // assumes origin is centred
+    position1: (f32, f32),
+    size1: (f32, f32),
+    position2: (f32, f32),
+    size2: (f32, f32),
+) -> bool {
+    position1.0 - (size1.0 * 0.5) < position2.0 + (size2.0 * 0.5)
+        && position1.0 + (size1.0 * 0.5) > position2.0 - (size2.0 * 0.5)
+        && position1.1 - (size1.1 * 0.5) < position2.1 + (size2.1 * 0.5)
+        && position1.1 + (size1.1 * 0.5) > position2.1 - (size2.1 * 0.5)
 }
