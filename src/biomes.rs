@@ -37,7 +37,7 @@ pub const RANDOM_PATTERN_MAP_OBJECTS: [RandomPatternMapObject; 1] = [RandomPatte
     priority: 1,
     behaviour: CollisionBehaviour::None,
     rendering_size: (0.5, 0.5),
-    collision_size: (1.0, 1.0),
+    collision_size: (0.5, 0.5),
     uv: (5.0 * SPRITE_SIZE.0, 0.0),
 }];
 
@@ -60,7 +60,7 @@ pub const SIMPLEX_PATTERN_MAP_OBJECTS: [SimplexPatternMapObject; 3] = [
         priority: 1,
         behaviour: CollisionBehaviour::None,
         rendering_size: (1.0, 1.0),
-        collision_size: (1.0, 1.0),
+        collision_size: (0.0, 0.0),
         seed: 2,
         acceptable_noise: (0.2, 0.5),
         noise_scale: 0.1,
@@ -159,4 +159,5 @@ pub struct PatternArray {
 #[derive(Debug)]
 pub enum CollisionBehaviour {
     None,
+    Consume(u8),
 }

@@ -49,16 +49,20 @@ pub fn start(camera: &mut Camera, brightness: &mut f32) -> Storage {
         map_objects: [biomes::MapObject::None; FULL_GRID_WIDTH_SQUARED as usize],
         chunk_sender,
         chunk_receiver,
-        player_position: (10.0, 10.0),
-        previous_player_position: (5.0, 5.0),
-        sprinting: false,
-        collision_debug: false,
+        player: Player {
+            position: (10.0, 10.0),
+            previous_position: (5.0, 5.0),
+            sprinting: false,
+            collision_debug: false,
+            size: (1.0, 1.0),
+            strength: 1,
+        },
     };
 
     generate_chunk(&storage, (0, 0));
     generate_chunk(&storage, (1, 1));
 
-    camera.position = storage.player_position;
+    camera.position = storage.player.position;
 
     storage
 }
@@ -75,7 +79,7 @@ pub fn update(
     brightness: &mut f32,
 ) {
     //println!("delta time: {}", delta_time);
-    //println!("average fps: {}", average_fps);
+    println!("average fps: {}", average_fps);
 
     let motion = match storage.wasd_held {
         (true, false, false, false) => (0.0, -1.0),
@@ -85,32 +89,41 @@ pub fn update(
         _ => (0.0, 0.0),
     };
 
-    let speed = match storage.sprinting {
+    let speed = match storage.player.sprinting {
         false => 10.0,
         true => 50.0,
     };
 
-    storage.previous_player_position = storage.player_position;
+    storage.player.previous_position = storage.player.position;
 
-    storage.player_position.0 += motion.0 * delta_time * speed;
-    storage.player_position.1 += motion.1 * delta_time * speed;
+    storage.player.position.0 += motion.0 * delta_time * speed;
+    storage.player.position.1 += motion.1 * delta_time * speed;
 
-    if !storage.collision_debug {
-        collisions(storage);
+    if !storage.player.collision_debug {
+        collision_middle_top(storage);
+        collision_right_top(storage);
+        collision_left_top(storage);
+
+        collision_middle_bottom(storage);
+        collision_right_bottom(storage);
+        collision_left_bottom(storage);
+
+        collision_right_middle(storage);
+        collision_left_middle(storage);
     }
 
-    if storage.player_position.0 < 0.0 {
-        storage.player_position.0 = 0.0;
-    } else if storage.player_position.0 > FULL_GRID_WIDTH as f32 {
-        storage.player_position.0 = FULL_GRID_WIDTH as f32;
+    if storage.player.position.0 < 0.0 {
+        storage.player.position.0 = 0.0;
+    } else if storage.player.position.0 > FULL_GRID_WIDTH as f32 {
+        storage.player.position.0 = FULL_GRID_WIDTH as f32;
     }
-    if storage.player_position.1 < 0.0 {
-        storage.player_position.1 = 0.0;
-    } else if storage.player_position.1 > FULL_GRID_WIDTH as f32 {
-        storage.player_position.1 = FULL_GRID_WIDTH as f32;
+    if storage.player.position.1 < 0.0 {
+        storage.player.position.1 = 0.0;
+    } else if storage.player.position.1 > FULL_GRID_WIDTH as f32 {
+        storage.player.position.1 = FULL_GRID_WIDTH as f32;
     }
 
-    camera.position = storage.player_position;
+    camera.position = storage.player.position;
 
     render_map(storage, vertices, indices, index_count, scale, camera);
 }
@@ -139,7 +152,7 @@ pub fn on_keyboard_input(storage: &mut Storage, input: KeyboardInput) {
             VirtualKeyCode::D => storage.wasd_held.3 = is_pressed(input.state),
             VirtualKeyCode::F => {
                 if is_pressed(input.state) {
-                    storage.sprinting = !storage.sprinting;
+                    storage.player.sprinting = !storage.player.sprinting;
                 }
             }
             VirtualKeyCode::R => {
@@ -147,15 +160,15 @@ pub fn on_keyboard_input(storage: &mut Storage, input: KeyboardInput) {
                     generate_chunk(
                         &storage,
                         (
-                            (storage.player_position.0 / CHUNK_WIDTH as f32).floor() as u32,
-                            (storage.player_position.1 / CHUNK_WIDTH as f32).floor() as u32,
+                            (storage.player.position.0 / CHUNK_WIDTH as f32).floor() as u32,
+                            (storage.player.position.1 / CHUNK_WIDTH as f32).floor() as u32,
                         ),
                     );
                 }
             }
             VirtualKeyCode::E => {
                 if is_pressed(input.state) {
-                    storage.collision_debug = !storage.collision_debug;
+                    storage.player.collision_debug = !storage.player.collision_debug;
                 }
             }
             _ => (),
@@ -185,13 +198,8 @@ pub struct Storage {
         [biomes::MapObject; CHUNK_WIDTH_SQUARED as usize],
         (u32, u32),
     )>,
-    player_position: (f32, f32),
-    previous_player_position: (f32, f32),
-    sprinting: bool,
-    collision_debug: bool,
+    player: Player,
 }
-
-// Block generation:
 
 fn generate_chunk(storage: &Storage, chunk_position: (u32, u32)) {
     let chunk_sender = storage.chunk_sender.clone();
@@ -503,8 +511,8 @@ fn render_map(
     vertices[vertex_start] = vertex_data::VertexData {
         // top right
         position: [
-            storage.player_position.0 + 0.5,
-            storage.player_position.1 + 0.5,
+            storage.player.position.0 + 0.5,
+            storage.player.position.1 + 0.5,
         ],
         uv: [biomes::SPRITE_SIZE.0, biomes::SPRITE_SIZE.1],
     };
@@ -512,8 +520,8 @@ fn render_map(
     vertices[vertex_start + 1] = vertex_data::VertexData {
         // bottom right
         position: [
-            storage.player_position.0 + 0.5,
-            storage.player_position.1 + -0.5,
+            storage.player.position.0 + 0.5,
+            storage.player.position.1 + -0.5,
         ],
         uv: [biomes::SPRITE_SIZE.0, 0.0],
     };
@@ -521,8 +529,8 @@ fn render_map(
     vertices[vertex_start + 2] = vertex_data::VertexData {
         // top left
         position: [
-            storage.player_position.0 + -0.5,
-            storage.player_position.1 + 0.5,
+            storage.player.position.0 + -0.5,
+            storage.player.position.1 + 0.5,
         ],
         uv: [0.0, biomes::SPRITE_SIZE.1],
     };
@@ -530,8 +538,8 @@ fn render_map(
     vertices[vertex_start + 3] = vertex_data::VertexData {
         // bottom left
         position: [
-            storage.player_position.0 + -0.5,
-            storage.player_position.1 + -0.5,
+            storage.player.position.0 + -0.5,
+            storage.player.position.1 + -0.5,
         ],
         uv: [0.0, 0.0],
     };
@@ -547,81 +555,334 @@ fn render_map(
     *index_count = simple_rendering_count * 6 + 6;
 }
 
-fn collisions(storage: &mut Storage) {
-    for x in -1..1 {
-        for y in -1..1 {
-            let full_position = (
-                storage.player_position.0.round() + x as f32,
-                storage.player_position.1.round() + y as f32,
-            );
-            if full_position.0 < 0.0 || full_position.1 < 0.0 {
-                continue;
-            }
+fn collision_middle_top(storage: &mut Storage) {
+    let top_position = storage.player.position.1.round() + 1.0;
 
-            let map_object = storage.map_objects
-                [full_index_from_full_position((full_position.0 as u32, full_position.1 as u32))];
+    let map_object = storage.map_objects[full_index_from_full_position((
+        storage.player.position.0.round() as u32,
+        top_position as u32,
+    ))];
 
-            match map_object {
-                biomes::MapObject::RandomPattern(i) => {
-                    let random_pattern_map_object = &biomes::RANDOM_PATTERN_MAP_OBJECTS[i as usize];
-                    if is_colliding(
-                        (storage.player_position.0 + 1.0 * -0.5 , storage.player_position.1 + 1.0 * -0.5), // This is nonsense.
-                        //storage.player_position,
-                        (0.5, 0.5),
-                        (full_position.0 + random_pattern_map_object.collision_size.0 * -0.5, full_position.1 + random_pattern_map_object.collision_size.1 * -0.5),
-                        //full_position
-                        //random_pattern_map_object.collision_size,
-                        (0.5,0.5)
-                    ) {
-                        storage.player_position = storage.previous_player_position;
-                    }
-                }
-                biomes::MapObject::SimplexPattern(i) => {
-                    let simplex_pattern_map_object =
-                        &biomes::SIMPLEX_PATTERN_MAP_OBJECTS[i as usize];
-                    if is_colliding(
-                        (storage.player_position.0 + 1.0 * -0.5 + 0.5, storage.player_position.1 + 1.0 * -0.5 + 0.5), // This is nonsense.
-                        //storage.player_position,
-                        (1.0, 1.0),
-                        (full_position.0 + simplex_pattern_map_object.collision_size.0 * -0.5 + 0.5, full_position.1 + simplex_pattern_map_object.collision_size.1 * -0.5 + 0.5),
-                        //full_position
-                        simplex_pattern_map_object.collision_size,
-                    ) {
-                        storage.player_position = storage.previous_player_position;
-                        println!("Collision!");
-                    }
-                }
-                biomes::MapObject::SimplexSmoothedPattern(i) => {
-                    todo!();
-                }
-                biomes::MapObject::None => {
-                    continue;
-                }
+    match map_object {
+        biomes::MapObject::RandomPattern(i) => {
+            let random_pattern_map_object = &biomes::RANDOM_PATTERN_MAP_OBJECTS[i as usize];
+
+            let bottom_of_top = top_position - (random_pattern_map_object.collision_size.1 * 0.5);
+
+            if storage.player.position.1 + 0.5 > bottom_of_top {
+                storage.player.position.1 = bottom_of_top - 0.5;
             }
         }
+        biomes::MapObject::SimplexPattern(i) => {
+            let simplex_pattern_map_object = &biomes::SIMPLEX_PATTERN_MAP_OBJECTS[i as usize];
+
+            let bottom_of_top = top_position - (simplex_pattern_map_object.collision_size.1 * 0.5);
+
+            if storage.player.position.1 + 0.5 > bottom_of_top {
+                storage.player.position.1 = bottom_of_top - 0.5;
+            }
+        }
+        biomes::MapObject::SimplexSmoothedPattern(i) => {
+            todo!();
+        }
+        biomes::MapObject::None => {}
     }
 }
 
-fn is_colliding( // assumes origin is bottom left
-    position1: (f32, f32),
-    size1: (f32, f32),
-    position2: (f32, f32),
-    size2: (f32, f32),
-) -> bool {
-    position1.0 < position2.0 + size2.0
-        && position1.0 + size1.0 > position2.0
-        && position1.1 < position2.1 + size2.1
-        && position1.1 + size1.1 > position2.1
+fn collision_right_top(storage: &mut Storage) {
+    let right_position = storage.player.position.0.round() + 1.0;
+    let top_position = storage.player.position.1.round() + 1.0;
+
+    let map_object = storage.map_objects
+        [full_index_from_full_position((right_position as u32, top_position as u32))];
+
+    match map_object {
+        biomes::MapObject::RandomPattern(i) => {
+            let random_pattern_map_object = &biomes::RANDOM_PATTERN_MAP_OBJECTS[i as usize];
+
+            let left_of_right = right_position - (random_pattern_map_object.collision_size.0 * 0.5);
+            let bottom_of_top = top_position - (random_pattern_map_object.collision_size.1 * 0.5);
+
+            if storage.player.position.0 + 0.5 > left_of_right
+                && storage.player.position.1 + 0.5 > bottom_of_top
+            {
+                storage.player.position = storage.player.previous_position;
+            }
+        }
+        biomes::MapObject::SimplexPattern(i) => {
+            let simplex_pattern_map_object = &biomes::SIMPLEX_PATTERN_MAP_OBJECTS[i as usize];
+
+            let left_of_right =
+                right_position - (simplex_pattern_map_object.collision_size.0 * 0.5);
+            let bottom_of_top = top_position - (simplex_pattern_map_object.collision_size.1 * 0.5);
+
+            if storage.player.position.0 + 0.5 > left_of_right
+                && storage.player.position.1 + 0.5 > bottom_of_top
+            {
+                storage.player.position = storage.player.previous_position;
+            }
+        }
+        biomes::MapObject::SimplexSmoothedPattern(i) => {
+            todo!();
+        }
+        biomes::MapObject::None => {}
+    }
 }
 
-fn is_colliding_centred( // assumes origin is centred
-    position1: (f32, f32),
-    size1: (f32, f32),
-    position2: (f32, f32),
-    size2: (f32, f32),
-) -> bool {
-    position1.0 - (size1.0 * 0.5) < position2.0 + (size2.0 * 0.5)
-        && position1.0 + (size1.0 * 0.5) > position2.0 - (size2.0 * 0.5)
-        && position1.1 - (size1.1 * 0.5) < position2.1 + (size2.1 * 0.5)
-        && position1.1 + (size1.1 * 0.5) > position2.1 - (size2.1 * 0.5)
+fn collision_left_top(storage: &mut Storage) {
+    let left_position = storage.player.position.0.round() - 1.0;
+    let top_position = storage.player.position.1.round() + 1.0;
+
+    let map_object = storage.map_objects
+        [full_index_from_full_position((left_position as u32, top_position as u32))];
+
+    match map_object {
+        biomes::MapObject::RandomPattern(i) => {
+            let random_pattern_map_object = &biomes::RANDOM_PATTERN_MAP_OBJECTS[i as usize];
+
+            let right_of_left = left_position + (random_pattern_map_object.collision_size.0 * 0.5);
+            let bottom_of_top = top_position - (random_pattern_map_object.collision_size.1 * 0.5);
+
+            if storage.player.position.0 - 0.5 < right_of_left
+                && storage.player.position.1 + 0.5 > bottom_of_top
+            {
+                storage.player.position = storage.player.previous_position;
+            }
+        }
+        biomes::MapObject::SimplexPattern(i) => {
+            let simplex_pattern_map_object = &biomes::SIMPLEX_PATTERN_MAP_OBJECTS[i as usize];
+
+            let right_of_left = left_position + (simplex_pattern_map_object.collision_size.0 * 0.5);
+            let bottom_of_top = top_position - (simplex_pattern_map_object.collision_size.1 * 0.5);
+
+            if storage.player.position.0 - 0.5 < right_of_left
+                && storage.player.position.1 + 0.5 > bottom_of_top
+            {
+                storage.player.position = storage.player.previous_position;
+            }
+        }
+        biomes::MapObject::SimplexSmoothedPattern(i) => {
+            todo!();
+        }
+        biomes::MapObject::None => {}
+    }
+}
+
+fn collision_middle_bottom(storage: &mut Storage) {
+    let bottom_position = storage.player.position.1.round() - 1.0;
+
+    let map_object = storage.map_objects[full_index_from_full_position((
+        storage.player.position.0.round() as u32,
+        bottom_position as u32,
+    ))];
+
+    match map_object {
+        biomes::MapObject::RandomPattern(i) => {
+            let random_pattern_map_object = &biomes::RANDOM_PATTERN_MAP_OBJECTS[i as usize];
+
+            let top_of_bottom =
+                bottom_position + (random_pattern_map_object.collision_size.1 * 0.5);
+
+            if storage.player.position.1 - 0.5 < top_of_bottom {
+                storage.player.position.1 = top_of_bottom + 0.5;
+            }
+        }
+        biomes::MapObject::SimplexPattern(i) => {
+            let simplex_pattern_map_object = &biomes::SIMPLEX_PATTERN_MAP_OBJECTS[i as usize];
+
+            let top_of_bottom =
+                bottom_position + (simplex_pattern_map_object.collision_size.1 * 0.5);
+
+            if storage.player.position.1 - 0.5 < top_of_bottom {
+                storage.player.position.1 = top_of_bottom + 0.5;
+            }
+        }
+        biomes::MapObject::SimplexSmoothedPattern(i) => {
+            todo!();
+        }
+        biomes::MapObject::None => {}
+    }
+}
+
+fn collision_right_bottom(storage: &mut Storage) {
+    let right_position = storage.player.position.0.round() + 1.0;
+    let bottom_position = storage.player.position.1.round() - 1.0;
+
+    let map_object = storage.map_objects
+        [full_index_from_full_position((right_position as u32, bottom_position as u32))];
+
+    match map_object {
+        biomes::MapObject::RandomPattern(i) => {
+            let random_pattern_map_object = &biomes::RANDOM_PATTERN_MAP_OBJECTS[i as usize];
+
+            let left_of_right = right_position - (random_pattern_map_object.collision_size.0 * 0.5);
+            let top_of_bottom =
+                bottom_position + (random_pattern_map_object.collision_size.1 * 0.5);
+
+            if storage.player.position.0 + 0.5 > left_of_right
+                && storage.player.position.1 - 0.5 < top_of_bottom
+            {
+                storage.player.position = storage.player.previous_position;
+            }
+        }
+        biomes::MapObject::SimplexPattern(i) => {
+            let simplex_pattern_map_object = &biomes::SIMPLEX_PATTERN_MAP_OBJECTS[i as usize];
+
+            let left_of_right =
+                right_position - (simplex_pattern_map_object.collision_size.0 * 0.5);
+            let top_of_bottom =
+                bottom_position + (simplex_pattern_map_object.collision_size.1 * 0.5);
+
+            if storage.player.position.0 + 0.5 > left_of_right
+                && storage.player.position.1 - 0.5 < top_of_bottom
+            {
+                storage.player.position = storage.player.previous_position;
+            }
+        }
+        biomes::MapObject::SimplexSmoothedPattern(i) => {
+            todo!();
+        }
+        biomes::MapObject::None => {}
+    }
+}
+
+fn collision_left_bottom(storage: &mut Storage) {
+    let left_position = storage.player.position.0.round() - 1.0;
+    let bottom_position = storage.player.position.1.round() - 1.0;
+
+    let map_object = storage.map_objects
+        [full_index_from_full_position((left_position as u32, bottom_position as u32))];
+
+    match map_object {
+        biomes::MapObject::RandomPattern(i) => {
+            let random_pattern_map_object = &biomes::RANDOM_PATTERN_MAP_OBJECTS[i as usize];
+
+            let right_of_left = left_position + (random_pattern_map_object.collision_size.0 * 0.5);
+            let top_of_bottom =
+                bottom_position + (random_pattern_map_object.collision_size.1 * 0.5);
+
+            if storage.player.position.0 - 0.5 < right_of_left
+                && storage.player.position.1 - 0.5 < top_of_bottom
+            {
+                storage.player.position = storage.player.previous_position;
+            }
+        }
+        biomes::MapObject::SimplexPattern(i) => {
+            let simplex_pattern_map_object = &biomes::SIMPLEX_PATTERN_MAP_OBJECTS[i as usize];
+
+            let right_of_left = left_position + (simplex_pattern_map_object.collision_size.0 * 0.5);
+            let top_of_bottom =
+                bottom_position + (simplex_pattern_map_object.collision_size.1 * 0.5);
+
+            if storage.player.position.0 - 0.5 < right_of_left
+                && storage.player.position.1 - 0.5 < top_of_bottom
+            {
+                storage.player.position = storage.player.previous_position;
+            }
+        }
+        biomes::MapObject::SimplexSmoothedPattern(i) => {
+            todo!();
+        }
+        biomes::MapObject::None => {}
+    }
+}
+
+fn collision_right_middle(storage: &mut Storage) {
+    let right_position = storage.player.position.0.round() + 1.0;
+
+    let map_object = storage.map_objects[full_index_from_full_position((
+        right_position as u32,
+        storage.player.position.1.round() as u32,
+    ))];
+
+    match map_object {
+        biomes::MapObject::RandomPattern(i) => {
+            let random_pattern_map_object = &biomes::RANDOM_PATTERN_MAP_OBJECTS[i as usize];
+
+            let left_of_right = right_position - (random_pattern_map_object.collision_size.0 * 0.5);
+
+            if storage.player.position.0 + 0.5 > left_of_right {
+                storage.player.position.0 = left_of_right - 0.5;
+            }
+        }
+        biomes::MapObject::SimplexPattern(i) => {
+            let simplex_pattern_map_object = &biomes::SIMPLEX_PATTERN_MAP_OBJECTS[i as usize];
+
+            let left_of_right =
+                right_position - (simplex_pattern_map_object.collision_size.0 * 0.5);
+
+            if storage.player.position.0 + 0.5 > left_of_right {
+                storage.player.position.0 = left_of_right - 0.5;
+            }
+        }
+        biomes::MapObject::SimplexSmoothedPattern(i) => {
+            todo!();
+        }
+        biomes::MapObject::None => {}
+    }
+}
+
+fn collision_left_middle(storage: &mut Storage) {
+    let left_position = storage.player.position.0.round() - 1.0;
+
+    let map_object = storage.map_objects[full_index_from_full_position((
+        left_position as u32,
+        storage.player.position.1.round() as u32,
+    ))];
+
+    match map_object {
+        biomes::MapObject::RandomPattern(i) => {
+            let random_pattern_map_object = &biomes::RANDOM_PATTERN_MAP_OBJECTS[i as usize];
+
+            let right_of_left = left_position + (random_pattern_map_object.collision_size.0 * 0.5);
+
+            if storage.player.position.0 - 0.5 < right_of_left {
+                storage.player.position.0 = right_of_left + 0.5;
+            }
+        }
+        biomes::MapObject::SimplexPattern(i) => {
+            let simplex_pattern_map_object = &biomes::SIMPLEX_PATTERN_MAP_OBJECTS[i as usize];
+
+            let right_of_left = left_position + (simplex_pattern_map_object.collision_size.0 * 0.5);
+
+            if storage.player.position.0 - 0.5 < right_of_left {
+                storage.player.position.0 = right_of_left + 0.5;
+            }
+        }
+        biomes::MapObject::SimplexSmoothedPattern(i) => {
+            todo!();
+        }
+        biomes::MapObject::None => {}
+    }
+}
+
+struct Player {
+    position: (f32, f32),
+    previous_position: (f32, f32),
+    sprinting: bool,
+    collision_debug: bool,
+    size: (f32, f32),
+    strength: u8,
+}
+
+fn deal_with_collision(
+    storage: &mut Storage,
+    fallback_position: (f32, f32),
+    full_position: (u32, u32),
+) {
+    todo!();
+    let map_object = storage.map_objects[full_index_from_full_position(full_position)];
+
+    match map_object {
+        biomes::MapObject::RandomPattern(i) => {
+            todo!();
+        }
+        biomes::MapObject::SimplexPattern(i) => {
+            todo!();
+        }
+        biomes::MapObject::SimplexSmoothedPattern(i) => {
+            todo!();
+        }
+        biomes::MapObject::None => {}
+    }
 }
