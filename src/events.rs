@@ -17,7 +17,7 @@ use winit::event::VirtualKeyCode;
 use crate::biomes;
 use crate::vertex_data;
 
-const FULL_GRID_WIDTH: u32 = 256;
+const FULL_GRID_WIDTH: u32 = CHUNK_WIDTH as u32 * 100;
 const FULL_GRID_WIDTH_SQUARED: u32 = FULL_GRID_WIDTH * FULL_GRID_WIDTH; // 256**2
 
 const CHUNK_WIDTH: u16 = 128;
@@ -40,13 +40,14 @@ pub fn start(camera: &mut Camera, brightness: &mut f32) -> Storage {
 
     let storage = Storage {
         wasd_held: (false, false, false, false),
+        zoom_held: (false, false),
         main_seed: seed_range.sample(&mut rng),
         percent_range: Uniform::new(0u8, 100),
         biome_noise: (
             OpenSimplex::new(seed_range.sample(&mut rng)),
             OpenSimplex::new(seed_range.sample(&mut rng)),
         ),
-        map_objects: [biomes::MapObject::None; FULL_GRID_WIDTH_SQUARED as usize],
+        map_objects: vec![biomes::MapObject::None; FULL_GRID_WIDTH_SQUARED as usize],
         chunk_sender,
         chunk_receiver,
         player: Player {
@@ -54,7 +55,7 @@ pub fn start(camera: &mut Camera, brightness: &mut f32) -> Storage {
             previous_position: (5.0, 5.0),
             sprinting: false,
             collision_debug: false,
-            size: (1.0, 1.0),
+            size: (0.8, 0.8),
             strength: 1,
         },
     };
@@ -70,7 +71,7 @@ pub fn start(camera: &mut Camera, brightness: &mut f32) -> Storage {
 pub fn update(
     storage: &mut Storage,
     vertices: BufferWriteGuard<'_, [vertex_data::VertexData]>,
-    indices: BufferWriteGuard<'_, [u16]>,
+    indices: BufferWriteGuard<'_, [u32]>,
     index_count: &mut u32,
     scale: f32,
     delta_time: f32,
@@ -79,7 +80,13 @@ pub fn update(
     brightness: &mut f32,
 ) {
     //println!("delta time: {}", delta_time);
-    println!("average fps: {}", average_fps);
+    //println!("average fps: {}", average_fps);
+
+    let zoom_motion = match storage.zoom_held {
+        (true, false) => -1.0,
+        (false, true) => 1.0,
+        _ => 0.0,
+    };
 
     let motion = match storage.wasd_held {
         (true, false, false, false) => (0.0, -1.0),
@@ -99,6 +106,8 @@ pub fn update(
     storage.player.position.0 += motion.0 * delta_time * speed;
     storage.player.position.1 += motion.1 * delta_time * speed;
 
+    camera.scale += zoom_motion * delta_time * (speed / 100.0);
+
     if !storage.player.collision_debug {
         collision_middle_top(storage);
         collision_right_top(storage);
@@ -110,6 +119,8 @@ pub fn update(
 
         collision_right_middle(storage);
         collision_left_middle(storage);
+
+        //collision_middle_middle(storage); Doesn't work yet!
     }
 
     if storage.player.position.0 < 0.0 {
@@ -171,6 +182,8 @@ pub fn on_keyboard_input(storage: &mut Storage, input: KeyboardInput) {
                     storage.player.collision_debug = !storage.player.collision_debug;
                 }
             }
+            VirtualKeyCode::Up => storage.zoom_held.0 = is_pressed(input.state),
+            VirtualKeyCode::Down => storage.zoom_held.1 = is_pressed(input.state),
             _ => (),
         }
     }
@@ -186,10 +199,11 @@ fn is_pressed(state: ElementState) -> bool {
 pub struct Storage {
     // This is for the user's stuff. The event loop should not touch this.
     wasd_held: (bool, bool, bool, bool),
+    zoom_held: (bool, bool),
     main_seed: u32,
     percent_range: Uniform<u8>,
     biome_noise: (OpenSimplex, OpenSimplex),
-    map_objects: [biomes::MapObject; FULL_GRID_WIDTH_SQUARED as usize],
+    map_objects: Vec<biomes::MapObject>,
     chunk_sender: Sender<(
         [biomes::MapObject; CHUNK_WIDTH_SQUARED as usize],
         (u32, u32),
@@ -247,15 +261,21 @@ fn generate_position(
 ) -> biomes::MapObject {
     let position_as_float_array = [position.0 as f64, position.1 as f64];
 
-    let biome = &biomes::BIOMES[biomes::get_biome(
-        biome_noise.0.get(position_as_float_array),
-        biome_noise.1.get(position_as_float_array),
-    )];
+    let biome_position = [
+        position_as_float_array[0] * biomes::BIOME_SCALE.0,
+        position_as_float_array[1] * biomes::BIOME_SCALE.1,
+    ];
+    let biome = &biomes::BIOMES[biomes::get_biome((
+        (biome_noise.0.get(biome_position) + 1.0) * 0.5,
+        (biome_noise.1.get(biome_position) + 1.0) * 0.5,
+    ))];
 
     let mut map_object = biomes::MapObject::None;
     let mut highest_priority = 0u8;
 
-    for i in biome.random_pattern.starting_index..biome.random_pattern.length {
+    for i in biome.random_pattern.starting_index
+        ..biome.random_pattern.starting_index + biome.random_pattern.length
+    {
         let random_pattern_map_object = &biomes::RANDOM_PATTERN_MAP_OBJECTS[i as usize];
         if random_pattern_map_object.priority > highest_priority
             && percent_range.sample(&mut rng) < random_pattern_map_object.chance
@@ -265,7 +285,9 @@ fn generate_position(
         }
     }
 
-    for i in biome.simplex_pattern.starting_index..biome.simplex_pattern.length {
+    for i in biome.simplex_pattern.starting_index
+        ..biome.simplex_pattern.starting_index + biome.simplex_pattern.length
+    {
         let simplex_pattern_map_object = &biomes::SIMPLEX_PATTERN_MAP_OBJECTS[i as usize];
         let simplex_noise = OpenSimplex::new(main_seed + simplex_pattern_map_object.seed as u32)
             .get([
@@ -282,7 +304,9 @@ fn generate_position(
         }
     }
 
-    for i in biome.simplex_smoothed_pattern.starting_index..biome.simplex_smoothed_pattern.length {
+    for i in biome.simplex_smoothed_pattern.starting_index
+        ..biome.simplex_smoothed_pattern.starting_index + biome.simplex_smoothed_pattern.length
+    {
         let simplex_smoothed_pattern_map_object =
             &biomes::SIMPLEX_SMOOTHED_PATTERN_MAP_OBJECTS[i as usize];
         let simplex_noise =
@@ -299,7 +323,6 @@ fn generate_position(
             highest_priority = simplex_smoothed_pattern_map_object.priority
         }
     }
-
     map_object
 }
 
@@ -335,7 +358,7 @@ pub struct Camera {
 fn render_map(
     storage: &mut Storage,
     mut vertices: BufferWriteGuard<'_, [vertex_data::VertexData]>,
-    mut indices: BufferWriteGuard<'_, [u16]>,
+    mut indices: BufferWriteGuard<'_, [u32]>,
     index_count: &mut u32,
     scale: f32,
     camera: &mut Camera,
@@ -345,11 +368,11 @@ fn render_map(
 
     let mut simple_rendering_count = 0u32;
 
-    for x in (camera.position.0 - (screen_width_as_world_units * 0.5)).floor() as i32 - 1
-        ..(camera.position.0 + (screen_width_as_world_units * 0.5)).ceil() as i32 + 1
+    for x in (camera.position.0 - (screen_width_as_world_units * 0.5)).floor() as i32 + 1
+        ..(camera.position.0 + (screen_width_as_world_units * 0.5)).ceil() as i32 - 1
     {
-        for y in (camera.position.1 - (screen_height_as_world_units * 0.5)).floor() as i32 - 1
-            ..(camera.position.1 + (screen_height_as_world_units * 0.5)).ceil() as i32 + 1
+        for y in (camera.position.1 - (screen_height_as_world_units * 0.5)).floor() as i32 + 1
+            ..(camera.position.1 + (screen_height_as_world_units * 0.5)).ceil() as i32 - 1
         {
             if x < 0 || y < 0 {
                 continue;
@@ -358,6 +381,7 @@ fn render_map(
             let full_index = full_index_from_full_position((x as u32, y as u32));
 
             if full_index >= FULL_GRID_WIDTH_SQUARED as usize {
+                println!("What the hell?");
                 continue;
             }
 
@@ -422,13 +446,13 @@ fn render_map(
                         ],
                     };
 
-                    indices[index_start] = vertex_start as u16;
-                    indices[index_start + 1] = vertex_start as u16 + 1;
-                    indices[index_start + 2] = vertex_start as u16 + 2;
+                    indices[index_start] = vertex_start as u32;
+                    indices[index_start + 1] = vertex_start as u32 + 1;
+                    indices[index_start + 2] = vertex_start as u32 + 2;
 
-                    indices[index_start + 3] = vertex_start as u16 + 1;
-                    indices[index_start + 4] = vertex_start as u16 + 3;
-                    indices[index_start + 5] = vertex_start as u16 + 2;
+                    indices[index_start + 3] = vertex_start as u32 + 1;
+                    indices[index_start + 4] = vertex_start as u32 + 3;
+                    indices[index_start + 5] = vertex_start as u32 + 2;
 
                     simple_rendering_count += 1;
                 }
@@ -487,13 +511,13 @@ fn render_map(
                         ],
                     };
 
-                    indices[index_start] = vertex_start as u16;
-                    indices[index_start + 1] = vertex_start as u16 + 1;
-                    indices[index_start + 2] = vertex_start as u16 + 2;
+                    indices[index_start] = vertex_start as u32;
+                    indices[index_start + 1] = vertex_start as u32 + 1;
+                    indices[index_start + 2] = vertex_start as u32 + 2;
 
-                    indices[index_start + 3] = vertex_start as u16 + 1;
-                    indices[index_start + 4] = vertex_start as u16 + 3;
-                    indices[index_start + 5] = vertex_start as u16 + 2;
+                    indices[index_start + 3] = vertex_start as u32 + 1;
+                    indices[index_start + 4] = vertex_start as u32 + 3;
+                    indices[index_start + 5] = vertex_start as u32 + 2;
 
                     simple_rendering_count += 1;
                 }
@@ -511,8 +535,8 @@ fn render_map(
     vertices[vertex_start] = vertex_data::VertexData {
         // top right
         position: [
-            storage.player.position.0 + 0.5,
-            storage.player.position.1 + 0.5,
+            storage.player.position.0 + storage.player.size.0 * 0.5,
+            storage.player.position.1 + storage.player.size.1 * 0.5,
         ],
         uv: [biomes::SPRITE_SIZE.0, biomes::SPRITE_SIZE.1],
     };
@@ -520,8 +544,8 @@ fn render_map(
     vertices[vertex_start + 1] = vertex_data::VertexData {
         // bottom right
         position: [
-            storage.player.position.0 + 0.5,
-            storage.player.position.1 + -0.5,
+            storage.player.position.0 + storage.player.size.0 * 0.5,
+            storage.player.position.1 - storage.player.size.1 * 0.5,
         ],
         uv: [biomes::SPRITE_SIZE.0, 0.0],
     };
@@ -529,8 +553,8 @@ fn render_map(
     vertices[vertex_start + 2] = vertex_data::VertexData {
         // top left
         position: [
-            storage.player.position.0 + -0.5,
-            storage.player.position.1 + 0.5,
+            storage.player.position.0 - storage.player.size.0 * 0.5,
+            storage.player.position.1 + storage.player.size.1 * 0.5,
         ],
         uv: [0.0, biomes::SPRITE_SIZE.1],
     };
@@ -538,30 +562,34 @@ fn render_map(
     vertices[vertex_start + 3] = vertex_data::VertexData {
         // bottom left
         position: [
-            storage.player.position.0 + -0.5,
-            storage.player.position.1 + -0.5,
+            storage.player.position.0 - storage.player.size.0 * 0.5,
+            storage.player.position.1 - storage.player.size.1 * 0.5,
         ],
         uv: [0.0, 0.0],
     };
 
-    indices[index_start] = vertex_start as u16;
-    indices[index_start + 1] = vertex_start as u16 + 1;
-    indices[index_start + 2] = vertex_start as u16 + 2;
+    indices[index_start] = vertex_start as u32;
+    indices[index_start + 1] = vertex_start as u32 + 1;
+    indices[index_start + 2] = vertex_start as u32 + 2;
 
-    indices[index_start + 3] = vertex_start as u16 + 1;
-    indices[index_start + 4] = vertex_start as u16 + 3;
-    indices[index_start + 5] = vertex_start as u16 + 2;
+    indices[index_start + 3] = vertex_start as u32 + 1;
+    indices[index_start + 4] = vertex_start as u32 + 3;
+    indices[index_start + 5] = vertex_start as u32 + 2;
 
     *index_count = simple_rendering_count * 6 + 6;
+
+    println!("{}",index_count);
 }
 
 fn collision_middle_top(storage: &mut Storage) {
     let top_position = storage.player.position.1.round() + 1.0;
 
-    let map_object = storage.map_objects[full_index_from_full_position((
+    let full_position = (
         storage.player.position.0.round() as u32,
         top_position as u32,
-    ))];
+    );
+
+    let map_object = storage.map_objects[full_index_from_full_position(full_position)];
 
     match map_object {
         biomes::MapObject::RandomPattern(i) => {
@@ -569,8 +597,15 @@ fn collision_middle_top(storage: &mut Storage) {
 
             let bottom_of_top = top_position - (random_pattern_map_object.collision_size.1 * 0.5);
 
-            if storage.player.position.1 + 0.5 > bottom_of_top {
-                storage.player.position.1 = bottom_of_top - 0.5;
+            if storage.player.position.1 + 0.5 * storage.player.size.1 > bottom_of_top {
+                deal_with_collision(
+                    storage,
+                    (
+                        storage.player.position.0,
+                        bottom_of_top - 0.5 * storage.player.size.1,
+                    ),
+                    full_position,
+                )
             }
         }
         biomes::MapObject::SimplexPattern(i) => {
@@ -578,8 +613,15 @@ fn collision_middle_top(storage: &mut Storage) {
 
             let bottom_of_top = top_position - (simplex_pattern_map_object.collision_size.1 * 0.5);
 
-            if storage.player.position.1 + 0.5 > bottom_of_top {
-                storage.player.position.1 = bottom_of_top - 0.5;
+            if storage.player.position.1 + 0.5 * storage.player.size.1 > bottom_of_top {
+                deal_with_collision(
+                    storage,
+                    (
+                        storage.player.position.0,
+                        bottom_of_top - 0.5 * storage.player.size.1,
+                    ),
+                    full_position,
+                )
             }
         }
         biomes::MapObject::SimplexSmoothedPattern(i) => {
@@ -593,8 +635,9 @@ fn collision_right_top(storage: &mut Storage) {
     let right_position = storage.player.position.0.round() + 1.0;
     let top_position = storage.player.position.1.round() + 1.0;
 
-    let map_object = storage.map_objects
-        [full_index_from_full_position((right_position as u32, top_position as u32))];
+    let full_position = (right_position as u32, top_position as u32);
+
+    let map_object = storage.map_objects[full_index_from_full_position(full_position)];
 
     match map_object {
         biomes::MapObject::RandomPattern(i) => {
@@ -603,10 +646,10 @@ fn collision_right_top(storage: &mut Storage) {
             let left_of_right = right_position - (random_pattern_map_object.collision_size.0 * 0.5);
             let bottom_of_top = top_position - (random_pattern_map_object.collision_size.1 * 0.5);
 
-            if storage.player.position.0 + 0.5 > left_of_right
-                && storage.player.position.1 + 0.5 > bottom_of_top
+            if storage.player.position.0 + 0.5 * storage.player.size.0 > left_of_right
+                && storage.player.position.1 + 0.5 * storage.player.size.1 > bottom_of_top
             {
-                storage.player.position = storage.player.previous_position;
+                deal_with_collision(storage, storage.player.previous_position, full_position)
             }
         }
         biomes::MapObject::SimplexPattern(i) => {
@@ -616,10 +659,10 @@ fn collision_right_top(storage: &mut Storage) {
                 right_position - (simplex_pattern_map_object.collision_size.0 * 0.5);
             let bottom_of_top = top_position - (simplex_pattern_map_object.collision_size.1 * 0.5);
 
-            if storage.player.position.0 + 0.5 > left_of_right
-                && storage.player.position.1 + 0.5 > bottom_of_top
+            if storage.player.position.0 + 0.5 * storage.player.size.0 > left_of_right
+                && storage.player.position.1 + 0.5 * storage.player.size.1 > bottom_of_top
             {
-                storage.player.position = storage.player.previous_position;
+                deal_with_collision(storage, storage.player.previous_position, full_position)
             }
         }
         biomes::MapObject::SimplexSmoothedPattern(i) => {
@@ -633,8 +676,9 @@ fn collision_left_top(storage: &mut Storage) {
     let left_position = storage.player.position.0.round() - 1.0;
     let top_position = storage.player.position.1.round() + 1.0;
 
-    let map_object = storage.map_objects
-        [full_index_from_full_position((left_position as u32, top_position as u32))];
+    let full_position = (left_position as u32, top_position as u32);
+
+    let map_object = storage.map_objects[full_index_from_full_position(full_position)];
 
     match map_object {
         biomes::MapObject::RandomPattern(i) => {
@@ -643,10 +687,10 @@ fn collision_left_top(storage: &mut Storage) {
             let right_of_left = left_position + (random_pattern_map_object.collision_size.0 * 0.5);
             let bottom_of_top = top_position - (random_pattern_map_object.collision_size.1 * 0.5);
 
-            if storage.player.position.0 - 0.5 < right_of_left
-                && storage.player.position.1 + 0.5 > bottom_of_top
+            if storage.player.position.0 - 0.5 * storage.player.size.0 < right_of_left
+                && storage.player.position.1 + 0.5 * storage.player.size.1 > bottom_of_top
             {
-                storage.player.position = storage.player.previous_position;
+                deal_with_collision(storage, storage.player.previous_position, full_position)
             }
         }
         biomes::MapObject::SimplexPattern(i) => {
@@ -655,10 +699,10 @@ fn collision_left_top(storage: &mut Storage) {
             let right_of_left = left_position + (simplex_pattern_map_object.collision_size.0 * 0.5);
             let bottom_of_top = top_position - (simplex_pattern_map_object.collision_size.1 * 0.5);
 
-            if storage.player.position.0 - 0.5 < right_of_left
-                && storage.player.position.1 + 0.5 > bottom_of_top
+            if storage.player.position.0 - 0.5 * storage.player.size.0 < right_of_left
+                && storage.player.position.1 + 0.5 * storage.player.size.1 > bottom_of_top
             {
-                storage.player.position = storage.player.previous_position;
+                deal_with_collision(storage, storage.player.previous_position, full_position)
             }
         }
         biomes::MapObject::SimplexSmoothedPattern(i) => {
@@ -671,10 +715,12 @@ fn collision_left_top(storage: &mut Storage) {
 fn collision_middle_bottom(storage: &mut Storage) {
     let bottom_position = storage.player.position.1.round() - 1.0;
 
-    let map_object = storage.map_objects[full_index_from_full_position((
+    let full_position = (
         storage.player.position.0.round() as u32,
         bottom_position as u32,
-    ))];
+    );
+
+    let map_object = storage.map_objects[full_index_from_full_position(full_position)];
 
     match map_object {
         biomes::MapObject::RandomPattern(i) => {
@@ -683,8 +729,15 @@ fn collision_middle_bottom(storage: &mut Storage) {
             let top_of_bottom =
                 bottom_position + (random_pattern_map_object.collision_size.1 * 0.5);
 
-            if storage.player.position.1 - 0.5 < top_of_bottom {
-                storage.player.position.1 = top_of_bottom + 0.5;
+            if storage.player.position.1 - 0.5 * storage.player.size.1 < top_of_bottom {
+                deal_with_collision(
+                    storage,
+                    (
+                        storage.player.position.0,
+                        top_of_bottom + 0.5 * storage.player.size.1,
+                    ),
+                    full_position,
+                )
             }
         }
         biomes::MapObject::SimplexPattern(i) => {
@@ -693,8 +746,15 @@ fn collision_middle_bottom(storage: &mut Storage) {
             let top_of_bottom =
                 bottom_position + (simplex_pattern_map_object.collision_size.1 * 0.5);
 
-            if storage.player.position.1 - 0.5 < top_of_bottom {
-                storage.player.position.1 = top_of_bottom + 0.5;
+            if storage.player.position.1 - 0.5 * storage.player.size.1 < top_of_bottom {
+                deal_with_collision(
+                    storage,
+                    (
+                        storage.player.position.0,
+                        top_of_bottom + 0.5 * storage.player.size.1,
+                    ),
+                    full_position,
+                )
             }
         }
         biomes::MapObject::SimplexSmoothedPattern(i) => {
@@ -708,8 +768,9 @@ fn collision_right_bottom(storage: &mut Storage) {
     let right_position = storage.player.position.0.round() + 1.0;
     let bottom_position = storage.player.position.1.round() - 1.0;
 
-    let map_object = storage.map_objects
-        [full_index_from_full_position((right_position as u32, bottom_position as u32))];
+    let full_position = (right_position as u32, bottom_position as u32);
+
+    let map_object = storage.map_objects[full_index_from_full_position(full_position)];
 
     match map_object {
         biomes::MapObject::RandomPattern(i) => {
@@ -719,10 +780,10 @@ fn collision_right_bottom(storage: &mut Storage) {
             let top_of_bottom =
                 bottom_position + (random_pattern_map_object.collision_size.1 * 0.5);
 
-            if storage.player.position.0 + 0.5 > left_of_right
-                && storage.player.position.1 - 0.5 < top_of_bottom
+            if storage.player.position.0 + 0.5 * storage.player.size.0 > left_of_right
+                && storage.player.position.1 - 0.5 * storage.player.size.1 < top_of_bottom
             {
-                storage.player.position = storage.player.previous_position;
+                deal_with_collision(storage, storage.player.previous_position, full_position)
             }
         }
         biomes::MapObject::SimplexPattern(i) => {
@@ -733,10 +794,10 @@ fn collision_right_bottom(storage: &mut Storage) {
             let top_of_bottom =
                 bottom_position + (simplex_pattern_map_object.collision_size.1 * 0.5);
 
-            if storage.player.position.0 + 0.5 > left_of_right
-                && storage.player.position.1 - 0.5 < top_of_bottom
+            if storage.player.position.0 + 0.5 * storage.player.size.0 > left_of_right
+                && storage.player.position.1 - 0.5 * storage.player.size.1 < top_of_bottom
             {
-                storage.player.position = storage.player.previous_position;
+                deal_with_collision(storage, storage.player.previous_position, full_position)
             }
         }
         biomes::MapObject::SimplexSmoothedPattern(i) => {
@@ -750,8 +811,9 @@ fn collision_left_bottom(storage: &mut Storage) {
     let left_position = storage.player.position.0.round() - 1.0;
     let bottom_position = storage.player.position.1.round() - 1.0;
 
-    let map_object = storage.map_objects
-        [full_index_from_full_position((left_position as u32, bottom_position as u32))];
+    let full_position = (left_position as u32, bottom_position as u32);
+
+    let map_object = storage.map_objects[full_index_from_full_position(full_position)];
 
     match map_object {
         biomes::MapObject::RandomPattern(i) => {
@@ -761,10 +823,10 @@ fn collision_left_bottom(storage: &mut Storage) {
             let top_of_bottom =
                 bottom_position + (random_pattern_map_object.collision_size.1 * 0.5);
 
-            if storage.player.position.0 - 0.5 < right_of_left
-                && storage.player.position.1 - 0.5 < top_of_bottom
+            if storage.player.position.0 - 0.5 * storage.player.size.0 < right_of_left
+                && storage.player.position.1 - 0.5 * storage.player.size.1 < top_of_bottom
             {
-                storage.player.position = storage.player.previous_position;
+                deal_with_collision(storage, storage.player.previous_position, full_position)
             }
         }
         biomes::MapObject::SimplexPattern(i) => {
@@ -774,10 +836,10 @@ fn collision_left_bottom(storage: &mut Storage) {
             let top_of_bottom =
                 bottom_position + (simplex_pattern_map_object.collision_size.1 * 0.5);
 
-            if storage.player.position.0 - 0.5 < right_of_left
-                && storage.player.position.1 - 0.5 < top_of_bottom
+            if storage.player.position.0 - 0.5 * storage.player.size.0 < right_of_left
+                && storage.player.position.1 - 0.5 * storage.player.size.1 < top_of_bottom
             {
-                storage.player.position = storage.player.previous_position;
+                deal_with_collision(storage, storage.player.previous_position, full_position)
             }
         }
         biomes::MapObject::SimplexSmoothedPattern(i) => {
@@ -790,10 +852,12 @@ fn collision_left_bottom(storage: &mut Storage) {
 fn collision_right_middle(storage: &mut Storage) {
     let right_position = storage.player.position.0.round() + 1.0;
 
-    let map_object = storage.map_objects[full_index_from_full_position((
+    let full_position = (
         right_position as u32,
         storage.player.position.1.round() as u32,
-    ))];
+    );
+
+    let map_object = storage.map_objects[full_index_from_full_position(full_position)];
 
     match map_object {
         biomes::MapObject::RandomPattern(i) => {
@@ -801,8 +865,15 @@ fn collision_right_middle(storage: &mut Storage) {
 
             let left_of_right = right_position - (random_pattern_map_object.collision_size.0 * 0.5);
 
-            if storage.player.position.0 + 0.5 > left_of_right {
-                storage.player.position.0 = left_of_right - 0.5;
+            if storage.player.position.0 + 0.5 * storage.player.size.0 > left_of_right {
+                deal_with_collision(
+                    storage,
+                    (
+                        left_of_right - 0.5 * storage.player.size.0,
+                        storage.player.position.1,
+                    ),
+                    full_position,
+                )
             }
         }
         biomes::MapObject::SimplexPattern(i) => {
@@ -811,8 +882,15 @@ fn collision_right_middle(storage: &mut Storage) {
             let left_of_right =
                 right_position - (simplex_pattern_map_object.collision_size.0 * 0.5);
 
-            if storage.player.position.0 + 0.5 > left_of_right {
-                storage.player.position.0 = left_of_right - 0.5;
+            if storage.player.position.0 + 0.5 * storage.player.size.0 > left_of_right {
+                deal_with_collision(
+                    storage,
+                    (
+                        left_of_right - 0.5 * storage.player.size.0,
+                        storage.player.position.1,
+                    ),
+                    full_position,
+                )
             }
         }
         biomes::MapObject::SimplexSmoothedPattern(i) => {
@@ -825,10 +903,12 @@ fn collision_right_middle(storage: &mut Storage) {
 fn collision_left_middle(storage: &mut Storage) {
     let left_position = storage.player.position.0.round() - 1.0;
 
-    let map_object = storage.map_objects[full_index_from_full_position((
+    let full_position = (
         left_position as u32,
         storage.player.position.1.round() as u32,
-    ))];
+    );
+
+    let map_object = storage.map_objects[full_index_from_full_position(full_position)];
 
     match map_object {
         biomes::MapObject::RandomPattern(i) => {
@@ -836,8 +916,15 @@ fn collision_left_middle(storage: &mut Storage) {
 
             let right_of_left = left_position + (random_pattern_map_object.collision_size.0 * 0.5);
 
-            if storage.player.position.0 - 0.5 < right_of_left {
-                storage.player.position.0 = right_of_left + 0.5;
+            if storage.player.position.0 - 0.5 * storage.player.size.0 < right_of_left {
+                deal_with_collision(
+                    storage,
+                    (
+                        right_of_left + 0.5 * storage.player.size.0,
+                        storage.player.position.1,
+                    ),
+                    full_position,
+                )
             }
         }
         biomes::MapObject::SimplexPattern(i) => {
@@ -845,8 +932,15 @@ fn collision_left_middle(storage: &mut Storage) {
 
             let right_of_left = left_position + (simplex_pattern_map_object.collision_size.0 * 0.5);
 
-            if storage.player.position.0 - 0.5 < right_of_left {
-                storage.player.position.0 = right_of_left + 0.5;
+            if storage.player.position.0 - 0.5 * storage.player.size.0 < right_of_left {
+                deal_with_collision(
+                    storage,
+                    (
+                        right_of_left + 0.5 * storage.player.size.0,
+                        storage.player.position.1,
+                    ),
+                    full_position,
+                )
             }
         }
         biomes::MapObject::SimplexSmoothedPattern(i) => {
@@ -856,6 +950,26 @@ fn collision_left_middle(storage: &mut Storage) {
     }
 }
 
+fn collision_middle_middle(storage: &mut Storage) {
+    let full_position = (
+        storage.player.position.0 as u32,
+        storage.player.position.1 as u32,
+    );
+    let map_object = storage.map_objects[full_index_from_full_position(full_position)];
+
+    match map_object {
+        biomes::MapObject::RandomPattern(i) => {
+            todo!();
+        }
+        biomes::MapObject::SimplexPattern(i) => {
+            todo!();
+        }
+        biomes::MapObject::SimplexSmoothedPattern(i) => {
+            todo!();
+        }
+        biomes::MapObject::None => {}
+    }
+}
 struct Player {
     position: (f32, f32),
     previous_position: (f32, f32),
@@ -870,15 +984,54 @@ fn deal_with_collision(
     fallback_position: (f32, f32),
     full_position: (u32, u32),
 ) {
-    todo!();
-    let map_object = storage.map_objects[full_index_from_full_position(full_position)];
+    let map_object = &mut storage.map_objects[full_index_from_full_position(full_position)];
 
     match map_object {
         biomes::MapObject::RandomPattern(i) => {
-            todo!();
+            let random_pattern_map_object = &biomes::RANDOM_PATTERN_MAP_OBJECTS[*i as usize];
+
+            match random_pattern_map_object.behaviour {
+                biomes::CollisionBehaviour::None => {
+                    storage.player.position = fallback_position; // Should none have collision or not?
+                }
+                biomes::CollisionBehaviour::Consume(strength) => {
+                    if storage.player.strength > strength {
+                        *map_object = biomes::MapObject::None;
+                    } else {
+                        storage.player.position = fallback_position;
+                    }
+                }
+                biomes::CollisionBehaviour::Replace(strength, replacement_map_object) => {
+                    if storage.player.strength > strength {
+                        *map_object = replacement_map_object;
+                    } else {
+                        storage.player.position = fallback_position;
+                    }
+                }
+            }
         }
         biomes::MapObject::SimplexPattern(i) => {
-            todo!();
+            let simplex_pattern_map_object = &biomes::SIMPLEX_PATTERN_MAP_OBJECTS[*i as usize];
+
+            match simplex_pattern_map_object.behaviour {
+                biomes::CollisionBehaviour::None => {
+                    storage.player.position = fallback_position;
+                }
+                biomes::CollisionBehaviour::Consume(strength) => {
+                    if storage.player.strength > strength {
+                        *map_object = biomes::MapObject::None;
+                    } else {
+                        storage.player.position = fallback_position;
+                    }
+                }
+                biomes::CollisionBehaviour::Replace(strength, replacement_map_object) => {
+                    if storage.player.strength > strength {
+                        *map_object = replacement_map_object;
+                    } else {
+                        storage.player.position = fallback_position;
+                    }
+                }
+            }
         }
         biomes::MapObject::SimplexSmoothedPattern(i) => {
             todo!();

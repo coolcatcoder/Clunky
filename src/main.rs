@@ -179,7 +179,7 @@ fn main() {
                 position: [0.0, 0.0],
                 uv: [0.0, 0.0],
             };
-            events::CHUNK_WIDTH_SQUARED as usize * 4
+            events::CHUNK_WIDTH_SQUARED as usize * 4 * 5
         ],
     )
     .unwrap();
@@ -195,7 +195,7 @@ fn main() {
             ..Default::default()
         },
         //*events::STARTING_INDICES,
-        vec![0; events::CHUNK_WIDTH_SQUARED as usize * 6],
+        vec![0; events::CHUNK_WIDTH_SQUARED as usize * 6 * 5],
     )
     .unwrap();
 
