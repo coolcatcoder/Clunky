@@ -52,6 +52,8 @@ use vulkano::sampler::SamplerCreateInfo;
 
 use vulkano::command_buffer::PrimaryCommandBufferAbstract;
 
+use vulkano::buffer::Subbuffer;
+
 mod vertex_data;
 
 mod events;
@@ -59,18 +61,7 @@ mod events;
 mod biomes;
 
 fn main() {
-    // start initialization
-    let library = VulkanLibrary::new().unwrap();
-    let required_extensions = vulkano_win::required_extensions(&library);
-    let instance = Instance::new(
-        library,
-        InstanceCreateInfo {
-            enabled_extensions: required_extensions,
-            enumerate_portability: true,
-            ..Default::default()
-        },
-    )
-    .unwrap();
+    let instance = get_instance();
 
     let event_loop = EventLoop::new();
     let surface = WindowBuilder::new()
@@ -163,41 +154,9 @@ fn main() {
     // start creating buffers
     let memory_allocator = Arc::new(StandardMemoryAllocator::new_default(device.clone()));
 
-    let vertex_buffer = Buffer::from_iter(
-        &memory_allocator,
-        BufferCreateInfo {
-            usage: BufferUsage::VERTEX_BUFFER,
-            ..Default::default()
-        },
-        AllocationCreateInfo {
-            usage: MemoryUsage::Upload,
-            ..Default::default()
-        },
-        //*events::STARTING_VERTICES,
-        vec![
-            vertex_data::VertexData {
-                position: [0.0, 0.0],
-                uv: [0.0, 0.0],
-            };
-            events::CHUNK_WIDTH_SQUARED as usize * 4 * 5
-        ],
-    )
-    .unwrap();
+    let (vertex_buffers_map, index_buffers_map) = create_buffers_map(&memory_allocator);
 
-    let index_buffer = Buffer::from_iter(
-        &memory_allocator,
-        BufferCreateInfo {
-            usage: BufferUsage::INDEX_BUFFER,
-            ..Default::default()
-        },
-        AllocationCreateInfo {
-            usage: MemoryUsage::Upload,
-            ..Default::default()
-        },
-        //*events::STARTING_INDICES,
-        vec![0; events::CHUNK_WIDTH_SQUARED as usize * 6 * 5],
-    )
-    .unwrap();
+    let (vertex_buffers_text, index_buffers_text) = create_buffers_text(&memory_allocator);
 
     let uniform_buffer_main = SubbufferAllocator::new(
         memory_allocator.clone(),
@@ -220,7 +179,7 @@ fn main() {
     )
     .unwrap();
 
-    let texture = {
+    let sprites_map = {
         let png_bytes = include_bytes!("sprite_sheet.png").to_vec();
         let cursor = Cursor::new(png_bytes);
         let decoder = png::Decoder::new(cursor);
@@ -240,9 +199,34 @@ fn main() {
             image_data,
             dimensions,
             MipmapsCount::One,
-            //Format::R8G8B8A8_SRGB,
             Format::R8G8B8A8_SRGB,
-            //Format::R32G32B32A32_UINT,
+            &mut uploads,
+        )
+        .unwrap();
+        ImageView::new_default(image).unwrap()
+    };
+
+    let sprites_text = {
+        let png_bytes = include_bytes!("Text.png").to_vec();
+        let cursor = Cursor::new(png_bytes);
+        let decoder = png::Decoder::new(cursor);
+        let mut reader = decoder.read_info().unwrap();
+        let info = reader.info();
+        let dimensions = ImageDimensions::Dim2d {
+            width: info.width,
+            height: info.height,
+            array_layers: 1,
+        };
+        let mut image_data = Vec::new();
+        image_data.resize((info.width * info.height * 4) as usize, 0);
+        reader.next_frame(&mut image_data).unwrap();
+
+        let image = ImmutableImage::from_iter(
+            &memory_allocator,
+            image_data,
+            dimensions,
+            MipmapsCount::One,
+            Format::R8G8B8A8_SRGB,
             &mut uploads,
         )
         .unwrap();
@@ -261,22 +245,42 @@ fn main() {
     .unwrap();
 
     // start creating shaders
-    mod vertex_shader {
+    //let (vertex_shader_map, fragment_shader_map, vertex_shader_text, fragment_shader_text) = create_shaders(device);
+
+    mod vertex_shader_map {
         vulkano_shaders::shader! {
             ty: "vertex",
-            path: "src/vertex_shader.glsl",
+            path: "src/map_shaders/vertex_shader.glsl",
         }
     }
 
-    mod fragment_shader {
+    mod fragment_shader_map {
         vulkano_shaders::shader! {
             ty: "fragment",
-            path: "src/fragment_shader.glsl",
+            path: "src/map_shaders/fragment_shader.glsl",
         }
     }
 
-    let vertex_shader = vertex_shader::load(device.clone()).unwrap();
-    let fragment_shader = fragment_shader::load(device.clone()).unwrap();
+    let vertex_shader_map = vertex_shader_map::load(device.clone()).unwrap();
+    let fragment_shader_map = fragment_shader_map::load(device.clone()).unwrap();
+
+    mod vertex_shader_text {
+        vulkano_shaders::shader! {
+            ty: "vertex",
+            path: "src/text_shaders/vertex_shader.glsl",
+        }
+    }
+
+    mod fragment_shader_text {
+        vulkano_shaders::shader! {
+            ty: "fragment",
+            path: "src/text_shaders/fragment_shader.glsl",
+        }
+    }
+
+    let vertex_shader_text = vertex_shader_text::load(device.clone()).unwrap();
+    let fragment_shader_text = fragment_shader_text::load(device.clone()).unwrap();
+
     // end of creating shaders
 
     // start creating render pass
@@ -298,10 +302,12 @@ fn main() {
     .unwrap();
     // end of creating render pass
 
-    let (mut pipeline, mut framebuffers) = window_size_dependent_setup(
+    let (mut pipeline_map, mut pipeline_text, mut framebuffers) = window_size_dependent_setup(
         &memory_allocator,
-        &vertex_shader,
-        &fragment_shader,
+        &vertex_shader_map,
+        &fragment_shader_map,
+        &vertex_shader_text,
+        &fragment_shader_text,
         &images,
         render_pass.clone(),
     );
@@ -320,11 +326,28 @@ fn main() {
             .boxed(),
     );
 
-    let layout_images = pipeline.layout().set_layouts().get(1).unwrap();
-    let set_images = PersistentDescriptorSet::new(
+    let layout_map = pipeline_map.layout().set_layouts().get(1).unwrap();
+    let layout_text = pipeline_text.layout().set_layouts().get(1).unwrap();
+
+    let set_sprites_map = PersistentDescriptorSet::new(
         &descriptor_set_allocator,
-        layout_images.clone(),
-        [WriteDescriptorSet::image_view_sampler(1, texture, sampler)],
+        layout_map.clone(),
+        [WriteDescriptorSet::image_view_sampler(
+            1,
+            sprites_map,
+            sampler.clone(),
+        )],
+    )
+    .unwrap();
+
+    let set_sprites_text = PersistentDescriptorSet::new(
+        &descriptor_set_allocator,
+        layout_text.clone(),
+        [WriteDescriptorSet::image_view_sampler(
+            1,
+            sprites_text,
+            sampler,
+        )],
     )
     .unwrap();
 
@@ -334,18 +357,43 @@ fn main() {
     let mut delta_time = 0.0;
     let mut time = Instant::now();
 
-    let mut skip_update = false; // Sometimes when the window is being resized or moved, you can't access the buffers and as such must skip an update.
+    let mut vertex_counts_map = [0u32, 0u32];
+    let mut index_counts_map = [0u32, 0u32];
 
-    let mut index_count = events::STARTING_INDEX_COUNT;
+    let mut vertex_counts_text = [0u32, 0u32];
+    let mut index_counts_text = [0u32, 0u32];
 
-    let mut camera = events::Camera {
-        scale: 1.0,
-        position: (0.0, 0.0),
+    let mut render_storage = events::RenderStorage {
+        vertices_map: vec![
+            vertex_data::VertexData {
+                position: [0.0, 0.0],
+                uv: [0.0, 0.0],
+            };
+            vertex_buffers_map[0].len() as usize
+        ],
+        vertex_count_map: 0,
+        indices_map: vec![0u32; index_buffers_map[0].len() as usize],
+        index_count_map: 0,
+        vertices_text: vec![
+            vertex_data::VertexData {
+                position: [0.0, 0.0],
+                uv: [0.0, 0.0],
+            };
+            vertex_buffers_text[0].len() as usize
+        ],
+        vertex_count_text: 0,
+        indices_text: vec![0u32; index_buffers_text[0].len() as usize],
+        index_count_text: 0,
+        aspect_ratio: 0.0,
+        camera: events::Camera {
+            scale: 1.0,
+            position: (0.0, 0.0),
+        },
+        brightness: 0.0,
+        frame_count: 0,
     };
 
-    let mut brightness = 1.0;
-
-    let mut storage = events::start(&mut camera, &mut brightness);
+    let mut user_storage = events::start(&mut render_storage);
 
     // start event loop
     event_loop.run(move |event, _, control_flow| {
@@ -368,7 +416,7 @@ fn main() {
                 event: WindowEvent::KeyboardInput { input, .. },
                 ..
             } => {
-                events::on_keyboard_input(&mut storage, input);
+                events::on_keyboard_input(&mut user_storage, input);
             }
 
             Event::RedrawEventsCleared => {
@@ -383,37 +431,37 @@ fn main() {
 
                 previous_frame_end.as_mut().unwrap().cleanup_finished(); // clean up memory
 
-                let vertex_writer = vertex_buffer.write();
+                render_storage.aspect_ratio =
+                    swapchain.image_extent()[1] as f32 / swapchain.image_extent()[0] as f32;
 
-                skip_update = match vertex_writer {
-                    Ok(_) => skip_update,
-                    Err(BufferError::InUseByDevice) => true,
-                    Err(e) => panic!("couldn't write to the vertex buffer: {e}"),
-                };
+                events::update(
+                    &mut user_storage,
+                    &mut render_storage,
+                    //vertex_writer.unwrap(),
+                    //index_writer.unwrap(),
+                    //&mut index_count,
+                    //swapchain.image_extent()[1] as f32 / swapchain.image_extent()[0] as f32,
+                    delta_time,
+                    average_fps,
+                    //&mut camera,
+                    //&mut brightness,
+                ); // call update once per frame
 
-                let index_writer = index_buffer.write();
+                update_buffers_map(
+                    &mut render_storage,
+                    &vertex_buffers_map,
+                    &mut vertex_counts_map,
+                    &index_buffers_map,
+                    &mut index_counts_map,
+                );
 
-                skip_update = match index_writer {
-                    Ok(_) => skip_update,
-                    Err(BufferError::InUseByDevice) => true,
-                    Err(e) => panic!("couldn't write to the index buffer: {e}"),
-                };
-
-                if skip_update {
-                    println!("Skipping update!");
-                } else {
-                    events::update(
-                        &mut storage,
-                        vertex_writer.unwrap(),
-                        index_writer.unwrap(),
-                        &mut index_count,
-                        swapchain.image_extent()[1] as f32 / swapchain.image_extent()[0] as f32,
-                        delta_time,
-                        average_fps,
-                        &mut camera,
-                        &mut brightness,
-                    ); // call update once per frame
-                }
+                update_buffers_text(
+                    &mut render_storage,
+                    &vertex_buffers_text,
+                    &mut vertex_counts_text,
+                    &index_buffers_text,
+                    &mut index_counts_text,
+                );
 
                 if recreate_swapchain {
                     // When the window resizes we need to recreate everything dependent on the window size.
@@ -429,27 +477,34 @@ fn main() {
 
                     swapchain = new_swapchain;
 
-                    let (new_pipeline, new_framebuffers) = window_size_dependent_setup(
-                        &memory_allocator,
-                        &vertex_shader,
-                        &fragment_shader,
-                        &new_images,
-                        render_pass.clone(),
-                    );
+                    let (new_pipeline_map, new_pipeline_text, new_framebuffers) =
+                        window_size_dependent_setup(
+                            &memory_allocator,
+                            &vertex_shader_map,
+                            &fragment_shader_map,
+                            &vertex_shader_text,
+                            &fragment_shader_text,
+                            &new_images,
+                            render_pass.clone(),
+                        );
 
-                    pipeline = new_pipeline;
+                    pipeline_map = new_pipeline_map;
+                    pipeline_text = new_pipeline_text;
                     framebuffers = new_framebuffers;
 
                     recreate_swapchain = false;
                 }
 
                 let uniform_buffer_subbuffer = {
-                    let uniform_data: vertex_shader::Data = vertex_shader::Data {
+                    let uniform_data: vertex_shader_map::Data = vertex_shader_map::Data {
                         scale: swapchain.image_extent()[1] as f32
                             / swapchain.image_extent()[0] as f32,
-                        camera_scale: camera.scale,
-                        camera_position: [camera.position.0, camera.position.1],
-                        brightness,
+                        camera_scale: render_storage.camera.scale,
+                        camera_position: [
+                            render_storage.camera.position.0,
+                            render_storage.camera.position.1,
+                        ],
+                        brightness: render_storage.brightness,
                     };
 
                     let subbuffer = uniform_buffer_main.allocate_sized().unwrap();
@@ -459,7 +514,7 @@ fn main() {
                     subbuffer
                 };
 
-                let layout_main = pipeline.layout().set_layouts().get(0).unwrap();
+                let layout_main = pipeline_map.layout().set_layouts().get(0).unwrap();
                 let set_main = PersistentDescriptorSet::new(
                     &descriptor_set_allocator,
                     layout_main.clone(),
@@ -504,22 +559,49 @@ fn main() {
                     )
                     .unwrap()
                     //.set_viewport(0, [viewport.clone()])
-                    .bind_pipeline_graphics(pipeline.clone())
+                    .bind_pipeline_graphics(pipeline_map.clone())
                     .bind_descriptor_sets(
                         PipelineBindPoint::Graphics,
-                        pipeline.layout().clone(),
+                        pipeline_map.layout().clone(),
                         0,
-                        vec![set_main, set_images.clone()],
+                        vec![set_main.clone(), set_sprites_map.clone()],
                     )
-                    // .bind_descriptor_sets(
-                    //     PipelineBindPoint::Graphics,
-                    //     pipeline.layout().clone(),
-                    //     0,
-                    //     set_images.clone(),
-                    // )
-                    .bind_vertex_buffers(0, vertex_buffer.clone())
-                    .bind_index_buffer(index_buffer.clone())
-                    .draw_indexed(index_count, 1, 0, 0, 0)
+                    .bind_vertex_buffers(
+                        0,
+                        vertex_buffers_map[render_storage.frame_count as usize % 2].clone(),
+                    )
+                    .bind_index_buffer(
+                        index_buffers_map[render_storage.frame_count as usize % 2].clone(),
+                    )
+                    .draw_indexed(
+                        index_counts_map[render_storage.frame_count as usize % 2],
+                        1,
+                        0,
+                        0,
+                        0,
+                    )
+                    .unwrap()
+                    .bind_pipeline_graphics(pipeline_text.clone()) // start of text pipeline
+                    .bind_descriptor_sets(
+                        PipelineBindPoint::Graphics,
+                        pipeline_text.layout().clone(),
+                        0,
+                        vec![set_main, set_sprites_text.clone()],
+                    )
+                    .bind_vertex_buffers(
+                        0,
+                        vertex_buffers_text[render_storage.frame_count as usize % 2].clone(),
+                    )
+                    .bind_index_buffer(
+                        index_buffers_text[render_storage.frame_count as usize % 2].clone(),
+                    )
+                    .draw_indexed(
+                        index_counts_text[render_storage.frame_count as usize % 2],
+                        1,
+                        0,
+                        0,
+                        0,
+                    )
                     .unwrap()
                     .end_render_pass()
                     .unwrap();
@@ -552,25 +634,22 @@ fn main() {
                         panic!("failed to flush future: {e}");
                     }
                 }
+                events::late_update(&mut user_storage, delta_time, average_fps); // The goal of late update should be to do cpu work while the gpu is doing the hard work of rendering everything. This should save performance if done right.
 
-                if skip_update {
-                    skip_update = false;
-                } else {
-                    events::late_update(&mut storage, delta_time, average_fps); // The goal of late update should be to do cpu work while the gpu is doing the hard work of rendering everything. This should save performance if done right.
+                render_storage.frame_count += 1;
 
-                    // Start calculating time.
-                    if delta_time_sum > 1.0 {
-                        average_fps = frame_count / delta_time_sum;
-                        frame_count = 0.0;
-                        delta_time_sum = 0.0;
-                    }
-
-                    delta_time = time.elapsed().as_secs_f32();
-                    delta_time_sum += delta_time;
-                    frame_count += 1.0;
-                    time = Instant::now();
-                    // End calculating time.
+                // Start calculating time.
+                if delta_time_sum > 1.0 {
+                    average_fps = frame_count / delta_time_sum;
+                    frame_count = 0.0;
+                    delta_time_sum = 0.0;
                 }
+
+                delta_time = time.elapsed().as_secs_f32();
+                delta_time_sum += delta_time;
+                frame_count += 1.0;
+                time = Instant::now();
+                // End calculating time.
             }
             _ => (),
         }
@@ -580,11 +659,17 @@ fn main() {
 
 fn window_size_dependent_setup(
     memory_allocator: &StandardMemoryAllocator,
-    vertex_shader: &ShaderModule,
-    fragment_shader: &ShaderModule,
+    vertex_shader_map: &ShaderModule,
+    fragment_shader_map: &ShaderModule,
+    vertex_shader_text: &ShaderModule,
+    fragment_shader_text: &ShaderModule,
     images: &[Arc<SwapchainImage>],
     render_pass: Arc<RenderPass>,
-) -> (Arc<GraphicsPipeline>, Vec<Arc<Framebuffer>>) {
+) -> (
+    Arc<GraphicsPipeline>,
+    Arc<GraphicsPipeline>,
+    Vec<Arc<Framebuffer>>,
+) {
     let dimensions = images[0].dimensions().width_height();
 
     let framebuffers = images
@@ -603,11 +688,11 @@ fn window_size_dependent_setup(
         .collect::<Vec<_>>();
 
     let subpass = Subpass::from(render_pass.clone(), 0).unwrap();
-    let pipeline = GraphicsPipeline::start()
-        .render_pass(Subpass::from(render_pass, 0).unwrap())
+    let pipeline_map = GraphicsPipeline::start()
+        .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
         .vertex_input_state(vertex_data::VertexData::per_vertex())
         .input_assembly_state(InputAssemblyState::new())
-        .vertex_shader(vertex_shader.entry_point("main").unwrap(), ())
+        .vertex_shader(vertex_shader_map.entry_point("main").unwrap(), ())
         .viewport_state(ViewportState::viewport_fixed_scissor_irrelevant([
             Viewport {
                 origin: [0.0, 0.0],
@@ -615,10 +700,323 @@ fn window_size_dependent_setup(
                 depth_range: 0.0..1.0,
             },
         ]))
-        .fragment_shader(fragment_shader.entry_point("main").unwrap(), ())
+        .fragment_shader(fragment_shader_map.entry_point("main").unwrap(), ())
         .color_blend_state(ColorBlendState::new(subpass.num_color_attachments()).blend_alpha())
         .build(memory_allocator.device().clone())
         .unwrap();
 
-    (pipeline, framebuffers)
+    let pipeline_text = GraphicsPipeline::start()
+        .render_pass(Subpass::from(render_pass, 0).unwrap())
+        .vertex_input_state(vertex_data::VertexData::per_vertex())
+        .input_assembly_state(InputAssemblyState::new())
+        .vertex_shader(vertex_shader_text.entry_point("main").unwrap(), ())
+        .viewport_state(ViewportState::viewport_fixed_scissor_irrelevant([
+            Viewport {
+                origin: [0.0, 0.0],
+                dimensions: [dimensions[0] as f32, dimensions[1] as f32],
+                depth_range: 0.0..1.0,
+            },
+        ]))
+        .fragment_shader(fragment_shader_text.entry_point("main").unwrap(), ())
+        .color_blend_state(ColorBlendState::new(subpass.num_color_attachments()).blend_alpha())
+        .build(memory_allocator.device().clone())
+        .unwrap();
+
+    (pipeline_map, pipeline_text, framebuffers)
 }
+
+fn get_instance() -> Arc<vulkano::instance::Instance> {
+    let library = VulkanLibrary::new().unwrap();
+    let required_extensions = vulkano_win::required_extensions(&library);
+    Instance::new(
+        library,
+        InstanceCreateInfo {
+            enabled_extensions: required_extensions,
+            enumerate_portability: true,
+            ..Default::default()
+        },
+    )
+    .unwrap()
+}
+
+fn create_buffers_map(
+    memory_allocator: &StandardMemoryAllocator,
+) -> (
+    [Subbuffer<[vertex_data::VertexData]>; 2],
+    [Subbuffer<[u32]>; 2],
+) {
+    let vertex_buffers_map = [
+        Buffer::from_iter(
+            memory_allocator,
+            BufferCreateInfo {
+                usage: BufferUsage::VERTEX_BUFFER,
+                ..Default::default()
+            },
+            AllocationCreateInfo {
+                usage: MemoryUsage::Upload,
+                ..Default::default()
+            },
+            //*events::STARTING_VERTICES,
+            vec![
+                vertex_data::VertexData {
+                    position: [0.0, 0.0],
+                    uv: [0.0, 0.0],
+                };
+                events::CHUNK_WIDTH_SQUARED as usize * 4 * 30
+            ],
+        )
+        .unwrap(),
+        Buffer::from_iter(
+            memory_allocator,
+            BufferCreateInfo {
+                usage: BufferUsage::VERTEX_BUFFER,
+                ..Default::default()
+            },
+            AllocationCreateInfo {
+                usage: MemoryUsage::Upload,
+                ..Default::default()
+            },
+            //*events::STARTING_VERTICES,
+            vec![
+                vertex_data::VertexData {
+                    position: [0.0, 0.0],
+                    uv: [0.0, 0.0],
+                };
+                events::CHUNK_WIDTH_SQUARED as usize * 4 * 30
+            ],
+        )
+        .unwrap(),
+    ];
+
+    let index_buffers_map = [
+        Buffer::from_iter(
+            memory_allocator,
+            BufferCreateInfo {
+                usage: BufferUsage::INDEX_BUFFER,
+                ..Default::default()
+            },
+            AllocationCreateInfo {
+                usage: MemoryUsage::Upload,
+                ..Default::default()
+            },
+            //*events::STARTING_INDICES,
+            vec![0u32; events::CHUNK_WIDTH_SQUARED as usize * 6 * 30],
+        )
+        .unwrap(),
+        Buffer::from_iter(
+            memory_allocator,
+            BufferCreateInfo {
+                usage: BufferUsage::INDEX_BUFFER,
+                ..Default::default()
+            },
+            AllocationCreateInfo {
+                usage: MemoryUsage::Upload,
+                ..Default::default()
+            },
+            //*events::STARTING_INDICES,
+            vec![0u32; events::CHUNK_WIDTH_SQUARED as usize * 6 * 30],
+        )
+        .unwrap(),
+    ];
+
+    (vertex_buffers_map, index_buffers_map)
+}
+
+fn create_buffers_text(
+    memory_allocator: &StandardMemoryAllocator,
+) -> (
+    [Subbuffer<[vertex_data::VertexData]>; 2],
+    [Subbuffer<[u32]>; 2],
+) {
+    let vertex_buffers_text = [
+        Buffer::from_iter(
+            memory_allocator,
+            BufferCreateInfo {
+                usage: BufferUsage::VERTEX_BUFFER,
+                ..Default::default()
+            },
+            AllocationCreateInfo {
+                usage: MemoryUsage::Upload,
+                ..Default::default()
+            },
+            vec![
+                vertex_data::VertexData {
+                    position: [0.0, 0.0],
+                    uv: [0.0, 0.0],
+                };
+                events::CHUNK_WIDTH_SQUARED as usize * 4 * 30
+            ],
+        )
+        .unwrap(),
+        Buffer::from_iter(
+            memory_allocator,
+            BufferCreateInfo {
+                usage: BufferUsage::VERTEX_BUFFER,
+                ..Default::default()
+            },
+            AllocationCreateInfo {
+                usage: MemoryUsage::Upload,
+                ..Default::default()
+            },
+            vec![
+                vertex_data::VertexData {
+                    position: [0.0, 0.0],
+                    uv: [0.0, 0.0],
+                };
+                events::CHUNK_WIDTH_SQUARED as usize * 4 * 30
+            ],
+        )
+        .unwrap(),
+    ];
+
+    let index_buffers_text = [
+        Buffer::from_iter(
+            memory_allocator,
+            BufferCreateInfo {
+                usage: BufferUsage::INDEX_BUFFER,
+                ..Default::default()
+            },
+            AllocationCreateInfo {
+                usage: MemoryUsage::Upload,
+                ..Default::default()
+            },
+            vec![0u32; events::CHUNK_WIDTH_SQUARED as usize * 6 * 30],
+        )
+        .unwrap(),
+        Buffer::from_iter(
+            memory_allocator,
+            BufferCreateInfo {
+                usage: BufferUsage::INDEX_BUFFER,
+                ..Default::default()
+            },
+            AllocationCreateInfo {
+                usage: MemoryUsage::Upload,
+                ..Default::default()
+            },
+            vec![0u32; events::CHUNK_WIDTH_SQUARED as usize * 6 * 30],
+        )
+        .unwrap(),
+    ];
+
+    (vertex_buffers_text, index_buffers_text)
+}
+
+fn update_buffers_map(
+    render_storage: &mut events::RenderStorage,
+    vertex_buffers_map: &[Subbuffer<[vertex_data::VertexData]>; 2],
+    vertex_counts_map: &mut [u32; 2],
+    index_buffers_map: &[Subbuffer<[u32]>; 2],
+    index_counts_map: &mut [u32; 2],
+) {
+    let vertex_writer_map = vertex_buffers_map[render_storage.frame_count as usize % 2].write();
+    //let vertex_writer_text = vertex_buffers_text[render_storage.frame_count as usize%2].write();
+
+    match vertex_writer_map {
+        Ok(mut writer) => {
+            writer[0..render_storage.vertex_count_map as usize].copy_from_slice(
+                &render_storage.vertices_map[0..render_storage.vertex_count_map as usize],
+            );
+            vertex_counts_map[render_storage.frame_count as usize % 2] =
+                render_storage.vertex_count_map;
+        }
+        Err(BufferError::InUseByDevice) => {
+            println!("Failed to update vertex buffer. Vertex buffer is being used by the device.")
+        }
+        Err(e) => panic!("couldn't write to the vertex buffer: {e}"),
+    };
+
+    let index_writer = index_buffers_map[render_storage.frame_count as usize % 2].write();
+
+    match index_writer {
+        Ok(mut writer) => {
+            writer[0..render_storage.index_count_map as usize].copy_from_slice(
+                &render_storage.indices_map[0..render_storage.index_count_map as usize],
+            );
+            index_counts_map[render_storage.frame_count as usize % 2] =
+                render_storage.index_count_map;
+        }
+        Err(BufferError::InUseByDevice) => {
+            println!("Failed to update index buffer. Index buffer is being used by the device.")
+        }
+        Err(e) => panic!("couldn't write to the index buffer: {e}"),
+    };
+}
+
+fn update_buffers_text(
+    render_storage: &mut events::RenderStorage,
+    vertex_buffers_text: &[Subbuffer<[vertex_data::VertexData]>; 2],
+    vertex_counts_text: &mut [u32; 2],
+    index_buffers_text: &[Subbuffer<[u32]>; 2],
+    index_counts_text: &mut [u32; 2],
+) {
+    let vertex_writer_text = vertex_buffers_text[render_storage.frame_count as usize % 2].write();
+    //let vertex_writer_text = vertex_buffers_text[render_storage.frame_count as usize%2].write();
+
+    match vertex_writer_text {
+        Ok(mut writer) => {
+            writer[0..render_storage.vertex_count_text as usize].copy_from_slice(
+                &render_storage.vertices_text[0..render_storage.vertex_count_text as usize],
+            );
+            vertex_counts_text[render_storage.frame_count as usize % 2] =
+                render_storage.vertex_count_text;
+        }
+        Err(BufferError::InUseByDevice) => {
+            println!("Failed to update vertex buffer. Vertex buffer is being used by the device.")
+        }
+        Err(e) => panic!("couldn't write to the vertex buffer: {e}"),
+    };
+
+    let index_writer = index_buffers_text[render_storage.frame_count as usize % 2].write();
+
+    match index_writer {
+        Ok(mut writer) => {
+            writer[0..render_storage.index_count_text as usize].copy_from_slice(
+                &render_storage.indices_text[0..render_storage.index_count_text as usize],
+            );
+            index_counts_text[render_storage.frame_count as usize % 2] =
+                render_storage.index_count_text;
+        }
+        Err(BufferError::InUseByDevice) => {
+            println!("Failed to update index buffer. Index buffer is being used by the device.")
+        }
+        Err(e) => panic!("couldn't write to the index buffer: {e}"),
+    };
+}
+
+// fn create_shaders(device: Arc<Device>) -> (Arc<ShaderModule>, Arc<ShaderModule>, Arc<ShaderModule>, Arc<ShaderModule>) {
+//     mod vertex_shader_map {
+//         vulkano_shaders::shader! {
+//             ty: "vertex",
+//             path: "src/vertex_shader.glsl",
+//         }
+//     }
+
+//     mod fragment_shader_map {
+//         vulkano_shaders::shader! {
+//             ty: "fragment",
+//             path: "src/fragment_shader.glsl",
+//         }
+//     }
+
+//     let vertex_shader_map = vertex_shader_map::load(device.clone()).unwrap();
+//     let fragment_shader_map = fragment_shader_map::load(device.clone()).unwrap();
+
+//     mod vertex_shader_text {
+//         vulkano_shaders::shader! {
+//             ty: "vertex",
+//             path: "src/vertex_shader.glsl",
+//         }
+//     }
+
+//     mod fragment_shader_text {
+//         vulkano_shaders::shader! {
+//             ty: "fragment",
+//             path: "src/fragment_shader.glsl",
+//         }
+//     }
+
+//     let vertex_shader_text = vertex_shader_map::load(device.clone()).unwrap();
+//     let fragment_shader_text = fragment_shader_map::load(device.clone()).unwrap();
+
+//     (vertex_shader_map,fragment_shader_map,vertex_shader_text,fragment_shader_text)
+// }

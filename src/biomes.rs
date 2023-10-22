@@ -13,7 +13,7 @@ pub fn get_biome(biome_noise: (f64, f64)) -> usize {
 
 pub const BIOME_SCALE: (f64, f64) = (0.05, 0.05);
 
-pub const SPRITE_SIZE: (f32, f32) = (1.0 / 42.0, 1.0);
+pub const SPRITE_SIZE: (f32, f32) = (1.0 / 44.0, 1.0);
 
 pub const BIOMES: [Biome; 5] = [
     Biome {
