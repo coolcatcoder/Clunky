@@ -60,6 +60,8 @@ mod events;
 
 mod biomes;
 
+mod testing_biomes;
+
 fn main() {
     let instance = get_instance();
 
@@ -391,6 +393,7 @@ fn main() {
         },
         brightness: 0.0,
         frame_count: 0,
+        starting_time: Instant::now(),
     };
 
     let mut user_storage = events::start(&mut render_storage);
@@ -634,7 +637,6 @@ fn main() {
                         panic!("failed to flush future: {e}");
                     }
                 }
-                events::late_update(&mut user_storage, delta_time, average_fps); // The goal of late update should be to do cpu work while the gpu is doing the hard work of rendering everything. This should save performance if done right.
 
                 render_storage.frame_count += 1;
 

@@ -1,3 +1,7 @@
+use std::ops::AddAssign;
+
+// TODO: Add detail level to each block, so the generator can tell whether or not that block belongs to that detail level
+
 pub fn get_biome(biome_noise: (f64, f64)) -> usize {
     // To handle overlapping shapes we should instead go through each biome, if it is a correct biome, add it to a vector, then pick randomly from the vector at the end.
     for biome_index in 0..BIOMES.len() {
@@ -19,10 +23,8 @@ pub const BIOMES: [Biome; 5] = [
     Biome {
         // sparse rock
         aabb: Aabb {
-            size_x: 1.0 / 3.0 + 0.01,
-            size_y: 0.5,
-            position_x: 0.0,
-            position_y: 0.5,
+            size: (1.0 / 3.0 + 0.01, 0.5),
+            position: (0.0, 0.5),
         },
         random_pattern: PatternArray {
             starting_index: 2,
@@ -40,10 +42,8 @@ pub const BIOMES: [Biome; 5] = [
     Biome {
         // mixed jungle
         aabb: Aabb {
-            size_x: 2.0 / 3.0,
-            size_y: 0.5,
-            position_x: 1.0 / 3.0,
-            position_y: 0.5,
+            size: (2.0 / 3.0, 0.5),
+            position: (1.0 / 3.0, 0.5),
         },
         random_pattern: PatternArray {
             starting_index: 0,
@@ -61,10 +61,8 @@ pub const BIOMES: [Biome; 5] = [
     Biome {
         // grasslands
         aabb: Aabb {
-            size_x: 1.0 / 3.0 + 0.01,
-            size_y: 0.501,
-            position_x: 0.0,
-            position_y: 0.0,
+            size: (1.0 / 3.0 + 0.01, 0.501),
+            position: (0.0, 0.0),
         },
         random_pattern: PatternArray {
             starting_index: 3,
@@ -82,10 +80,8 @@ pub const BIOMES: [Biome; 5] = [
     Biome {
         // desert
         aabb: Aabb {
-            size_x: 1.0 / 3.0 + 0.01,
-            size_y: 0.501,
-            position_x: 1.0 / 3.0,
-            position_y: 0.0,
+            size: (1.0 / 3.0 + 0.01, 0.501),
+            position: (1.0 / 3.0, 0.0),
         },
         random_pattern: PatternArray {
             starting_index: 4,
@@ -103,10 +99,8 @@ pub const BIOMES: [Biome; 5] = [
     Biome {
         // mountains
         aabb: Aabb {
-            size_x: 1.0 / 3.0,
-            size_y: 0.501,
-            position_x: 2.0 / 3.0,
-            position_y: 0.0,
+            size: (1.0 / 3.0, 0.501),
+            position: (2.0 / 3.0, 0.0),
         },
         random_pattern: PatternArray {
             starting_index: 5,
@@ -123,22 +117,38 @@ pub const BIOMES: [Biome; 5] = [
     },
 ];
 
-pub const RANDOM_PATTERN_MAP_OBJECTS: [RandomPatternMapObject; 10] = [
+pub const RANDOM_PATTERN_MAP_OBJECTS: [RandomPatternMapObject; 11] = [
     // start mixed jungle
     RandomPatternMapObject {
         // health fruit medium
+        detail: 0,
         chance: 9,
         priority: 1,
-        behaviour: CollisionBehaviour::Consume(0),
+        behaviour: CollisionBehaviour::Consume(
+            0,
+            Statistics {
+                strength: 0,
+                health: 5,
+                stamina: 2,
+            },
+        ),
         rendering_size: (0.75, 0.75),
         collision_size: (0.6, 0.6),
         uv: (20.0 * SPRITE_SIZE.0, 0.0),
     },
     RandomPatternMapObject {
         // health fruit large
+        detail: 0,
         chance: 1,
         priority: 1,
-        behaviour: CollisionBehaviour::Consume(0),
+        behaviour: CollisionBehaviour::Consume(
+            0,
+            Statistics {
+                strength: 0,
+                health: 10,
+                stamina: 5,
+            },
+        ),
         rendering_size: (1.3, 1.3),
         collision_size: (1.0, 1.0),
         uv: (20.0 * SPRITE_SIZE.0, 0.0),
@@ -148,9 +158,17 @@ pub const RANDOM_PATTERN_MAP_OBJECTS: [RandomPatternMapObject; 10] = [
     // start sparse rock
     RandomPatternMapObject {
         // weird stamina rock
+        detail: 0,
         chance: 10,
         priority: 2,
-        behaviour: CollisionBehaviour::Consume(0),
+        behaviour: CollisionBehaviour::Consume(
+            0,
+            Statistics {
+                strength: 0,
+                health: 0,
+                stamina: 2,
+            },
+        ),
         rendering_size: (1.0, 1.0),
         collision_size: (1.0, 1.0),
         uv: (8.0 * SPRITE_SIZE.0, 0.0),
@@ -160,6 +178,7 @@ pub const RANDOM_PATTERN_MAP_OBJECTS: [RandomPatternMapObject; 10] = [
     // start grasslands
     RandomPatternMapObject {
         // swishy swishy
+        detail: 0,
         chance: 100,
         priority: 1,
         behaviour: CollisionBehaviour::None,
@@ -172,6 +191,7 @@ pub const RANDOM_PATTERN_MAP_OBJECTS: [RandomPatternMapObject; 10] = [
     // start desert
     RandomPatternMapObject {
         // sand
+        detail: 0,
         chance: 100,
         priority: 1,
         behaviour: CollisionBehaviour::None,
@@ -184,59 +204,118 @@ pub const RANDOM_PATTERN_MAP_OBJECTS: [RandomPatternMapObject; 10] = [
     // start mountain
     RandomPatternMapObject {
         // spiccaro mixed
+        detail: 0,
         chance: 10,
         priority: 2,
-        behaviour: CollisionBehaviour::Consume(0),
+        behaviour: CollisionBehaviour::Consume(
+            0,
+            Statistics {
+                strength: 1,
+                health: -10,
+                stamina: -10,
+            },
+        ),
         rendering_size: (0.75, 0.75),
         collision_size: (0.6, 0.6),
         uv: (21.0 * SPRITE_SIZE.0, 0.0),
     },
     RandomPatternMapObject {
         // spiccaro purple
+        detail: 0,
         chance: 1,
         priority: 2,
-        behaviour: CollisionBehaviour::Consume(0),
+        behaviour: CollisionBehaviour::Consume(
+            0,
+            Statistics {
+                strength: 2,
+                health: -20,
+                stamina: 0,
+            },
+        ),
         rendering_size: (0.75, 0.75),
         collision_size: (0.6, 0.6),
         uv: (22.0 * SPRITE_SIZE.0, 0.0),
     },
     RandomPatternMapObject {
         // spiccaro blue
+        detail: 0,
         chance: 1,
         priority: 2,
-        behaviour: CollisionBehaviour::Consume(0),
+        behaviour: CollisionBehaviour::Consume(
+            0,
+            Statistics {
+                strength: 0,
+                health: 0,
+                stamina: -20,
+            },
+        ),
         rendering_size: (0.75, 0.75),
         collision_size: (0.6, 0.6),
         uv: (23.0 * SPRITE_SIZE.0, 0.0),
     },
     RandomPatternMapObject {
         // spiccaro orange
+        detail: 0,
         chance: 1,
         priority: 2,
-        behaviour: CollisionBehaviour::Consume(0),
+        behaviour: CollisionBehaviour::Consume(
+            0,
+            Statistics {
+                strength: 0,
+                health: 10,
+                stamina: 10,
+            },
+        ),
         rendering_size: (0.75, 0.75),
         collision_size: (0.6, 0.6),
         uv: (24.0 * SPRITE_SIZE.0, 0.0),
     },
     RandomPatternMapObject {
         // dark velvet slicer
+        detail: 0,
         chance: 50,
         priority: 1,
-        behaviour: CollisionBehaviour::Consume(0),
+        behaviour: CollisionBehaviour::Consume(
+            0,
+            Statistics {
+                strength: 0,
+                health: -10,
+                stamina: -10,
+            },
+        ),
         rendering_size: (1.3, 1.3),
         collision_size: (1.0, 1.0),
         uv: (19.0 * SPRITE_SIZE.0, 0.0),
     },
     // end mountain
+    RandomPatternMapObject {
+        // swishy swishy. This is debug, remove asap.
+        detail: 1,
+        chance: 100,
+        priority: 1,
+        behaviour: CollisionBehaviour::None,
+        rendering_size: (0.5, 0.5),
+        collision_size: (0.0, 0.0),
+        uv: (14.0 * SPRITE_SIZE.0, 0.0),
+    },
 ];
 
 pub const SIMPLEX_PATTERN_MAP_OBJECTS: [SimplexPatternMapObject; 8] = [
     // start mixed jungle
     SimplexPatternMapObject {
         // circus rock
+        detail: 0,
         chance: 100,
         priority: 3,
-        behaviour: CollisionBehaviour::Consume(2),
+        behaviour: CollisionBehaviour::Consume(
+            2,
+            Statistics {
+                // replace with rock eating collision behaviour
+                strength: 0,
+                health: 0,
+                stamina: 2,
+            },
+        ),
         rendering_size: (1.0, 1.0),
         collision_size: (1.0, 1.0),
         seed: 1,
@@ -246,9 +325,17 @@ pub const SIMPLEX_PATTERN_MAP_OBJECTS: [SimplexPatternMapObject; 8] = [
     },
     SimplexPatternMapObject {
         // the weird stamina rock
+        detail: 0,
         chance: 100,
         priority: 2,
-        behaviour: CollisionBehaviour::Consume(0),
+        behaviour: CollisionBehaviour::Consume(
+            0,
+            Statistics {
+                strength: 0,
+                health: 0,
+                stamina: 2,
+            },
+        ),
         rendering_size: (1.0, 1.0),
         collision_size: (1.0, 1.0),
         seed: 1,
@@ -258,9 +345,17 @@ pub const SIMPLEX_PATTERN_MAP_OBJECTS: [SimplexPatternMapObject; 8] = [
     },
     SimplexPatternMapObject {
         // velvet slicer
+        detail: 0,
         chance: 75,
         priority: 1,
-        behaviour: CollisionBehaviour::Consume(0),
+        behaviour: CollisionBehaviour::Consume(
+            0,
+            Statistics {
+                strength: 0,
+                health: -3,
+                stamina: -5,
+            },
+        ),
         rendering_size: (1.3, 1.3),
         collision_size: (1.0, 1.0),
         seed: 2,
@@ -270,6 +365,7 @@ pub const SIMPLEX_PATTERN_MAP_OBJECTS: [SimplexPatternMapObject; 8] = [
     },
     SimplexPatternMapObject {
         // Large test
+        detail: 0,
         chance: 100,
         priority: 4,
         behaviour: CollisionBehaviour::None,
@@ -285,9 +381,18 @@ pub const SIMPLEX_PATTERN_MAP_OBJECTS: [SimplexPatternMapObject; 8] = [
     // start sparse rock
     SimplexPatternMapObject {
         // circus rock
+        detail: 0,
         chance: 100,
         priority: 1,
-        behaviour: CollisionBehaviour::Consume(2),
+        behaviour: CollisionBehaviour::Consume(
+            2,
+            Statistics {
+                // rock eater asap
+                strength: 0,
+                health: 0,
+                stamina: 2,
+            },
+        ),
         rendering_size: (1.0, 1.0),
         collision_size: (1.0, 1.0),
         seed: 1,
@@ -300,9 +405,18 @@ pub const SIMPLEX_PATTERN_MAP_OBJECTS: [SimplexPatternMapObject; 8] = [
     // start grasslands
     SimplexPatternMapObject {
         // flowers
+        detail: 0,
         chance: 75,
         priority: 2,
-        behaviour: CollisionBehaviour::Replace(0, MapObject::RandomPattern(3)),
+        behaviour: CollisionBehaviour::Replace(
+            0,
+            Statistics {
+                strength: 0,
+                health: 1,
+                stamina: 2,
+            },
+            MapObject::RandomPattern(3),
+        ),
         rendering_size: (1.0, 1.0),
         collision_size: (1.0, 1.0),
         seed: 15,
@@ -315,9 +429,18 @@ pub const SIMPLEX_PATTERN_MAP_OBJECTS: [SimplexPatternMapObject; 8] = [
     // start desert
     SimplexPatternMapObject {
         // ???
+        detail: 0,
         chance: 45,
         priority: 2,
-        behaviour: CollisionBehaviour::Replace(0, MapObject::RandomPattern(4)),
+        behaviour: CollisionBehaviour::Replace(
+            0,
+            Statistics {
+                strength: 0,
+                health: -5,
+                stamina: -5,
+            },
+            MapObject::RandomPattern(4),
+        ),
         rendering_size: (1.0, 1.0),
         collision_size: (1.0, 1.0),
         seed: 15,
@@ -330,9 +453,18 @@ pub const SIMPLEX_PATTERN_MAP_OBJECTS: [SimplexPatternMapObject; 8] = [
     // start mountains
     SimplexPatternMapObject {
         // circus rock
+        detail: 0,
         chance: 100,
         priority: 3,
-        behaviour: CollisionBehaviour::Consume(2),
+        behaviour: CollisionBehaviour::Consume(
+            2,
+            Statistics {
+                // rock eater asap
+                strength: 0,
+                health: 0,
+                stamina: 2,
+            },
+        ),
         rendering_size: (1.0, 1.0),
         collision_size: (1.0, 1.0),
         seed: 1,
@@ -347,6 +479,7 @@ pub const SIMPLEX_SMOOTHED_PATTERN_MAP_OBJECTS: [SimplexSmoothedPatternMapObject
 
 #[derive(Debug)]
 pub struct RandomPatternMapObject {
+    pub detail: u8,
     pub chance: u8,
     pub priority: u8,
     pub behaviour: CollisionBehaviour,
@@ -357,6 +490,7 @@ pub struct RandomPatternMapObject {
 
 #[derive(Debug)]
 pub struct SimplexPatternMapObject {
+    pub detail: u8,
     pub chance: u8,
     pub priority: u8,
     pub behaviour: CollisionBehaviour,
@@ -370,6 +504,7 @@ pub struct SimplexPatternMapObject {
 
 #[derive(Debug)]
 pub struct SimplexSmoothedPatternMapObject {
+    pub detail: u8,
     pub chance: u8,
     pub priority: u8,
     pub behaviour: CollisionBehaviour,
@@ -379,6 +514,11 @@ pub struct SimplexSmoothedPatternMapObject {
     pub noise_scale: f64,
 }
 
+// leaving this structh here, so no one makes the mistake of trying this again. You still gotta match, to get the right array, so this is useless, unless we wanted to store these in their own array, which is a big NO, until we have the easy biomes in testing_biomes.rs sorted. Even then we would still need some sort of index into this array, which sounds slow.
+// pub struct CommonMapObject {
+
+// }
+
 #[derive(Debug, Copy, Clone)]
 pub enum MapObject {
     None,
@@ -387,42 +527,58 @@ pub enum MapObject {
     SimplexSmoothedPattern(u8),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Biome {
-    aabb: Aabb,
+    pub aabb: Aabb,
     pub random_pattern: PatternArray,
     pub simplex_pattern: PatternArray,
     pub simplex_smoothed_pattern: PatternArray,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Aabb {
-    size_x: f64,
-    size_y: f64,
+    pub size: (f64, f64),
 
-    position_x: f64,
-    position_y: f64,
+    pub position: (f64, f64),
 }
 
 impl Aabb {
     fn point_intersects(&self, position: (f64, f64)) -> bool {
-        position.0 < self.position_x + self.size_x
-            && position.0 > self.position_x
-            && position.1 < self.position_y + self.size_y
-            && position.1 > self.position_y
+        position.0 < self.position.0 + self.size.0
+            && position.0 > self.position.0
+            && position.1 < self.position.1 + self.size.1
+            && position.1 > self.position.1
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
+pub struct Statistics {
+    // TODO: is there a better name?
+    pub strength: u8,
+    pub health: i32, // Although player health will never be below zero, map objects could wish to lower the health, therefore requiring negative health.
+    pub stamina: i32,
+}
+
+impl AddAssign for Statistics {
+    fn add_assign(&mut self, other: Self) {
+        *self = Statistics {
+            strength: self.strength + other.strength,
+            health: self.health + other.health,
+            stamina: self.stamina + other.stamina,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 pub struct PatternArray {
     pub starting_index: u8,
     pub length: u8,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum CollisionBehaviour {
     None,
-    Consume(u8),
-    Replace(u8, MapObject),
-    //Push(u8), Some objects should be pushable, I'm just not sure how yet.
+    Consume(u8, Statistics),
+    Replace(u8, Statistics, MapObject),
+    //Push(u8), Some objects should be pushable. This is not possible until we get a proper physics system working.
 }
