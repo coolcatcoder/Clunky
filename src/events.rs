@@ -74,7 +74,7 @@ pub fn start(render_storage: &mut RenderStorage) -> UserStorage {
             },
             Detail {
                 scale: 2,
-                offset: (0.25, 0.25),
+                offset: (-0.25, -0.25),
             },
         ],
         map_objects: [
@@ -123,7 +123,7 @@ pub fn start(render_storage: &mut RenderStorage) -> UserStorage {
     user_storage.chunks_generated[index_from_position(starting_chunk, CHUNK_GRID_WIDTH) as usize] =
         true;
 
-    user_storage.player.size = (0.4, 0.4);
+    //let pain = transform_biomes![TESTING_BIOME, TESTING_BIOME];
 
     user_storage
 }
@@ -176,20 +176,13 @@ pub fn update(
 
     render_storage.camera.position = user_storage.player.position;
 
-    // Make sure to remove this:
-    user_storage.map_objects[1][full_index_from_full_position(
-        (
-            (user_storage.player.position.0 * 2.0 - 0.5).round() as u32,
-            (user_storage.player.position.1 * 2.0 - 0.5).round() as u32,
-        ),
-        2,
-    )] = biomes::MapObject::RandomPattern(10);
-
     render_storage.vertex_count_map = 0;
     render_storage.index_count_map = 0;
 
-    //render_map(user_storage, render_storage, 0);
-    render_map(user_storage, render_storage, 1);
+    for detail_index in 0..user_storage.details.len() {
+        render_map(user_storage, render_storage, detail_index as u8);
+    }
+
     render_player(user_storage, render_storage);
 
     render_storage.vertex_count_text = 0;
@@ -320,25 +313,30 @@ pub fn fixed_update(user_storage: &mut UserStorage) {
     user_storage.player.position.1 += motion.1 * FIXED_UPDATE_TIME_STEP * speed;
 
     if !user_storage.player.collision_debug {
-        let rounded_player_position = (
-            user_storage.player.position.0.round() as i32,
-            user_storage.player.position.1.round() as i32,
-        );
+        for detail_index in 0..user_storage.details.len() {
+            let detail = user_storage.details[detail_index];
 
-        let ceil_player_half_size = (
-            (user_storage.player.size.0 * 0.5).ceil() as i32,
-            (user_storage.player.size.1 * 0.5).ceil() as i32,
-        );
+            let rounded_player_position_scaled = (
+                (user_storage.player.position.0 * detail.scale as f32).round() as i32,
+                (user_storage.player.position.1 * detail.scale as f32).round() as i32,
+            );
 
-        for x in -ceil_player_half_size.0..ceil_player_half_size.0 + 1 {
-            for y in -ceil_player_half_size.1..ceil_player_half_size.1 + 1 {
-                collide(
-                    user_storage,
-                    (
-                        (rounded_player_position.0 + x) as u32,
-                        (rounded_player_position.1 + y) as u32,
-                    ),
-                );
+            let ceil_player_half_size_scaled = (
+                (user_storage.player.size.0 * 0.5 * detail.scale as f32).ceil() as i32,
+                (user_storage.player.size.1 * 0.5 * detail.scale as f32).ceil() as i32,
+            );
+
+            for x in -ceil_player_half_size_scaled.0..ceil_player_half_size_scaled.0 + 1 {
+                for y in -ceil_player_half_size_scaled.1..ceil_player_half_size_scaled.1 + 1 {
+                    collide(
+                        user_storage,
+                        (
+                            (rounded_player_position_scaled.0 + x) as u32,
+                            (rounded_player_position_scaled.1 + y) as u32,
+                        ),
+                        detail_index as u8,
+                    )
+                }
             }
         }
     }
@@ -417,7 +415,7 @@ fn is_pressed(state: ElementState) -> bool {
 
 #[derive(Debug, Copy, Clone)]
 struct Detail {
-    scale: u8, // This is unintuitive. Basically how many of these blocks become 1 block.
+    scale: u32, // This is unintuitive. Basically how many of these blocks become 1 block.
     offset: (f32, f32),
 }
 
@@ -460,7 +458,6 @@ pub struct RenderStorage {
     pub starting_time: Instant,
 }
 
-// this is going to be hard to fix. Consider looking into where and how chunks are positioned in different details. chunk width should be multiplied by 2
 fn generate_chunk(user_storage: &UserStorage, chunk_position: (u32, u32)) {
     let biome_noise = user_storage.biome_noise;
     let percent_range = user_storage.percent_range;
@@ -499,20 +496,23 @@ fn generate_chunk(user_storage: &UserStorage, chunk_position: (u32, u32)) {
                                 * map_objects_per_thread
                                 * (detail.scale * detail.scale) as usize))
                                 as u32,
-                            CHUNK_WIDTH as u32,
+                            CHUNK_WIDTH as u32 * detail.scale as u32,
                         );
                         let full_position = (
                             full_position_start.0 + local_position.0,
                             full_position_start.1 + local_position.1,
                         );
+
                         generation_array[i] = generate_position(
                             full_position,
                             detail_index as u8,
+                            detail.scale,
+                            detail.offset,
                             &mut thread_rng(),
                             biome_noise,
                             percent_range,
                             main_seed,
-                        )
+                        );
                     }
 
                     let full_index_start =
@@ -521,7 +521,9 @@ fn generate_chunk(user_storage: &UserStorage, chunk_position: (u32, u32)) {
                     generation_sender
                         .send((
                             generation_array,
-                            full_index_start + (t * map_objects_per_thread),
+                            full_index_start
+                                + (t * map_objects_per_thread
+                                    * (detail.scale * detail.scale) as usize),
                             detail_index as u8,
                         ))
                         .unwrap()
@@ -534,16 +536,21 @@ fn generate_chunk(user_storage: &UserStorage, chunk_position: (u32, u32)) {
 fn generate_position(
     position: (u32, u32),
     detail: u8,
+    scale: u32,
+    offset: (f32, f32),
     mut rng: &mut ThreadRng,
     biome_noise: (OpenSimplex, OpenSimplex),
     percent_range: Uniform<u8>,
     main_seed: u32,
 ) -> biomes::MapObject {
-    let position_as_float_array = [position.0 as f64, position.1 as f64];
+    let position_as_float_array_descaled = [
+        position.0 as f64 / scale as f64 + offset.0 as f64,
+        position.1 as f64 / scale as f64 + offset.1 as f64,
+    ]; // returning to true world space
 
     let biome_position = [
-        position_as_float_array[0] * biomes::BIOME_SCALE.0,
-        position_as_float_array[1] * biomes::BIOME_SCALE.1,
+        position_as_float_array_descaled[0] * biomes::BIOME_SCALE.0,
+        position_as_float_array_descaled[1] * biomes::BIOME_SCALE.1,
     ];
     let biome = &biomes::BIOMES[biomes::get_biome((
         (biome_noise.0.get(biome_position) + 1.0) * 0.5,
@@ -558,6 +565,7 @@ fn generate_position(
     {
         let random_pattern_map_object = &biomes::RANDOM_PATTERN_MAP_OBJECTS[i as usize];
         if random_pattern_map_object.priority > highest_priority
+            && detail == random_pattern_map_object.detail
             && percent_range.sample(&mut rng) < random_pattern_map_object.chance
         {
             map_object = biomes::MapObject::RandomPattern(i);
@@ -571,10 +579,11 @@ fn generate_position(
         let simplex_pattern_map_object = &biomes::SIMPLEX_PATTERN_MAP_OBJECTS[i as usize];
         let simplex_noise = OpenSimplex::new(main_seed + simplex_pattern_map_object.seed as u32)
             .get([
-                position_as_float_array[0] * simplex_pattern_map_object.noise_scale,
-                position_as_float_array[1] * simplex_pattern_map_object.noise_scale,
+                position_as_float_array_descaled[0] * simplex_pattern_map_object.noise_scale,
+                position_as_float_array_descaled[1] * simplex_pattern_map_object.noise_scale,
             ]);
         if simplex_pattern_map_object.priority > highest_priority
+            && detail == simplex_pattern_map_object.detail
             && percent_range.sample(&mut rng) < simplex_pattern_map_object.chance
             && simplex_noise > simplex_pattern_map_object.acceptable_noise.0
             && simplex_noise < simplex_pattern_map_object.acceptable_noise.1
@@ -591,10 +600,13 @@ fn generate_position(
             &biomes::SIMPLEX_SMOOTHED_PATTERN_MAP_OBJECTS[i as usize];
         let simplex_noise =
             OpenSimplex::new(main_seed + simplex_smoothed_pattern_map_object.seed as u32).get([
-                position_as_float_array[0] * simplex_smoothed_pattern_map_object.noise_scale,
-                position_as_float_array[1] * simplex_smoothed_pattern_map_object.noise_scale,
+                position_as_float_array_descaled[0]
+                    * simplex_smoothed_pattern_map_object.noise_scale,
+                position_as_float_array_descaled[1]
+                    * simplex_smoothed_pattern_map_object.noise_scale,
             ]);
         if simplex_smoothed_pattern_map_object.priority > highest_priority
+            && detail == simplex_smoothed_pattern_map_object.detail
             && percent_range.sample(&mut rng) < simplex_smoothed_pattern_map_object.chance
             && simplex_noise > simplex_smoothed_pattern_map_object.acceptable_noise.0
             && simplex_noise < simplex_smoothed_pattern_map_object.acceptable_noise.1
@@ -606,14 +618,13 @@ fn generate_position(
     map_object
 }
 
-// how do I deal with detail here??
 fn full_index_from_full_position(full_position: (u32, u32), scale: u32) -> usize {
     let chunk_position = (
         full_position.0 / CHUNK_WIDTH as u32 / scale,
         full_position.1 / CHUNK_WIDTH as u32 / scale,
     );
     let chunk_index = index_from_position(chunk_position, CHUNK_GRID_WIDTH);
-    let full_index_start = chunk_index * CHUNK_WIDTH_SQUARED as u32 * scale;
+    let full_index_start = chunk_index * CHUNK_WIDTH_SQUARED as u32 * (scale * scale);
 
     let local_position = (
         full_position.0 % (CHUNK_WIDTH as u32 * scale),
@@ -644,25 +655,28 @@ pub struct Camera {
 }
 
 fn render_map(user_storage: &mut UserStorage, render_storage: &mut RenderStorage, detail: u8) {
-    let detail_scale = user_storage.details[detail as usize].scale as f32;
+    let detail_scale = user_storage.details[detail as usize].scale;
+    let float_detail_scale = detail_scale as f32;
     let detail_offset = user_storage.details[detail as usize].offset;
 
     let screen_width_as_world_units =
-        2.0 / render_storage.camera.scale / render_storage.aspect_ratio * detail_scale;
-    let screen_height_as_world_units = 2.0 / render_storage.camera.scale * detail_scale;
+        2.0 / render_storage.camera.scale / render_storage.aspect_ratio * float_detail_scale;
+    let screen_height_as_world_units = 2.0 / render_storage.camera.scale * float_detail_scale;
 
-    for x in (render_storage.camera.position.0 * detail_scale - (screen_width_as_world_units * 0.5))
+    for x in (render_storage.camera.position.0 * float_detail_scale
+        - (screen_width_as_world_units * 0.5))
         .floor() as i32
         - 1
-        ..(render_storage.camera.position.0 * detail_scale + (screen_width_as_world_units * 0.5))
+        ..(render_storage.camera.position.0 * float_detail_scale
+            + (screen_width_as_world_units * 0.5))
             .ceil() as i32
             + 1
     {
-        for y in (render_storage.camera.position.1 * detail_scale
+        for y in (render_storage.camera.position.1 * float_detail_scale
             - (screen_height_as_world_units * 0.5))
             .floor() as i32
             - 1
-            ..(render_storage.camera.position.1 * detail_scale
+            ..(render_storage.camera.position.1 * float_detail_scale
                 + (screen_height_as_world_units * 0.5))
                 .ceil() as i32
                 + 1
@@ -671,17 +685,13 @@ fn render_map(user_storage: &mut UserStorage, render_storage: &mut RenderStorage
                 continue;
             }
 
-            let full_index = full_index_from_full_position(
-                (x as u32, y as u32),
-                user_storage.details[detail as usize].scale as u32,
-            );
+            let full_index =
+                full_index_from_full_position((x as u32, y as u32), detail_scale as u32);
 
             if full_index
-                >= FULL_GRID_WIDTH_SQUARED as usize
-                    * user_storage.details[detail as usize].scale as usize
+                >= FULL_GRID_WIDTH_SQUARED as usize * (detail_scale * detail_scale) as usize
             {
-                println!("What the hell?");
-                continue;
+                panic!("Something has gone wrong with the index. It is beyond reasonable array bounds. full index: {}, bounds: {}", full_index, FULL_GRID_WIDTH_SQUARED * (detail_scale * detail_scale))
             }
 
             let map_object = user_storage.map_objects[detail as usize][full_index];
@@ -718,8 +728,8 @@ fn render_map(user_storage: &mut UserStorage, render_storage: &mut RenderStorage
             render_storage.vertices_map[vertex_start] = vertex_data::VertexData {
                 // top right
                 position: [
-                    x as f32 / detail_scale + detail_offset.0 + (0.5 * rendering_size.0),
-                    y as f32 / detail_scale + detail_offset.1 + (0.5 * rendering_size.1),
+                    x as f32 / float_detail_scale + detail_offset.0 + (0.5 * rendering_size.0),
+                    y as f32 / float_detail_scale + detail_offset.1 + (0.5 * rendering_size.1),
                 ],
                 uv: [uv.0 + biomes::SPRITE_SIZE.0, uv.1 + biomes::SPRITE_SIZE.1],
             };
@@ -727,8 +737,8 @@ fn render_map(user_storage: &mut UserStorage, render_storage: &mut RenderStorage
             render_storage.vertices_map[vertex_start + 1] = vertex_data::VertexData {
                 // bottom right
                 position: [
-                    x as f32 / detail_scale + detail_offset.0 + (0.5 * rendering_size.0),
-                    y as f32 / detail_scale + detail_offset.1 + (-0.5 * rendering_size.1),
+                    x as f32 / float_detail_scale + detail_offset.0 + (0.5 * rendering_size.0),
+                    y as f32 / float_detail_scale + detail_offset.1 + (-0.5 * rendering_size.1),
                 ],
                 uv: [uv.0 + biomes::SPRITE_SIZE.0, uv.1],
             };
@@ -736,8 +746,8 @@ fn render_map(user_storage: &mut UserStorage, render_storage: &mut RenderStorage
             render_storage.vertices_map[vertex_start + 2] = vertex_data::VertexData {
                 // top left
                 position: [
-                    x as f32 / detail_scale + detail_offset.0 + (-0.5 * rendering_size.0),
-                    y as f32 / detail_scale + detail_offset.1 + (0.5 * rendering_size.1),
+                    x as f32 / float_detail_scale + detail_offset.0 + (-0.5 * rendering_size.0),
+                    y as f32 / float_detail_scale + detail_offset.1 + (0.5 * rendering_size.1),
                 ],
                 uv: [uv.0, uv.1 + biomes::SPRITE_SIZE.1],
             };
@@ -745,8 +755,8 @@ fn render_map(user_storage: &mut UserStorage, render_storage: &mut RenderStorage
             render_storage.vertices_map[vertex_start + 3] = vertex_data::VertexData {
                 // bottom left
                 position: [
-                    x as f32 / detail_scale + detail_offset.0 + (-0.5 * rendering_size.0),
-                    y as f32 / detail_scale + detail_offset.1 + (-0.5 * rendering_size.1),
+                    x as f32 / float_detail_scale + detail_offset.0 + (-0.5 * rendering_size.0),
+                    y as f32 / float_detail_scale + detail_offset.1 + (-0.5 * rendering_size.1),
                 ],
                 uv: [uv.0, uv.1],
             };
@@ -832,8 +842,11 @@ fn detect_collision(
     true
 }
 
-fn collide(user_storage: &mut UserStorage, full_position: (u32, u32)) {
-    let map_object = user_storage.map_objects[0][full_index_from_full_position(full_position, 1)];
+fn collide(user_storage: &mut UserStorage, full_position: (u32, u32), detail_index: u8) {
+    let detail = user_storage.details[detail_index as usize];
+
+    let map_object = user_storage.map_objects[detail_index as usize]
+        [full_index_from_full_position(full_position, detail.scale)];
 
     let collision_size = match map_object {
         biomes::MapObject::RandomPattern(i) => {
@@ -851,13 +864,17 @@ fn collide(user_storage: &mut UserStorage, full_position: (u32, u32)) {
     if detect_collision(
         user_storage.player.position,
         user_storage.player.size,
-        (full_position.0 as f32, full_position.1 as f32),
+        (
+            full_position.0 as f32 / detail.scale as f32 + detail.offset.0,
+            full_position.1 as f32 / detail.scale as f32 + detail.offset.1,
+        ), //TODO: probably add the offset to this. I'm fairly certain this won't work without offset.
         collision_size,
     ) {
         deal_with_collision(
             user_storage,
             user_storage.player.previous_position,
             full_position,
+            detail_index,
         )
     }
 }
@@ -875,9 +892,10 @@ fn deal_with_collision(
     user_storage: &mut UserStorage,
     fallback_position: (f32, f32),
     full_position: (u32, u32),
+    detail: u8,
 ) {
-    let map_object =
-        &mut user_storage.map_objects[0][full_index_from_full_position(full_position, 1)];
+    let map_object = &mut user_storage.map_objects[detail as usize]
+        [full_index_from_full_position(full_position, user_storage.details[detail as usize].scale)];
 
     let behaviour = match map_object {
         biomes::MapObject::RandomPattern(i) => {
@@ -1055,6 +1073,7 @@ fn draw_text(
     }
 }
 
+// Absolute garbage, fix asap. This needs to account for player size, whether the block thinks it is safe (add a safe bool to all blocks), and detail.
 fn get_safe_position(user_storage: &mut UserStorage) -> (u32, u32) {
     let mut rng = thread_rng();
     let position_range = Uniform::new(0u32, FULL_GRID_WIDTH);
@@ -1071,6 +1090,8 @@ fn get_safe_position(user_storage: &mut UserStorage) -> (u32, u32) {
         safe = match generate_position(
             safe_position,
             0,
+            1,
+            (0.0, 0.0),
             &mut rng,
             user_storage.biome_noise,
             user_storage.percent_range,

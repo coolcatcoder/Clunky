@@ -31,7 +31,7 @@ pub const BIOMES: [Biome; 5] = [
             length: 1,
         },
         simplex_pattern: PatternArray {
-            starting_index: 4,
+            starting_index: 5,
             length: 1,
         },
         simplex_smoothed_pattern: PatternArray {
@@ -51,7 +51,7 @@ pub const BIOMES: [Biome; 5] = [
         },
         simplex_pattern: PatternArray {
             starting_index: 0,
-            length: 4,
+            length: 5,
         },
         simplex_smoothed_pattern: PatternArray {
             starting_index: 0,
@@ -69,7 +69,7 @@ pub const BIOMES: [Biome; 5] = [
             length: 1,
         },
         simplex_pattern: PatternArray {
-            starting_index: 5,
+            starting_index: 6,
             length: 1,
         },
         simplex_smoothed_pattern: PatternArray {
@@ -88,7 +88,7 @@ pub const BIOMES: [Biome; 5] = [
             length: 1,
         },
         simplex_pattern: PatternArray {
-            starting_index: 6,
+            starting_index: 7,
             length: 1,
         },
         simplex_smoothed_pattern: PatternArray {
@@ -107,7 +107,7 @@ pub const BIOMES: [Biome; 5] = [
             length: 5,
         },
         simplex_pattern: PatternArray {
-            starting_index: 7,
+            starting_index: 8,
             length: 1,
         },
         simplex_smoothed_pattern: PatternArray {
@@ -300,11 +300,11 @@ pub const RANDOM_PATTERN_MAP_OBJECTS: [RandomPatternMapObject; 11] = [
     },
 ];
 
-pub const SIMPLEX_PATTERN_MAP_OBJECTS: [SimplexPatternMapObject; 8] = [
+pub const SIMPLEX_PATTERN_MAP_OBJECTS: [SimplexPatternMapObject; 9] = [
     // start mixed jungle
     SimplexPatternMapObject {
         // circus rock
-        detail: 0,
+        detail: 1,
         chance: 100,
         priority: 3,
         behaviour: CollisionBehaviour::Consume(
@@ -316,12 +316,25 @@ pub const SIMPLEX_PATTERN_MAP_OBJECTS: [SimplexPatternMapObject; 8] = [
                 stamina: 2,
             },
         ),
-        rendering_size: (1.0, 1.0),
-        collision_size: (1.0, 1.0),
+        rendering_size: (0.5, 0.5),
+        collision_size: (0.5, 0.5),
         seed: 1,
         acceptable_noise: (0.0, 1.0),
         noise_scale: 0.15,
         uv: (7.0 * SPRITE_SIZE.0, 0.0),
+    },
+    SimplexPatternMapObject {
+        // circus rock detail 0 blank filler
+        detail: 0,
+        chance: 100,
+        priority: 1,
+        behaviour: CollisionBehaviour::None,
+        rendering_size: (0.0, 0.0),
+        collision_size: (0.0, 0.0),
+        seed: 1,
+        acceptable_noise: (-0.1, 1.1),
+        noise_scale: 0.15,
+        uv: (0.0 * SPRITE_SIZE.0, 0.0),
     },
     SimplexPatternMapObject {
         // the weird stamina rock
@@ -339,7 +352,7 @@ pub const SIMPLEX_PATTERN_MAP_OBJECTS: [SimplexPatternMapObject; 8] = [
         rendering_size: (1.0, 1.0),
         collision_size: (1.0, 1.0),
         seed: 1,
-        acceptable_noise: (-0.2, 1.0),
+        acceptable_noise: (-0.2, 0.0),
         noise_scale: 0.15,
         uv: (8.0 * SPRITE_SIZE.0, 0.0),
     },
@@ -477,7 +490,7 @@ pub const SIMPLEX_PATTERN_MAP_OBJECTS: [SimplexPatternMapObject; 8] = [
 
 pub const SIMPLEX_SMOOTHED_PATTERN_MAP_OBJECTS: [SimplexSmoothedPatternMapObject; 0] = [];
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct RandomPatternMapObject {
     pub detail: u8,
     pub chance: u8,
@@ -488,7 +501,7 @@ pub struct RandomPatternMapObject {
     pub uv: (f32, f32),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct SimplexPatternMapObject {
     pub detail: u8,
     pub chance: u8,
@@ -502,7 +515,7 @@ pub struct SimplexPatternMapObject {
     pub uv: (f32, f32),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct SimplexSmoothedPatternMapObject {
     pub detail: u8,
     pub chance: u8,
