@@ -138,6 +138,7 @@ pub enum CollisionBehaviour {
 // stolen:
 
 #[allow(long_running_const_eval)]
+#[allow(unused_assignments)]
 const ALL_BIOME_DATA: (
     [Biome; 5],
     [RandomPatternMapObject; 10],
@@ -145,6 +146,7 @@ const ALL_BIOME_DATA: (
     [SimplexSmoothedPatternMapObject; 0],
 ) = transform_biomes![SPARSE_ROCK, MIXED_JUNGLE, GRASSLANDS, DESERT, MOUNTAINS];
 
+#[allow(dead_code)]
 const TEMPLATE_BIOME: EasyBiome<0, 0, 0> = EasyBiome {
     aabb: Aabb {
         size: (0.0, 0.0),
@@ -679,9 +681,4 @@ macro_rules! transform_biomes {
             (biomes, random_pattern_map_objects, simplex_pattern_map_objects, simplex_smoothed_pattern_map_objects)
         }
     };
-}
-
-#[macro_export]
-macro_rules! ignore {
-    ($($t:tt)*) => {};
 }

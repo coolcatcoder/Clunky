@@ -9,6 +9,7 @@ use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::Sender;
 use std::sync::mpsc::TryRecvError;
+use std::sync::Arc;
 use std::thread;
 use std::time::Instant;
 use winit::event::ElementState;
@@ -21,7 +22,7 @@ use crate::vertex_data;
 const TEXT_SPRITE_SIZE: (f32, f32) = (1.0 / 30.0, 1.0 / 5.0);
 
 const FULL_GRID_WIDTH: u32 = CHUNK_WIDTH as u32 * 100;
-const FULL_GRID_WIDTH_SQUARED: u32 = FULL_GRID_WIDTH * FULL_GRID_WIDTH; // 256**2
+const FULL_GRID_WIDTH_SQUARED: u32 = FULL_GRID_WIDTH * FULL_GRID_WIDTH;
 
 const CHUNK_WIDTH: u16 = 128;
 pub const CHUNK_WIDTH_SQUARED: u16 = CHUNK_WIDTH * CHUNK_WIDTH;
@@ -30,13 +31,14 @@ pub const CHUNK_WIDTH_SQUARED: u16 = CHUNK_WIDTH * CHUNK_WIDTH;
 const CHUNK_GRID_WIDTH: u32 = FULL_GRID_WIDTH / CHUNK_WIDTH as u32;
 const CHUNK_GRID_WIDTH_SQUARED: u32 = CHUNK_GRID_WIDTH * CHUNK_GRID_WIDTH;
 
-const FIXED_UPDATE_TIME_STEP: f32 = 0.003;
+const FIXED_UPDATE_TIME_STEP: f32 = 0.004;
 const MAX_SUBSTEPS: u32 = 150;
 
 pub fn start(render_storage: &mut RenderStorage) -> UserStorage {
     render_storage.camera.scale = 0.12;
 
-    render_storage.brightness = 2.5;
+    //render_storage.brightness = 2.5;
+    render_storage.brightness = 1.0;
 
     let mut rng = thread_rng();
 
@@ -179,8 +181,17 @@ pub fn update(
     render_storage.vertex_count_map = 0;
     render_storage.index_count_map = 0;
 
+    let read_only_map_objects = Arc::new(user_storage.map_objects.clone()); //TODO: this is going to be slow. Fix.
+
+    let (render_sender, render_receiver): (Sender<(Vec<vertex_data::VertexData>, Vec<u32>)>, Receiver<(Vec<vertex_data::VertexData>, Vec<u32>)>) = mpsc::channel();
+
     for detail_index in 0..user_storage.details.len() {
-        render_map(user_storage, render_storage, detail_index as u8);
+        render_map_single_threaded(user_storage, render_storage, detail_index as u8);
+        
+        for render_data in &render_receiver {
+            render_storage.vertices_map[render_storage.vertex_count_map as usize..render_storage.vertex_count_map as usize + render_data.0.len()].copy_from_slice(render_data.0.as_slice());
+            render_storage.indices_map[render_storage.index_count_map as usize..render_storage.index_count_map as usize + render_data.1.len()].copy_from_slice(render_data.1.as_slice());
+        }
     }
 
     render_player(user_storage, render_storage);
@@ -654,7 +665,131 @@ pub struct Camera {
     pub position: (f32, f32),
 }
 
-fn render_map(user_storage: &mut UserStorage, render_storage: &mut RenderStorage, detail: u8) {
+fn render_map(map_objects: Arc<[Vec<biomes::MapObject>; 2]>, camera: Camera, detail: u8) {
+    
+
+    let detail_scale = user_storage.details[detail as usize].scale;
+    let float_detail_scale = detail_scale as f32;
+    let detail_offset = user_storage.details[detail as usize].offset;
+
+    let screen_width_as_world_units =
+        2.0 / render_storage.camera.scale / render_storage.aspect_ratio * float_detail_scale;
+    let screen_height_as_world_units = 2.0 / render_storage.camera.scale * float_detail_scale;
+
+    for x in (render_storage.camera.position.0 * float_detail_scale
+        - (screen_width_as_world_units * 0.5))
+        .floor() as i32
+        - 1
+        ..(render_storage.camera.position.0 * float_detail_scale
+            + (screen_width_as_world_units * 0.5))
+            .ceil() as i32
+            + 1
+    {
+        for y in (render_storage.camera.position.1 * float_detail_scale
+            - (screen_height_as_world_units * 0.5))
+            .floor() as i32
+            - 1
+            ..(render_storage.camera.position.1 * float_detail_scale
+                + (screen_height_as_world_units * 0.5))
+                .ceil() as i32
+                + 1
+        {
+            if x < 0 || y < 0 {
+                continue;
+            }
+
+            let full_index =
+                full_index_from_full_position((x as u32, y as u32), detail_scale as u32);
+
+            if full_index
+                >= FULL_GRID_WIDTH_SQUARED as usize * (detail_scale * detail_scale) as usize
+            {
+                panic!("Something has gone wrong with the index. It is beyond reasonable array bounds. full index: {}, bounds: {}", full_index, FULL_GRID_WIDTH_SQUARED * (detail_scale * detail_scale))
+            }
+
+            let map_object = user_storage.map_objects[detail as usize][full_index];
+
+            let (rendering_size, uv) = match map_object {
+                biomes::MapObject::RandomPattern(i) => {
+                    let random_pattern_map_object = &biomes::RANDOM_PATTERN_MAP_OBJECTS[i as usize];
+                    (
+                        random_pattern_map_object.rendering_size,
+                        random_pattern_map_object.uv,
+                    )
+                }
+                biomes::MapObject::SimplexPattern(i) => {
+                    let simplex_pattern_map_object =
+                        &biomes::SIMPLEX_PATTERN_MAP_OBJECTS[i as usize];
+                    (
+                        simplex_pattern_map_object.rendering_size,
+                        simplex_pattern_map_object.uv,
+                    )
+                }
+                biomes::MapObject::SimplexSmoothedPattern(_) => {
+                    todo!();
+                    //let simplex_smoothed_pattern_map_object = biomes::SIMPLEX_SMOOTHED_PATTERN_MAP_OBJECTS[i as usize];
+                    //(simplex_smoothed_pattern_map_object.rendering_size, simplex_smoothed_pattern_map_object.uv)
+                }
+                biomes::MapObject::None => {
+                    continue;
+                }
+            };
+
+            let vertex_start = render_storage.vertex_count_map as usize;
+            let index_start = render_storage.index_count_map as usize;
+
+            render_storage.vertices_map[vertex_start] = vertex_data::VertexData {
+                // top right
+                position: [
+                    x as f32 / float_detail_scale + detail_offset.0 + (0.5 * rendering_size.0),
+                    y as f32 / float_detail_scale + detail_offset.1 + (0.5 * rendering_size.1),
+                ],
+                uv: [uv.0 + biomes::SPRITE_SIZE.0, uv.1 + biomes::SPRITE_SIZE.1],
+            };
+
+            render_storage.vertices_map[vertex_start + 1] = vertex_data::VertexData {
+                // bottom right
+                position: [
+                    x as f32 / float_detail_scale + detail_offset.0 + (0.5 * rendering_size.0),
+                    y as f32 / float_detail_scale + detail_offset.1 + (-0.5 * rendering_size.1),
+                ],
+                uv: [uv.0 + biomes::SPRITE_SIZE.0, uv.1],
+            };
+
+            render_storage.vertices_map[vertex_start + 2] = vertex_data::VertexData {
+                // top left
+                position: [
+                    x as f32 / float_detail_scale + detail_offset.0 + (-0.5 * rendering_size.0),
+                    y as f32 / float_detail_scale + detail_offset.1 + (0.5 * rendering_size.1),
+                ],
+                uv: [uv.0, uv.1 + biomes::SPRITE_SIZE.1],
+            };
+
+            render_storage.vertices_map[vertex_start + 3] = vertex_data::VertexData {
+                // bottom left
+                position: [
+                    x as f32 / float_detail_scale + detail_offset.0 + (-0.5 * rendering_size.0),
+                    y as f32 / float_detail_scale + detail_offset.1 + (-0.5 * rendering_size.1),
+                ],
+                uv: [uv.0, uv.1],
+            };
+
+            render_storage.indices_map[index_start] = vertex_start as u32;
+            render_storage.indices_map[index_start + 1] = vertex_start as u32 + 1;
+            render_storage.indices_map[index_start + 2] = vertex_start as u32 + 2;
+
+            render_storage.indices_map[index_start + 3] = vertex_start as u32 + 1;
+            render_storage.indices_map[index_start + 4] = vertex_start as u32 + 3;
+            render_storage.indices_map[index_start + 5] = vertex_start as u32 + 2;
+
+            render_storage.vertex_count_map += 4;
+            render_storage.index_count_map += 6;
+        }
+    }
+}
+
+#[deprecated]
+fn render_map_single_threaded(user_storage: &mut UserStorage, render_storage: &mut RenderStorage, detail: u8) {
     let detail_scale = user_storage.details[detail as usize].scale;
     let float_detail_scale = detail_scale as f32;
     let detail_offset = user_storage.details[detail as usize].offset;
