@@ -1,6 +1,5 @@
 use noise::NoiseFn;
 use noise::OpenSimplex;
-use rand::distributions::Bernoulli;
 use rand::distributions::{Distribution, Uniform};
 use rand::rngs::ThreadRng;
 use rand::thread_rng;
@@ -8,51 +7,35 @@ use std::ops::{Add, Div, Mul, Rem};
 use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::Sender;
-use std::sync::mpsc::TryRecvError;
-use std::sync::Arc;
 use std::thread;
 use std::time::Instant;
 use winit::event::ElementState;
 use winit::event::KeyboardInput;
-use winit::event::VirtualKeyCode;
 
 use crate::biomes;
+use crate::marching_squares;
+use crate::menus;
 use crate::vertex_data;
 
-const TEXT_SPRITE_SIZE: (f32, f32) = (1.0 / 30.0, 1.0 / 5.0);
+pub const TEXT_SPRITE_SIZE: (f32, f32) = (1.0 / 30.0, 1.0 / 5.0);
 
-const FULL_GRID_WIDTH: u32 = CHUNK_WIDTH as u32 * 100;
-const FULL_GRID_WIDTH_SQUARED: u32 = FULL_GRID_WIDTH * FULL_GRID_WIDTH;
+pub const FULL_GRID_WIDTH: u32 = CHUNK_WIDTH as u32 * 50; //100;
+pub const FULL_GRID_WIDTH_SQUARED: u32 = FULL_GRID_WIDTH * FULL_GRID_WIDTH;
 
-const CHUNK_WIDTH: u16 = 128;
+pub const CHUNK_WIDTH: u16 = 64;
 pub const CHUNK_WIDTH_SQUARED: u16 = CHUNK_WIDTH * CHUNK_WIDTH;
 //const CHUNK_WIDTH_LOG2: u16 = (u16::BITS - CHUNK_WIDTH.leading_zeros()) as u16;
 
-const CHUNK_GRID_WIDTH: u32 = FULL_GRID_WIDTH / CHUNK_WIDTH as u32;
-const CHUNK_GRID_WIDTH_SQUARED: u32 = CHUNK_GRID_WIDTH * CHUNK_GRID_WIDTH;
+pub const CHUNK_GRID_WIDTH: u32 = FULL_GRID_WIDTH / CHUNK_WIDTH as u32;
+pub const CHUNK_GRID_WIDTH_SQUARED: u32 = CHUNK_GRID_WIDTH * CHUNK_GRID_WIDTH;
 
-const FIXED_UPDATE_TIME_STEP: f32 = 0.004;
-const MAX_SUBSTEPS: u32 = 150;
+pub const FIXED_UPDATE_TIME_STEP: f32 = 0.004;
+pub const MAX_SUBSTEPS: u32 = 150;
 
 pub fn start(render_storage: &mut RenderStorage) -> UserStorage {
     render_storage.camera.scale = 0.12;
 
-    //render_storage.brightness = 2.5;
-    render_storage.brightness = 1.0;
-
-    let mut rng = thread_rng();
-
-    let seed_range = Uniform::new(0u32, 1000);
-    let player_size_range = Uniform::new(0.25, 10.0);
-
-    let mut player_size = (0.7, 0.7);
-
-    if Bernoulli::new(0.1).unwrap().sample(&mut rng) {
-        player_size = (
-            player_size_range.sample(&mut rng),
-            player_size_range.sample(&mut rng),
-        )
-    }
+    render_storage.brightness = 2.5;
 
     let (generation_sender, generation_receiver) = mpsc::channel();
 
@@ -62,13 +45,10 @@ pub fn start(render_storage: &mut RenderStorage) -> UserStorage {
         wasd_held: (false, false, false, false),
         zoom_held: (false, false),
         show_debug: false,
-        main_seed: seed_range.sample(&mut rng),
+        main_seed: 0,
         percent_range: Uniform::new(0u8, 100),
-        biome_noise: (
-            OpenSimplex::new(seed_range.sample(&mut rng)),
-            OpenSimplex::new(seed_range.sample(&mut rng)),
-        ),
-        chunks_generated: vec![false; CHUNK_GRID_WIDTH_SQUARED as usize],
+        biome_noise: (OpenSimplex::new(0), OpenSimplex::new(0)),
+        chunks_generated: vec![false; 0],
         details: [
             Detail {
                 scale: 1,
@@ -78,32 +58,38 @@ pub fn start(render_storage: &mut RenderStorage) -> UserStorage {
                 scale: 2,
                 offset: (-0.25, -0.25),
             },
+            Detail {
+                scale: 3,
+                offset: (0.0, 0.0),
+            },
         ],
         map_objects: [
-            vec![biomes::MapObject::None; FULL_GRID_WIDTH_SQUARED as usize],
-            vec![biomes::MapObject::None; FULL_GRID_WIDTH_SQUARED as usize * 4],
+            vec![biomes::MapObject::None; 0],
+            vec![biomes::MapObject::None; 0],
+            vec![biomes::MapObject::None; 0],
         ],
         generation_sender,
         generation_receiver,
         available_parallelism,
         map_objects_per_thread: CHUNK_WIDTH_SQUARED as usize / available_parallelism,
         player: Player {
-            position: (10.0, 10.0),
-            previous_position: (5.0, 5.0),
+            position: (0.0, 0.0),
+            previous_position: (0.0, 0.0),
             sprinting: false,
             collision_debug: false,
-            size: player_size,
+            size: (0.0, 0.0),
             statistics: biomes::Statistics {
-                strength: 1,
-                health: 30,
-                stamina: 100,
+                strength: 0,
+                health: 0,
+                stamina: 0,
             },
         },
         stop_watch: Instant::now(),
         fixed_time_passed: 0.0,
+        multithread_rendering: false,
+        chunk_generation: 0,
+        menu: menus::Menu::TitleScreen,
     };
-
-    render_storage.camera.position = user_storage.player.position;
 
     let check = user_storage.map_objects_per_thread * available_parallelism;
 
@@ -111,21 +97,7 @@ pub fn start(render_storage: &mut RenderStorage) -> UserStorage {
 
     assert!(check == CHUNK_WIDTH_SQUARED as usize);
 
-    let safe_position = get_safe_position(&mut user_storage);
-
-    user_storage.player.position = (safe_position.0 as f32, safe_position.1 as f32);
-
-    let starting_chunk = (
-        safe_position.0 / CHUNK_WIDTH as u32,
-        safe_position.1 / CHUNK_WIDTH as u32,
-    );
-
-    generate_chunk(&user_storage, starting_chunk);
-
-    user_storage.chunks_generated[index_from_position(starting_chunk, CHUNK_GRID_WIDTH) as usize] =
-        true;
-
-    //let pain = transform_biomes![TESTING_BIOME, TESTING_BIOME];
+    (menus::TITLE_SCREEN.start)(&mut user_storage, render_storage);
 
     user_storage
 }
@@ -142,165 +114,14 @@ pub fn update(
     //camera: &mut Camera,
     //brightness: &mut f32,
 ) {
-    // TODO: work out how the hell to get a fixed update working...
-
-    let seconds_since_start = render_storage.starting_time.elapsed().as_secs_f32();
-
-    let mut substeps = 0;
-
-    while user_storage.fixed_time_passed < seconds_since_start {
-        fixed_update(user_storage);
-        user_storage.fixed_time_passed += FIXED_UPDATE_TIME_STEP;
-
-        substeps += 1;
-
-        if substeps > MAX_SUBSTEPS {
-            println!(
-                "Too many substeps per frame. Entered performance sinkhole. Substeps: {}",
-                substeps
-            )
+    match user_storage.menu {
+        menus::Menu::TitleScreen => {
+            (menus::TITLE_SCREEN.update)(user_storage, render_storage, delta_time, average_fps)
         }
-    }
-
-    let zoom_motion = match user_storage.zoom_held {
-        (true, false) => -1.0,
-        (false, true) => 1.0,
-        _ => 0.0,
-    };
-
-    let camera_speed = match user_storage.player.sprinting {
-        // bit jank, but it works
-        false => 0.01,
-        true => 0.1,
-    };
-
-    render_storage.camera.scale += zoom_motion * delta_time * (camera_speed);
-
-    render_storage.camera.position = user_storage.player.position;
-
-    render_storage.vertex_count_map = 0;
-    render_storage.index_count_map = 0;
-
-    let read_only_map_objects = Arc::new(user_storage.map_objects.clone()); //TODO: this is going to be slow. Fix.
-
-    let (render_sender, render_receiver): (Sender<(Vec<vertex_data::VertexData>, Vec<u32>)>, Receiver<(Vec<vertex_data::VertexData>, Vec<u32>)>) = mpsc::channel();
-
-    for detail_index in 0..user_storage.details.len() {
-        render_map_single_threaded(user_storage, render_storage, detail_index as u8);
-        
-        for render_data in &render_receiver {
-            render_storage.vertices_map[render_storage.vertex_count_map as usize..render_storage.vertex_count_map as usize + render_data.0.len()].copy_from_slice(render_data.0.as_slice());
-            render_storage.indices_map[render_storage.index_count_map as usize..render_storage.index_count_map as usize + render_data.1.len()].copy_from_slice(render_data.1.as_slice());
+        menus::Menu::Alive => {
+            (menus::ALIVE.update)(user_storage, render_storage, delta_time, average_fps)
         }
-    }
-
-    render_player(user_storage, render_storage);
-
-    render_storage.vertex_count_text = 0;
-    render_storage.index_count_text = 0;
-
-    let screen_width = 2.0 / render_storage.aspect_ratio;
-
-    draw_text(
-        render_storage,
-        (screen_width * -0.5 + screen_width * 0.1, -0.8),
-        (0.05, 0.1),
-        0.025,
-        format!("Health: {}", user_storage.player.statistics.health).as_str(),
-    );
-
-    draw_text(
-        render_storage,
-        (screen_width * -0.5 + screen_width * 0.1, -0.7),
-        (0.05, 0.1),
-        0.025,
-        format!("Stamina: {}%", user_storage.player.statistics.stamina).as_str(),
-    );
-
-    draw_text(
-        render_storage,
-        (screen_width * -0.5 + screen_width * 0.1, -0.6),
-        (0.05, 0.1),
-        0.025,
-        format!("@ Strength: {}", user_storage.player.statistics.strength).as_str(),
-    );
-
-    if user_storage.show_debug {
-        draw_text(
-            render_storage,
-            (screen_width * -0.5 + screen_width * 0.1, 0.4),
-            (0.05, 0.1),
-            0.025,
-            format!("substeps: {}", substeps).as_str(),
-        );
-
-        draw_text(
-            render_storage,
-            (screen_width * -0.5 + screen_width * 0.1, 0.5),
-            (0.05, 0.1),
-            0.025,
-            format!(
-                "player.position: ({},{})",
-                user_storage.player.position.0, user_storage.player.position.1
-            )
-            .as_str(),
-        );
-
-        draw_text(
-            render_storage,
-            (screen_width * -0.5 + screen_width * 0.1, 0.6),
-            (0.05, 0.1),
-            0.025,
-            format!(
-                "player.size: ({},{})",
-                user_storage.player.size.0, user_storage.player.size.1
-            )
-            .as_str(),
-        );
-
-        draw_text(
-            render_storage,
-            (screen_width * -0.5 + screen_width * 0.1, 0.7),
-            (0.05, 0.1),
-            0.025,
-            format!("average_fps: {}", average_fps).as_str(),
-        );
-
-        draw_text(
-            render_storage,
-            (screen_width * -0.5 + screen_width * 0.1, 0.8),
-            (0.05, 0.1),
-            0.025,
-            format!("delta_time: {}", delta_time).as_str(),
-        );
-    }
-
-    match user_storage.generation_receiver.try_recv() {
-        Ok(generation) => {
-            user_storage.map_objects[generation.2 as usize]
-                [generation.1..generation.1 + generation.0.len()]
-                .copy_from_slice(generation.0.as_slice());
-        }
-        Err(TryRecvError::Empty) => {}
-        Err(TryRecvError::Disconnected) => {
-            panic!("Something got disconnected from the chunk receivers and senders!")
-        }
-    }
-
-    for x in -1..2 {
-        for y in -1..2 {
-            let player_chunk_position = (
-                (user_storage.player.position.0 as i32 / CHUNK_WIDTH as i32 + x) as u32,
-                (user_storage.player.position.1 as i32 / CHUNK_WIDTH as i32 + y) as u32,
-            );
-            let player_chunk_index =
-                index_from_position(player_chunk_position, CHUNK_GRID_WIDTH) as usize;
-
-            if !user_storage.chunks_generated[player_chunk_index] {
-                generate_chunk(&user_storage, player_chunk_position);
-                user_storage.chunks_generated[player_chunk_index] = true;
-            }
-        }
+        _ => {}
     }
 }
 
@@ -310,6 +131,13 @@ pub fn fixed_update(user_storage: &mut UserStorage) {
         (false, false, true, false) => (0.0, 1.0),
         (false, false, false, true) => (1.0, 0.0),
         (false, true, false, false) => (-1.0, 0.0),
+
+        (true, true, false, false) => (-0.7, -0.7),
+        (true, false, false, true) => (0.7, -0.7),
+
+        (false, true, true, false) => (-0.7, 0.7),
+        (false, false, true, true) => (0.7, 0.7),
+
         _ => (0.0, 0.0),
     };
 
@@ -376,48 +204,21 @@ pub fn fixed_update(user_storage: &mut UserStorage) {
     }
 }
 
-pub fn on_keyboard_input(user_storage: &mut UserStorage, input: KeyboardInput) {
-    if let Some(key_code) = input.virtual_keycode {
-        match key_code {
-            VirtualKeyCode::W => user_storage.wasd_held.0 = is_pressed(input.state),
-            VirtualKeyCode::A => user_storage.wasd_held.1 = is_pressed(input.state),
-            VirtualKeyCode::S => user_storage.wasd_held.2 = is_pressed(input.state),
-            VirtualKeyCode::D => user_storage.wasd_held.3 = is_pressed(input.state),
-            VirtualKeyCode::F => {
-                if is_pressed(input.state) {
-                    user_storage.player.sprinting = !user_storage.player.sprinting;
-                }
-            }
-            VirtualKeyCode::R => {
-                if is_pressed(input.state) {
-                    generate_chunk(
-                        &user_storage,
-                        (
-                            (user_storage.player.position.0 / CHUNK_WIDTH as f32).floor() as u32,
-                            (user_storage.player.position.1 / CHUNK_WIDTH as f32).floor() as u32,
-                        ),
-                    );
-                }
-            }
-            VirtualKeyCode::E => {
-                if is_pressed(input.state) {
-                    user_storage.player.collision_debug = !user_storage.player.collision_debug;
-                }
-            }
-            VirtualKeyCode::Up => user_storage.zoom_held.0 = is_pressed(input.state),
-            VirtualKeyCode::Down => user_storage.zoom_held.1 = is_pressed(input.state),
-
-            VirtualKeyCode::V => {
-                if is_pressed(input.state) {
-                    user_storage.show_debug = !user_storage.show_debug;
-                }
-            }
-            _ => (),
+pub fn on_keyboard_input(
+    user_storage: &mut UserStorage,
+    render_storage: &mut RenderStorage,
+    input: KeyboardInput,
+) {
+    match user_storage.menu {
+        menus::Menu::TitleScreen => {
+            (menus::TITLE_SCREEN.on_keyboard_input)(user_storage, render_storage, input)
         }
+        menus::Menu::Alive => (menus::ALIVE.on_keyboard_input)(user_storage, render_storage, input),
+        _ => {}
     }
 }
 
-fn is_pressed(state: ElementState) -> bool {
+pub fn is_pressed(state: ElementState) -> bool {
     match state {
         ElementState::Pressed => true,
         ElementState::Released => false,
@@ -425,29 +226,32 @@ fn is_pressed(state: ElementState) -> bool {
 }
 
 #[derive(Debug, Copy, Clone)]
-struct Detail {
+pub struct Detail {
     scale: u32, // This is unintuitive. Basically how many of these blocks become 1 block.
     offset: (f32, f32),
 }
 
 pub struct UserStorage {
     // This is for the user's stuff. The event loop should not touch this.
-    wasd_held: (bool, bool, bool, bool),
-    zoom_held: (bool, bool),
-    show_debug: bool,
-    main_seed: u32,
-    percent_range: Uniform<u8>,
-    biome_noise: (OpenSimplex, OpenSimplex),
-    chunks_generated: Vec<bool>,
-    details: [Detail; 2],
-    map_objects: [Vec<biomes::MapObject>; 2],
-    generation_sender: Sender<(Vec<biomes::MapObject>, usize, u8)>,
-    generation_receiver: Receiver<(Vec<biomes::MapObject>, usize, u8)>,
-    available_parallelism: usize,
-    map_objects_per_thread: usize,
-    player: Player,
-    stop_watch: Instant,
-    fixed_time_passed: f32,
+    pub wasd_held: (bool, bool, bool, bool),
+    pub zoom_held: (bool, bool),
+    pub show_debug: bool,
+    pub main_seed: u32,
+    pub percent_range: Uniform<u8>,
+    pub biome_noise: (OpenSimplex, OpenSimplex),
+    pub chunks_generated: Vec<bool>,
+    pub details: [Detail; 3],
+    pub map_objects: [Vec<biomes::MapObject>; 3],
+    pub generation_sender: Sender<(Vec<biomes::MapObject>, usize, u8)>,
+    pub generation_receiver: Receiver<(Vec<biomes::MapObject>, usize, u8)>,
+    pub available_parallelism: usize,
+    pub map_objects_per_thread: usize,
+    pub player: Player,
+    pub stop_watch: Instant,
+    pub fixed_time_passed: f32,
+    pub multithread_rendering: bool,
+    pub chunk_generation: u8,
+    pub menu: menus::Menu,
 }
 
 pub struct RenderStorage {
@@ -469,7 +273,93 @@ pub struct RenderStorage {
     pub starting_time: Instant,
 }
 
-fn generate_chunk(user_storage: &UserStorage, chunk_position: (u32, u32)) {
+pub fn generate_chunk(user_storage: &UserStorage, chunk_position: (u32, u32)) {
+    let biome_noise = user_storage.biome_noise;
+    let percent_range = user_storage.percent_range;
+    let main_seed = user_storage.main_seed;
+
+    let details = user_storage.details;
+
+    let full_position_start_unscaled = (
+        chunk_position.0 * CHUNK_WIDTH as u32,
+        chunk_position.1 * CHUNK_WIDTH as u32,
+    );
+
+    let generate_piece_of_chunk =
+        move |amount_of_chunk_to_generate_unscaled: usize, // replace 'chunk' in name with 'mapobjects' perhaps?
+              generation_offset_unscaled: usize,
+              generation_sender: Sender<(Vec<biomes::MapObject>, usize, u8)>| {
+            for detail_index in 0..details.len() {
+                let detail = details[detail_index];
+                let mut generation_array = vec![
+                    biomes::MapObject::None;
+                    amount_of_chunk_to_generate_unscaled
+                        * (detail.scale * detail.scale) as usize
+                ];
+
+                let full_position_start = (
+                    full_position_start_unscaled.0 * detail.scale as u32,
+                    full_position_start_unscaled.1 * detail.scale as u32,
+                );
+
+                for i in
+                    0..amount_of_chunk_to_generate_unscaled * (detail.scale * detail.scale) as usize
+                {
+                    let local_position = position_from_index(
+                        (i + (generation_offset_unscaled * (detail.scale * detail.scale) as usize))
+                            as u32,
+                        CHUNK_WIDTH as u32 * detail.scale as u32,
+                    );
+                    let full_position = (
+                        full_position_start.0 + local_position.0,
+                        full_position_start.1 + local_position.1,
+                    );
+
+                    generation_array[i] = generate_position(
+                        full_position,
+                        detail_index as u8,
+                        detail.scale,
+                        detail.offset,
+                        &mut thread_rng(),
+                        biome_noise,
+                        percent_range,
+                        main_seed,
+                    );
+                }
+
+                let full_index_start =
+                    full_index_from_full_position(full_position_start, detail.scale as u32);
+
+                generation_sender
+                    .send((
+                        generation_array,
+                        full_index_start
+                            + (generation_offset_unscaled * (detail.scale * detail.scale) as usize),
+                        detail_index as u8,
+                    ))
+                    .unwrap()
+            }
+        };
+
+    let map_objects_per_thread =
+        CHUNK_WIDTH_SQUARED as usize / (user_storage.available_parallelism - 1); // have fun messing around with this
+
+    for thread_index in 0..user_storage.available_parallelism - 1 {
+        let generation_sender = user_storage.generation_sender.clone();
+        thread::Builder::new()
+            .name("Generation Thread".into())
+            .spawn(move || {
+                generate_piece_of_chunk(
+                    map_objects_per_thread,
+                    thread_index * map_objects_per_thread,
+                    generation_sender.clone(),
+                )
+            })
+            .unwrap();
+    }
+}
+
+pub fn generate_chunk_old(user_storage: &UserStorage, chunk_position: (u32, u32)) {
     let biome_noise = user_storage.biome_noise;
     let percent_range = user_storage.percent_range;
     let main_seed = user_storage.main_seed;
@@ -609,21 +499,103 @@ fn generate_position(
     {
         let simplex_smoothed_pattern_map_object =
             &biomes::SIMPLEX_SMOOTHED_PATTERN_MAP_OBJECTS[i as usize];
-        let simplex_noise =
+        // let simplex_noise =
+        //     OpenSimplex::new(main_seed + simplex_smoothed_pattern_map_object.seed as u32).get([
+        //         position_as_float_array_descaled[0]
+        //             * simplex_smoothed_pattern_map_object.noise_scale,
+        //         position_as_float_array_descaled[1]
+        //             * simplex_smoothed_pattern_map_object.noise_scale,
+        //     ]);
+
+        let corners_noise = [
+            // TODO: asap write somewhere what corners are for what positions, as I'm confused as hell
             OpenSimplex::new(main_seed + simplex_smoothed_pattern_map_object.seed as u32).get([
-                position_as_float_array_descaled[0]
+                // bottom left
+                (position_as_float_array_descaled[0]
+                    - simplex_smoothed_pattern_map_object.rendering_size.0 as f64 * 0.5)
                     * simplex_smoothed_pattern_map_object.noise_scale,
-                position_as_float_array_descaled[1]
+                (position_as_float_array_descaled[1]
+                    - simplex_smoothed_pattern_map_object.rendering_size.1 as f64 * 0.5)
                     * simplex_smoothed_pattern_map_object.noise_scale,
-            ]);
+            ]),
+            OpenSimplex::new(main_seed + simplex_smoothed_pattern_map_object.seed as u32).get([
+                // bottom right
+                (position_as_float_array_descaled[0]
+                    + simplex_smoothed_pattern_map_object.rendering_size.0 as f64 * 0.5)
+                    * simplex_smoothed_pattern_map_object.noise_scale,
+                (position_as_float_array_descaled[1]
+                    - simplex_smoothed_pattern_map_object.rendering_size.1 as f64 * 0.5)
+                    * simplex_smoothed_pattern_map_object.noise_scale,
+            ]),
+            OpenSimplex::new(main_seed + simplex_smoothed_pattern_map_object.seed as u32).get([
+                // top right
+                (position_as_float_array_descaled[0]
+                    + simplex_smoothed_pattern_map_object.rendering_size.0 as f64 * 0.5)
+                    * simplex_smoothed_pattern_map_object.noise_scale,
+                (position_as_float_array_descaled[1]
+                    + simplex_smoothed_pattern_map_object.rendering_size.1 as f64 * 0.5)
+                    * simplex_smoothed_pattern_map_object.noise_scale,
+            ]),
+            OpenSimplex::new(main_seed + simplex_smoothed_pattern_map_object.seed as u32).get([
+                // top left
+                (position_as_float_array_descaled[0]
+                    - simplex_smoothed_pattern_map_object.rendering_size.0 as f64 * 0.5)
+                    * simplex_smoothed_pattern_map_object.noise_scale,
+                (position_as_float_array_descaled[1]
+                    + simplex_smoothed_pattern_map_object.rendering_size.1 as f64 * 0.5)
+                    * simplex_smoothed_pattern_map_object.noise_scale,
+            ]),
+        ];
+
+        let corners = [
+            if corners_noise[0] > simplex_smoothed_pattern_map_object.acceptable_noise.0
+                && corners_noise[0] < simplex_smoothed_pattern_map_object.acceptable_noise.1
+            {
+                true
+            } else {
+                false
+            },
+            if corners_noise[1] > simplex_smoothed_pattern_map_object.acceptable_noise.0
+                && corners_noise[1] < simplex_smoothed_pattern_map_object.acceptable_noise.1
+            {
+                true
+            } else {
+                false
+            },
+            if corners_noise[2] > simplex_smoothed_pattern_map_object.acceptable_noise.0
+                && corners_noise[2] < simplex_smoothed_pattern_map_object.acceptable_noise.1
+            {
+                true
+            } else {
+                false
+            },
+            if corners_noise[3] > simplex_smoothed_pattern_map_object.acceptable_noise.0
+                && corners_noise[3] < simplex_smoothed_pattern_map_object.acceptable_noise.1
+            {
+                true
+            } else {
+                false
+            },
+        ];
+
+        let has_correct_noise = corners[0] || corners[1] || corners[2] || corners[3];
+
         if simplex_smoothed_pattern_map_object.priority > highest_priority
             && detail == simplex_smoothed_pattern_map_object.detail
             && percent_range.sample(&mut rng) < simplex_smoothed_pattern_map_object.chance
-            && simplex_noise > simplex_smoothed_pattern_map_object.acceptable_noise.0
-            && simplex_noise < simplex_smoothed_pattern_map_object.acceptable_noise.1
+            && has_correct_noise
+        //&& simplex_noise > simplex_smoothed_pattern_map_object.acceptable_noise.0
+        //&& simplex_noise < simplex_smoothed_pattern_map_object.acceptable_noise.1
         {
-            map_object = biomes::MapObject::SimplexSmoothedPattern(i);
-            highest_priority = simplex_smoothed_pattern_map_object.priority
+            let square_index = marching_squares::get_square_index(corners);
+
+            if square_index != 0 {
+                // if square index is 0, then no corners had the iso surface, meaning it basically shouldn't exist, even if the center had the iso surface. Potentially could create a slower but more accurate marching cubes by including center in the calculation of the square index.
+                map_object = biomes::MapObject::SimplexSmoothedPattern(i, square_index); // TODO: replace 0 with the actual marching square index
+                highest_priority = simplex_smoothed_pattern_map_object.priority;
+            } else {
+                panic!("Why is it 0??");
+            }
         }
     }
     map_object
@@ -646,7 +618,7 @@ fn full_index_from_full_position(full_position: (u32, u32), scale: u32) -> usize
     (full_index_start + local_index) as usize
 }
 
-fn index_from_position<T>(position: (T, T), width: T) -> T
+pub fn index_from_position<T>(position: (T, T), width: T) -> T
 where
     T: Mul<T, Output = T> + Add<T, Output = T>,
 {
@@ -665,131 +637,165 @@ pub struct Camera {
     pub position: (f32, f32),
 }
 
-fn render_map(map_objects: Arc<[Vec<biomes::MapObject>; 2]>, camera: Camera, detail: u8) {
-    
+fn render_chunk() {} // instead of rendering every frame, which is slow, you can just render the 9 chunks around the player, keeping an array of which chunks are rendered
 
+#[deprecated]
+pub fn render_map(
+    user_storage: &mut UserStorage,
+    render_storage: &mut RenderStorage,
+    detail: u8,
+    render_sender: &Sender<(Vec<vertex_data::VertexData>, u32, Vec<u32>, u32)>,
+) {
     let detail_scale = user_storage.details[detail as usize].scale;
     let float_detail_scale = detail_scale as f32;
     let detail_offset = user_storage.details[detail as usize].offset;
 
+    let scaled_camera_position = (
+        render_storage.camera.position.0 * float_detail_scale,
+        render_storage.camera.position.1 * float_detail_scale,
+    );
+
     let screen_width_as_world_units =
-        2.0 / render_storage.camera.scale / render_storage.aspect_ratio * float_detail_scale;
-    let screen_height_as_world_units = 2.0 / render_storage.camera.scale * float_detail_scale;
+        2.0 / render_storage.camera.scale / render_storage.aspect_ratio * float_detail_scale + 5.0;
+    let screen_height_as_world_units = 2.0 / render_storage.camera.scale * float_detail_scale + 5.0;
 
-    for x in (render_storage.camera.position.0 * float_detail_scale
-        - (screen_width_as_world_units * 0.5))
-        .floor() as i32
-        - 1
-        ..(render_storage.camera.position.0 * float_detail_scale
-            + (screen_width_as_world_units * 0.5))
-            .ceil() as i32
-            + 1
-    {
-        for y in (render_storage.camera.position.1 * float_detail_scale
-            - (screen_height_as_world_units * 0.5))
-            .floor() as i32
-            - 1
-            ..(render_storage.camera.position.1 * float_detail_scale
-                + (screen_height_as_world_units * 0.5))
-                .ceil() as i32
-                + 1
-        {
-            if x < 0 || y < 0 {
-                continue;
-            }
+    let map_objects_per_thread = (screen_width_as_world_units * screen_height_as_world_units)
+        .floor() as usize
+        / user_storage.available_parallelism; // sketchy
 
-            let full_index =
-                full_index_from_full_position((x as u32, y as u32), detail_scale as u32);
+    thread::scope(|scope| {
+        for thread_index in 0..user_storage.available_parallelism {
+            let map_objects = &user_storage.map_objects;
 
-            if full_index
-                >= FULL_GRID_WIDTH_SQUARED as usize * (detail_scale * detail_scale) as usize
-            {
-                panic!("Something has gone wrong with the index. It is beyond reasonable array bounds. full index: {}, bounds: {}", full_index, FULL_GRID_WIDTH_SQUARED * (detail_scale * detail_scale))
-            }
+            let render_sender = render_sender.clone();
 
-            let map_object = user_storage.map_objects[detail as usize][full_index];
+            scope.spawn(move || {
+                let mut vertices = vec![vertex_data::VertexData{
+                    position: [0.0,0.0],
+                    uv: [0.0,0.0],
+                };map_objects_per_thread*4];
+                let mut indices = vec![0u32;map_objects_per_thread*6];
 
-            let (rendering_size, uv) = match map_object {
-                biomes::MapObject::RandomPattern(i) => {
-                    let random_pattern_map_object = &biomes::RANDOM_PATTERN_MAP_OBJECTS[i as usize];
-                    (
-                        random_pattern_map_object.rendering_size,
-                        random_pattern_map_object.uv,
-                    )
+                let mut vertex_count = 0u32;
+                let mut index_count = 0u32;
+
+                for position_as_index in thread_index*map_objects_per_thread..(thread_index+1)*map_objects_per_thread {
+
+                    let local_position = position_from_index(position_as_index, screen_width_as_world_units.floor() as usize); // sketchy
+
+                    let (x,y) = (local_position.0 as i32 + scaled_camera_position.0 as i32 - (screen_width_as_world_units/2.0) as i32, local_position.1 as i32 + scaled_camera_position.1 as i32 - (screen_height_as_world_units/2.0) as i32); // even more sketchy
+
+                    //println!("{},{}", x, y);
+
+                    if x < 0 || y < 0 {
+                        continue;
+                    }
+
+                    let full_index =
+                        full_index_from_full_position((x as u32, y as u32), detail_scale as u32);
+
+                    if full_index
+                        >= FULL_GRID_WIDTH_SQUARED as usize * (detail_scale * detail_scale) as usize
+                    {
+                        panic!("Something has gone wrong with the index. It is beyond reasonable array bounds. full index: {}, bounds: {}", full_index, FULL_GRID_WIDTH_SQUARED * (detail_scale * detail_scale))
+                    }
+
+                    let map_object = map_objects[detail as usize][full_index];
+
+                    let (rendering_size, uv) = match map_object {
+                        biomes::MapObject::RandomPattern(i) => {
+                            let random_pattern_map_object = &biomes::RANDOM_PATTERN_MAP_OBJECTS[i as usize];
+                            (
+                                random_pattern_map_object.rendering_size,
+                                random_pattern_map_object.uv,
+                            )
+                        }
+                        biomes::MapObject::SimplexPattern(i) => {
+                            let simplex_pattern_map_object =
+                                &biomes::SIMPLEX_PATTERN_MAP_OBJECTS[i as usize];
+                            (
+                                simplex_pattern_map_object.rendering_size,
+                                simplex_pattern_map_object.uv,
+                            )
+                        }
+                        biomes::MapObject::SimplexSmoothedPattern(i,_) => {
+                            let simplex_smoothed_pattern_map_object =
+                                &biomes::SIMPLEX_SMOOTHED_PATTERN_MAP_OBJECTS[i as usize];
+                            (
+                                simplex_smoothed_pattern_map_object.rendering_size,
+                                simplex_smoothed_pattern_map_object.uv,
+                            )
+                        }
+                        biomes::MapObject::None => {
+                            continue;
+                        }
+                    };
+
+                    let corrected_x = x as f32 / float_detail_scale + detail_offset.0;
+                    let corrected_y = y as f32 / float_detail_scale + detail_offset.1;
+
+                    let vertex_start = vertex_count as usize;
+                    let index_start = index_count as usize;
+
+                    vertices[vertex_start] = vertex_data::VertexData {
+                        // top right
+                        position: [
+                            corrected_x + (0.5 * rendering_size.0),
+                            corrected_y + (0.5 * rendering_size.1),
+                        ],
+                        uv: [uv.0 + biomes::SPRITE_SIZE.0, uv.1 + biomes::SPRITE_SIZE.1],
+                    };
+
+                    vertices[vertex_start + 1] = vertex_data::VertexData {
+                        // bottom right
+                        position: [
+                            corrected_x + (0.5 * rendering_size.0),
+                            corrected_y + (-0.5 * rendering_size.1),
+                        ],
+                        uv: [uv.0 + biomes::SPRITE_SIZE.0, uv.1],
+                    };
+
+                    vertices[vertex_start + 2] = vertex_data::VertexData {
+                        // top left
+                        position: [
+                            corrected_x + (-0.5 * rendering_size.0),
+                            corrected_y + (0.5 * rendering_size.1),
+                        ],
+                        uv: [uv.0, uv.1 + biomes::SPRITE_SIZE.1],
+                    };
+
+                    vertices[vertex_start + 3] = vertex_data::VertexData {
+                        // bottom left
+                        position: [
+                            corrected_x + (-0.5 * rendering_size.0),
+                            corrected_y + (-0.5 * rendering_size.1),
+                        ],
+                        uv: [uv.0, uv.1],
+                    };
+
+                    indices[index_start] = vertex_start as u32;
+                    indices[index_start + 1] = vertex_start as u32 + 1;
+                    indices[index_start + 2] = vertex_start as u32 + 2;
+
+                    indices[index_start + 3] = vertex_start as u32 + 1;
+                    indices[index_start + 4] = vertex_start as u32 + 3;
+                    indices[index_start + 5] = vertex_start as u32 + 2;
+
+                    vertex_count += 4;
+                    index_count += 6;
                 }
-                biomes::MapObject::SimplexPattern(i) => {
-                    let simplex_pattern_map_object =
-                        &biomes::SIMPLEX_PATTERN_MAP_OBJECTS[i as usize];
-                    (
-                        simplex_pattern_map_object.rendering_size,
-                        simplex_pattern_map_object.uv,
-                    )
-                }
-                biomes::MapObject::SimplexSmoothedPattern(_) => {
-                    todo!();
-                    //let simplex_smoothed_pattern_map_object = biomes::SIMPLEX_SMOOTHED_PATTERN_MAP_OBJECTS[i as usize];
-                    //(simplex_smoothed_pattern_map_object.rendering_size, simplex_smoothed_pattern_map_object.uv)
-                }
-                biomes::MapObject::None => {
-                    continue;
-                }
-            };
-
-            let vertex_start = render_storage.vertex_count_map as usize;
-            let index_start = render_storage.index_count_map as usize;
-
-            render_storage.vertices_map[vertex_start] = vertex_data::VertexData {
-                // top right
-                position: [
-                    x as f32 / float_detail_scale + detail_offset.0 + (0.5 * rendering_size.0),
-                    y as f32 / float_detail_scale + detail_offset.1 + (0.5 * rendering_size.1),
-                ],
-                uv: [uv.0 + biomes::SPRITE_SIZE.0, uv.1 + biomes::SPRITE_SIZE.1],
-            };
-
-            render_storage.vertices_map[vertex_start + 1] = vertex_data::VertexData {
-                // bottom right
-                position: [
-                    x as f32 / float_detail_scale + detail_offset.0 + (0.5 * rendering_size.0),
-                    y as f32 / float_detail_scale + detail_offset.1 + (-0.5 * rendering_size.1),
-                ],
-                uv: [uv.0 + biomes::SPRITE_SIZE.0, uv.1],
-            };
-
-            render_storage.vertices_map[vertex_start + 2] = vertex_data::VertexData {
-                // top left
-                position: [
-                    x as f32 / float_detail_scale + detail_offset.0 + (-0.5 * rendering_size.0),
-                    y as f32 / float_detail_scale + detail_offset.1 + (0.5 * rendering_size.1),
-                ],
-                uv: [uv.0, uv.1 + biomes::SPRITE_SIZE.1],
-            };
-
-            render_storage.vertices_map[vertex_start + 3] = vertex_data::VertexData {
-                // bottom left
-                position: [
-                    x as f32 / float_detail_scale + detail_offset.0 + (-0.5 * rendering_size.0),
-                    y as f32 / float_detail_scale + detail_offset.1 + (-0.5 * rendering_size.1),
-                ],
-                uv: [uv.0, uv.1],
-            };
-
-            render_storage.indices_map[index_start] = vertex_start as u32;
-            render_storage.indices_map[index_start + 1] = vertex_start as u32 + 1;
-            render_storage.indices_map[index_start + 2] = vertex_start as u32 + 2;
-
-            render_storage.indices_map[index_start + 3] = vertex_start as u32 + 1;
-            render_storage.indices_map[index_start + 4] = vertex_start as u32 + 3;
-            render_storage.indices_map[index_start + 5] = vertex_start as u32 + 2;
-
-            render_storage.vertex_count_map += 4;
-            render_storage.index_count_map += 6;
+                render_sender.send((vertices, vertex_count, indices, index_count)).unwrap();
+            });
         }
-    }
+    });
 }
 
 #[deprecated]
-fn render_map_single_threaded(user_storage: &mut UserStorage, render_storage: &mut RenderStorage, detail: u8) {
+pub fn render_map_single_threaded(
+    user_storage: &mut UserStorage,
+    render_storage: &mut RenderStorage,
+    detail: u8,
+) {
     let detail_scale = user_storage.details[detail as usize].scale;
     let float_detail_scale = detail_scale as f32;
     let detail_offset = user_storage.details[detail as usize].offset;
@@ -847,15 +853,52 @@ fn render_map_single_threaded(user_storage: &mut UserStorage, render_storage: &m
                         simplex_pattern_map_object.uv,
                     )
                 }
-                biomes::MapObject::SimplexSmoothedPattern(_) => {
-                    todo!();
-                    //let simplex_smoothed_pattern_map_object = biomes::SIMPLEX_SMOOTHED_PATTERN_MAP_OBJECTS[i as usize];
-                    //(simplex_smoothed_pattern_map_object.rendering_size, simplex_smoothed_pattern_map_object.uv)
+                biomes::MapObject::SimplexSmoothedPattern(i, square_index) => {
+                    let simplex_smoothed_pattern_map_object =
+                        &biomes::SIMPLEX_SMOOTHED_PATTERN_MAP_OBJECTS[i as usize];
+
+                    let corrected_x = x as f32 / float_detail_scale + detail_offset.0;
+                    let corrected_y = y as f32 / float_detail_scale + detail_offset.1;
+
+                    let vertex_start = render_storage.vertex_count_map as usize;
+                    let index_start = render_storage.index_count_map as usize;
+
+                    let vertices = marching_squares::VERTEX_TABLE[square_index as usize];
+
+                    for i in 0..vertices.len() {
+                        render_storage.vertices_map[vertex_start + i] = vertex_data::VertexData {
+                            position: [
+                                corrected_x
+                                    + (simplex_smoothed_pattern_map_object.rendering_size.0
+                                        * 0.5
+                                        * vertices[i].0 as f32),
+                                corrected_y
+                                    + (simplex_smoothed_pattern_map_object.rendering_size.1
+                                        * 0.5
+                                        * vertices[i].1 as f32),
+                            ],
+                            uv: [0.0, 0.0], // TODO: fix asap
+                        }
+                    }
+
+                    let mut indices = marching_squares::INDEX_TABLE[square_index as usize].to_vec(); // TODO: investigate to_vec() and work out if there is a better way
+                    indices.iter_mut().for_each(|x| *x += vertex_start as u32);
+
+                    render_storage.indices_map[index_start..index_start + indices.len()]
+                        .copy_from_slice(indices.as_slice());
+
+                    render_storage.vertex_count_map += vertices.len() as u32;
+                    render_storage.index_count_map += indices.len() as u32;
+
+                    continue;
                 }
                 biomes::MapObject::None => {
                     continue;
                 }
             };
+
+            let corrected_x = x as f32 / float_detail_scale + detail_offset.0;
+            let corrected_y = y as f32 / float_detail_scale + detail_offset.1;
 
             let vertex_start = render_storage.vertex_count_map as usize;
             let index_start = render_storage.index_count_map as usize;
@@ -863,8 +906,8 @@ fn render_map_single_threaded(user_storage: &mut UserStorage, render_storage: &m
             render_storage.vertices_map[vertex_start] = vertex_data::VertexData {
                 // top right
                 position: [
-                    x as f32 / float_detail_scale + detail_offset.0 + (0.5 * rendering_size.0),
-                    y as f32 / float_detail_scale + detail_offset.1 + (0.5 * rendering_size.1),
+                    corrected_x + (0.5 * rendering_size.0),
+                    corrected_y + (0.5 * rendering_size.1),
                 ],
                 uv: [uv.0 + biomes::SPRITE_SIZE.0, uv.1 + biomes::SPRITE_SIZE.1],
             };
@@ -872,8 +915,8 @@ fn render_map_single_threaded(user_storage: &mut UserStorage, render_storage: &m
             render_storage.vertices_map[vertex_start + 1] = vertex_data::VertexData {
                 // bottom right
                 position: [
-                    x as f32 / float_detail_scale + detail_offset.0 + (0.5 * rendering_size.0),
-                    y as f32 / float_detail_scale + detail_offset.1 + (-0.5 * rendering_size.1),
+                    corrected_x + (0.5 * rendering_size.0),
+                    corrected_y + (-0.5 * rendering_size.1),
                 ],
                 uv: [uv.0 + biomes::SPRITE_SIZE.0, uv.1],
             };
@@ -881,8 +924,8 @@ fn render_map_single_threaded(user_storage: &mut UserStorage, render_storage: &m
             render_storage.vertices_map[vertex_start + 2] = vertex_data::VertexData {
                 // top left
                 position: [
-                    x as f32 / float_detail_scale + detail_offset.0 + (-0.5 * rendering_size.0),
-                    y as f32 / float_detail_scale + detail_offset.1 + (0.5 * rendering_size.1),
+                    corrected_x + (-0.5 * rendering_size.0),
+                    corrected_y + (0.5 * rendering_size.1),
                 ],
                 uv: [uv.0, uv.1 + biomes::SPRITE_SIZE.1],
             };
@@ -890,8 +933,8 @@ fn render_map_single_threaded(user_storage: &mut UserStorage, render_storage: &m
             render_storage.vertices_map[vertex_start + 3] = vertex_data::VertexData {
                 // bottom left
                 position: [
-                    x as f32 / float_detail_scale + detail_offset.0 + (-0.5 * rendering_size.0),
-                    y as f32 / float_detail_scale + detail_offset.1 + (-0.5 * rendering_size.1),
+                    corrected_x + (-0.5 * rendering_size.0),
+                    corrected_y + (-0.5 * rendering_size.1),
                 ],
                 uv: [uv.0, uv.1],
             };
@@ -910,7 +953,7 @@ fn render_map_single_threaded(user_storage: &mut UserStorage, render_storage: &m
     }
 }
 
-fn render_player(user_storage: &mut UserStorage, render_storage: &mut RenderStorage) {
+pub fn render_player(user_storage: &mut UserStorage, render_storage: &mut RenderStorage) {
     let vertex_start = render_storage.vertex_count_map as usize;
     let index_start = render_storage.index_count_map as usize;
 
@@ -990,8 +1033,9 @@ fn collide(user_storage: &mut UserStorage, full_position: (u32, u32), detail_ind
         biomes::MapObject::SimplexPattern(i) => {
             biomes::SIMPLEX_PATTERN_MAP_OBJECTS[i as usize].collision_size
         }
-        biomes::MapObject::SimplexSmoothedPattern(_) => {
-            todo!();
+        biomes::MapObject::SimplexSmoothedPattern(i, _) => {
+            biomes::SIMPLEX_SMOOTHED_PATTERN_MAP_OBJECTS[i as usize].collision_size
+            // TODO: add proper collision handling for marching squares
         }
         biomes::MapObject::None => return,
     };
@@ -1014,13 +1058,13 @@ fn collide(user_storage: &mut UserStorage, full_position: (u32, u32), detail_ind
     }
 }
 
-struct Player {
-    position: (f32, f32),
-    previous_position: (f32, f32),
-    sprinting: bool,
-    collision_debug: bool,
-    size: (f32, f32),
-    statistics: biomes::Statistics,
+pub struct Player {
+    pub position: (f32, f32),
+    pub previous_position: (f32, f32),
+    pub sprinting: bool,
+    pub collision_debug: bool,
+    pub size: (f32, f32),
+    pub statistics: biomes::Statistics,
 }
 
 fn deal_with_collision(
@@ -1039,7 +1083,7 @@ fn deal_with_collision(
         biomes::MapObject::SimplexPattern(i) => {
             biomes::SIMPLEX_PATTERN_MAP_OBJECTS[*i as usize].behaviour
         }
-        biomes::MapObject::SimplexSmoothedPattern(i) => {
+        biomes::MapObject::SimplexSmoothedPattern(i, _) => {
             biomes::SIMPLEX_SMOOTHED_PATTERN_MAP_OBJECTS[*i as usize].behaviour
         }
         biomes::MapObject::None => biomes::CollisionBehaviour::None,
@@ -1066,7 +1110,7 @@ fn deal_with_collision(
     }
 }
 
-fn draw_text(
+pub fn draw_text(
     render_storage: &mut RenderStorage,
     mut position: (f32, f32),
     character_size: (f32, f32),
@@ -1145,6 +1189,7 @@ fn draw_text(
             '-' => ((TEXT_SPRITE_SIZE.0 * 11.0, TEXT_SPRITE_SIZE.1 * 0.0), 1.0),
             '_' => ((TEXT_SPRITE_SIZE.0 * 13.0, TEXT_SPRITE_SIZE.1 * 0.0), 1.0),
             '.' => ((TEXT_SPRITE_SIZE.0 * 10.0, TEXT_SPRITE_SIZE.1 * 0.0), 0.5),
+            '!' => ((TEXT_SPRITE_SIZE.0 * 15.0, TEXT_SPRITE_SIZE.1 * 0.0), 0.5),
             '%' => ((TEXT_SPRITE_SIZE.0 * 17.0, TEXT_SPRITE_SIZE.1 * 0.0), 1.0),
             '(' => ((TEXT_SPRITE_SIZE.0 * 18.0, TEXT_SPRITE_SIZE.1 * 0.0), 0.5),
             ')' => ((TEXT_SPRITE_SIZE.0 * 19.0, TEXT_SPRITE_SIZE.1 * 0.0), 0.5),
@@ -1209,7 +1254,7 @@ fn draw_text(
 }
 
 // Absolute garbage, fix asap. This needs to account for player size, whether the block thinks it is safe (add a safe bool to all blocks), and detail.
-fn get_safe_position(user_storage: &mut UserStorage) -> (u32, u32) {
+pub fn get_safe_position(user_storage: &mut UserStorage) -> (u32, u32) {
     let mut rng = thread_rng();
     let position_range = Uniform::new(0u32, FULL_GRID_WIDTH);
 

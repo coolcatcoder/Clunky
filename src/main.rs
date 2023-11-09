@@ -60,7 +60,9 @@ mod events;
 
 mod biomes;
 
-mod testing_biomes;
+mod marching_squares;
+
+mod menus;
 
 fn main() {
     let instance = get_instance();
@@ -419,7 +421,7 @@ fn main() {
                 event: WindowEvent::KeyboardInput { input, .. },
                 ..
             } => {
-                events::on_keyboard_input(&mut user_storage, input);
+                events::on_keyboard_input(&mut user_storage, &mut render_storage, input);
             }
 
             Event::RedrawEventsCleared => {

@@ -60,10 +60,12 @@ pub struct SimplexSmoothedPatternMapObject {
     pub chance: u8,
     pub priority: u8,
     pub behaviour: CollisionBehaviour,
-    pub size: f32, // Bad name? This is the size of a single square during marching squares.
+    pub rendering_size: (f32, f32),
+    pub collision_size: (f32, f32),
     pub seed: u8,
     pub acceptable_noise: (f64, f64),
     pub noise_scale: f64,
+    pub uv: (f32, f32),
 }
 
 // leaving this structh here, so no one makes the mistake of trying this again. You still gotta match, to get the right array, so this is useless, unless we wanted to store these in their own array, which is a big NO, until we have the easy biomes in testing_biomes.rs sorted. Even then we would still need some sort of index into this array, which sounds slow.
@@ -76,7 +78,7 @@ pub enum MapObject {
     None,
     RandomPattern(u8),
     SimplexPattern(u8),
-    SimplexSmoothedPattern(u8),
+    SimplexSmoothedPattern(u8, u8), // index into S_S_MAP_OBJECTS, index into marching squares
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -142,8 +144,8 @@ pub enum CollisionBehaviour {
 const ALL_BIOME_DATA: (
     [Biome; 5],
     [RandomPatternMapObject; 10],
-    [SimplexPatternMapObject; 9],
-    [SimplexSmoothedPatternMapObject; 0],
+    [SimplexPatternMapObject; 8],
+    [SimplexSmoothedPatternMapObject; 1],
 ) = transform_biomes![SPARSE_ROCK, MIXED_JUNGLE, GRASSLANDS, DESERT, MOUNTAINS];
 
 #[allow(dead_code)]
@@ -209,7 +211,7 @@ const SPARSE_ROCK: EasyBiome<1, 1, 0> = EasyBiome {
     simplex_smoothed_pattern: [],
 };
 
-const MIXED_JUNGLE: EasyBiome<2, 5, 0> = EasyBiome {
+const MIXED_JUNGLE: EasyBiome<2, 4, 1> = EasyBiome {
     aabb: Aabb {
         size: (2.0 / 3.0, 0.5),
         position: (1.0 / 3.0, 0.5),
@@ -253,27 +255,6 @@ const MIXED_JUNGLE: EasyBiome<2, 5, 0> = EasyBiome {
     ],
 
     simplex_pattern: [
-        SimplexPatternMapObject {
-            // circus rock
-            detail: 1,
-            chance: 100,
-            priority: 3,
-            behaviour: CollisionBehaviour::Consume(
-                2,
-                Statistics {
-                    // replace with rock eating collision behaviour
-                    strength: 0,
-                    health: 0,
-                    stamina: 2,
-                },
-            ),
-            rendering_size: (0.5, 0.5),
-            collision_size: (0.5, 0.5),
-            seed: 1,
-            acceptable_noise: (0.0, 1.0),
-            noise_scale: 0.15,
-            uv: (7.0 * SPRITE_SIZE.0, 0.0),
-        },
         SimplexPatternMapObject {
             // circus rock detail 0 blank filler
             detail: 0,
@@ -342,7 +323,27 @@ const MIXED_JUNGLE: EasyBiome<2, 5, 0> = EasyBiome {
         },
     ],
 
-    simplex_smoothed_pattern: [],
+    simplex_smoothed_pattern: [SimplexSmoothedPatternMapObject {
+        // circus rock
+        detail: 2,
+        chance: 100,
+        priority: 3,
+        behaviour: CollisionBehaviour::Consume(
+            2,
+            Statistics {
+                // replace with rock eating collision behaviour
+                strength: 0,
+                health: 0,
+                stamina: 2,
+            },
+        ),
+        rendering_size: (1.0 / 3.0, 1.0 / 3.0),
+        collision_size: (1.0 / 3.0, 1.0 / 3.0),
+        seed: 1,
+        acceptable_noise: (0.0, 1.0),
+        noise_scale: 0.15,
+        uv: (7.0 * SPRITE_SIZE.0, 0.0),
+    }],
 };
 
 const GRASSLANDS: EasyBiome<1, 1, 0> = EasyBiome {
@@ -625,10 +626,12 @@ macro_rules! transform_biomes {
                 chance: 0,
                 priority: 0,
                 behaviour: CollisionBehaviour::None,
-                size: 0.0,
+                rendering_size: (0.0, 0.0),
+                collision_size: (0.0, 0.0),
                 seed: 0,
                 acceptable_noise: (0.0, 0.0),
                 noise_scale: 0.0,
+                uv: (0.0,0.0),
             }; SIMPLEX_SMOOTHED_AMOUNT];
 
             let mut biome_index = 0;
