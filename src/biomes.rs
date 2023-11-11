@@ -108,7 +108,7 @@ impl Aabb {
 #[derive(Debug, Clone, Copy)]
 pub struct Statistics {
     // TODO: is there a better name?
-    pub strength: u8,
+    pub strength: i8,
     pub health: i32, // Although player health will never be below zero, map objects could wish to lower the health, therefore requiring negative health.
     pub stamina: i32,
 }
@@ -142,11 +142,18 @@ pub enum CollisionBehaviour {
 #[allow(long_running_const_eval)]
 #[allow(unused_assignments)]
 const ALL_BIOME_DATA: (
-    [Biome; 5],
-    [RandomPatternMapObject; 10],
-    [SimplexPatternMapObject; 8],
-    [SimplexSmoothedPatternMapObject; 1],
-) = transform_biomes![SPARSE_ROCK, MIXED_JUNGLE, GRASSLANDS, DESERT, MOUNTAINS];
+    [Biome; 6],
+    [RandomPatternMapObject; 11],
+    [SimplexPatternMapObject; 7],
+    [SimplexSmoothedPatternMapObject; 2],
+) = transform_biomes![
+    MANUAL_MAP_OBJECT_STORAGE,
+    SPARSE_ROCK,
+    MIXED_JUNGLE,
+    GRASSLANDS,
+    DESERT,
+    MOUNTAINS
+];
 
 #[allow(dead_code)]
 const TEMPLATE_BIOME: EasyBiome<0, 0, 0> = EasyBiome {
@@ -156,6 +163,36 @@ const TEMPLATE_BIOME: EasyBiome<0, 0, 0> = EasyBiome {
     },
 
     random_pattern: [],
+
+    simplex_pattern: [],
+
+    simplex_smoothed_pattern: [],
+};
+
+const MANUAL_MAP_OBJECT_STORAGE: EasyBiome<1, 0, 0> = EasyBiome {
+    // this biome should store any map objects that are planned to be used druing CollisionBehaviour::Replace, so reordering of biomes and map objects doesn't change the replacement map objects
+    aabb: Aabb {
+        size: (0.0, 0.0),
+        position: (100.0, 100.0),
+    },
+
+    random_pattern: [RandomPatternMapObject {
+        // debug testing manual placing of structures, should be index 0 in RANDOM_PATTERN_MAP_OBJECTS
+        detail: 0,
+        chance: 100,
+        priority: 255,
+        behaviour: CollisionBehaviour::Consume(
+            5,
+            Statistics {
+                strength: -5,
+                health: -10,
+                stamina: -10,
+            },
+        ),
+        rendering_size: (1.0, 1.0),
+        collision_size: (1.0, 1.0),
+        uv: (38.0 * SPRITE_SIZE.0, 0.0),
+    }],
 
     simplex_pattern: [],
 
@@ -174,7 +211,7 @@ const SPARSE_ROCK: EasyBiome<1, 1, 0> = EasyBiome {
         chance: 10,
         priority: 2,
         behaviour: CollisionBehaviour::Consume(
-            0,
+            1,
             Statistics {
                 strength: 0,
                 health: 0,
@@ -211,7 +248,7 @@ const SPARSE_ROCK: EasyBiome<1, 1, 0> = EasyBiome {
     simplex_smoothed_pattern: [],
 };
 
-const MIXED_JUNGLE: EasyBiome<2, 4, 1> = EasyBiome {
+const MIXED_JUNGLE: EasyBiome<2, 3, 2> = EasyBiome {
     aabb: Aabb {
         size: (2.0 / 3.0, 0.5),
         position: (1.0 / 3.0, 0.5),
@@ -259,34 +296,14 @@ const MIXED_JUNGLE: EasyBiome<2, 4, 1> = EasyBiome {
             // circus rock detail 0 blank filler
             detail: 0,
             chance: 100,
-            priority: 1,
+            priority: 2,
             behaviour: CollisionBehaviour::None,
             rendering_size: (0.0, 0.0),
             collision_size: (0.0, 0.0),
             seed: 1,
-            acceptable_noise: (-0.1, 1.1),
+            acceptable_noise: (-0.2, 1.15),
             noise_scale: 0.15,
             uv: (0.0 * SPRITE_SIZE.0, 0.0),
-        },
-        SimplexPatternMapObject {
-            // the weird stamina rock
-            detail: 0,
-            chance: 100,
-            priority: 2,
-            behaviour: CollisionBehaviour::Consume(
-                0,
-                Statistics {
-                    strength: 0,
-                    health: 0,
-                    stamina: 2,
-                },
-            ),
-            rendering_size: (1.0, 1.0),
-            collision_size: (1.0, 1.0),
-            seed: 1,
-            acceptable_noise: (-0.2, 0.0),
-            noise_scale: 0.15,
-            uv: (8.0 * SPRITE_SIZE.0, 0.0),
         },
         SimplexPatternMapObject {
             // velvet slicer
@@ -323,27 +340,49 @@ const MIXED_JUNGLE: EasyBiome<2, 4, 1> = EasyBiome {
         },
     ],
 
-    simplex_smoothed_pattern: [SimplexSmoothedPatternMapObject {
-        // circus rock
-        detail: 2,
-        chance: 100,
-        priority: 3,
-        behaviour: CollisionBehaviour::Consume(
-            2,
-            Statistics {
-                // replace with rock eating collision behaviour
-                strength: 0,
-                health: 0,
-                stamina: 2,
-            },
-        ),
-        rendering_size: (1.0 / 3.0, 1.0 / 3.0),
-        collision_size: (1.0 / 3.0, 1.0 / 3.0),
-        seed: 1,
-        acceptable_noise: (0.0, 1.0),
-        noise_scale: 0.15,
-        uv: (7.0 * SPRITE_SIZE.0, 0.0),
-    }],
+    simplex_smoothed_pattern: [
+        SimplexSmoothedPatternMapObject {
+            // circus rock
+            detail: 2,
+            chance: 100,
+            priority: 3,
+            behaviour: CollisionBehaviour::Consume(
+                2,
+                Statistics {
+                    // replace with rock eating collision behaviour
+                    strength: 0,
+                    health: 0,
+                    stamina: 2,
+                },
+            ),
+            rendering_size: (1.0 / 3.0, 1.0 / 3.0),
+            collision_size: (1.0 / 3.0, 1.0 / 3.0),
+            seed: 1,
+            acceptable_noise: (0.0, 1.0),
+            noise_scale: 0.15,
+            uv: (7.0 * SPRITE_SIZE.0, 0.0),
+        },
+        SimplexSmoothedPatternMapObject {
+            // the weird stamina rock
+            detail: 1,
+            chance: 100,
+            priority: 3,
+            behaviour: CollisionBehaviour::Consume(
+                1,
+                Statistics {
+                    strength: 0,
+                    health: 0,
+                    stamina: 2,
+                },
+            ),
+            rendering_size: (0.5, 0.5),
+            collision_size: (0.5, 0.5),
+            seed: 1,
+            acceptable_noise: (-0.2, 0.08),
+            noise_scale: 0.15,
+            uv: (8.0 * SPRITE_SIZE.0, 0.0),
+        },
+    ],
 };
 
 const GRASSLANDS: EasyBiome<1, 1, 0> = EasyBiome {

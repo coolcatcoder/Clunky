@@ -121,6 +121,12 @@ pub fn update(
         menus::Menu::Alive => {
             (menus::ALIVE.update)(user_storage, render_storage, delta_time, average_fps)
         }
+        menus::Menu::Paused => {
+            (menus::PAUSED.update)(user_storage, render_storage, delta_time, average_fps)
+        }
+        menus::Menu::Dead => {
+            (menus::DEAD.update)(user_storage, render_storage, delta_time, average_fps)
+        }
         _ => {}
     }
 }
@@ -167,14 +173,16 @@ pub fn fixed_update(user_storage: &mut UserStorage) {
 
             for x in -ceil_player_half_size_scaled.0..ceil_player_half_size_scaled.0 + 1 {
                 for y in -ceil_player_half_size_scaled.1..ceil_player_half_size_scaled.1 + 1 {
-                    collide(
-                        user_storage,
-                        (
-                            (rounded_player_position_scaled.0 + x) as u32,
-                            (rounded_player_position_scaled.1 + y) as u32,
-                        ),
-                        detail_index as u8,
-                    )
+                    let total_x = (rounded_player_position_scaled.0 + x) as u32;
+                    let total_y = (rounded_player_position_scaled.1 + y) as u32;
+
+                    if total_x >= FULL_GRID_WIDTH * detail.scale
+                        || total_y >= FULL_GRID_WIDTH * detail.scale
+                    {
+                        continue;
+                    }
+
+                    collide(user_storage, (total_x, total_y), detail_index as u8)
                 }
             }
         }
@@ -182,7 +190,9 @@ pub fn fixed_update(user_storage: &mut UserStorage) {
 
     user_storage.player.statistics.stamina = user_storage.player.statistics.stamina.min(100);
 
-    if user_storage.stop_watch.elapsed().as_secs_f32() >= 0.25 {
+    if !user_storage.player.collision_debug
+        && user_storage.stop_watch.elapsed().as_secs_f32() >= 0.25
+    {
         user_storage.stop_watch = Instant::now();
 
         user_storage.player.statistics.stamina -= 1;
@@ -190,6 +200,10 @@ pub fn fixed_update(user_storage: &mut UserStorage) {
         if user_storage.player.statistics.stamina < 0 {
             user_storage.player.statistics.health -= 1;
         }
+    }
+
+    if user_storage.player.statistics.health <= 0 {
+        user_storage.menu = menus::Menu::Dead;
     }
 
     if user_storage.player.position.0 < 0.0 {
@@ -214,6 +228,10 @@ pub fn on_keyboard_input(
             (menus::TITLE_SCREEN.on_keyboard_input)(user_storage, render_storage, input)
         }
         menus::Menu::Alive => (menus::ALIVE.on_keyboard_input)(user_storage, render_storage, input),
+        menus::Menu::Paused => {
+            (menus::PAUSED.on_keyboard_input)(user_storage, render_storage, input)
+        }
+        menus::Menu::Dead => (menus::DEAD.on_keyboard_input)(user_storage, render_storage, input),
         _ => {}
     }
 }
@@ -591,7 +609,7 @@ fn generate_position(
 
             if square_index != 0 {
                 // if square index is 0, then no corners had the iso surface, meaning it basically shouldn't exist, even if the center had the iso surface. Potentially could create a slower but more accurate marching cubes by including center in the calculation of the square index.
-                map_object = biomes::MapObject::SimplexSmoothedPattern(i, square_index); // TODO: replace 0 with the actual marching square index
+                map_object = biomes::MapObject::SimplexSmoothedPattern(i, square_index);
                 highest_priority = simplex_smoothed_pattern_map_object.priority;
             } else {
                 panic!("Why is it 0??");
@@ -601,7 +619,7 @@ fn generate_position(
     map_object
 }
 
-fn full_index_from_full_position(full_position: (u32, u32), scale: u32) -> usize {
+pub fn full_index_from_full_position(full_position: (u32, u32), scale: u32) -> usize {
     let chunk_position = (
         full_position.0 / CHUNK_WIDTH as u32 / scale,
         full_position.1 / CHUNK_WIDTH as u32 / scale,
@@ -832,7 +850,8 @@ pub fn render_map_single_threaded(
             if full_index
                 >= FULL_GRID_WIDTH_SQUARED as usize * (detail_scale * detail_scale) as usize
             {
-                panic!("Something has gone wrong with the index. It is beyond reasonable array bounds. full index: {}, bounds: {}", full_index, FULL_GRID_WIDTH_SQUARED * (detail_scale * detail_scale))
+                continue; // Don't need to panic. Simply don't render it.
+                          //panic!("Something has gone wrong with the index. It is beyond reasonable array bounds. full index: {}, bounds: {}", full_index, FULL_GRID_WIDTH_SQUARED * (detail_scale * detail_scale))
             }
 
             let map_object = user_storage.map_objects[detail as usize][full_index];
@@ -866,18 +885,37 @@ pub fn render_map_single_threaded(
                     let vertices = marching_squares::VERTEX_TABLE[square_index as usize];
 
                     for i in 0..vertices.len() {
+                        let position = [
+                            corrected_x
+                                + (simplex_smoothed_pattern_map_object.rendering_size.0
+                                    * 0.5
+                                    * vertices[i].0 as f32),
+                            corrected_y
+                                + (simplex_smoothed_pattern_map_object.rendering_size.1
+                                    * 0.5
+                                    * vertices[i].1 as f32),
+                        ];
+
                         render_storage.vertices_map[vertex_start + i] = vertex_data::VertexData {
-                            position: [
-                                corrected_x
-                                    + (simplex_smoothed_pattern_map_object.rendering_size.0
-                                        * 0.5
-                                        * vertices[i].0 as f32),
-                                corrected_y
-                                    + (simplex_smoothed_pattern_map_object.rendering_size.1
-                                        * 0.5
-                                        * vertices[i].1 as f32),
-                            ],
-                            uv: [0.0, 0.0], // TODO: fix asap
+                            position,
+                            uv: [
+                                rerange(
+                                    (
+                                        simplex_smoothed_pattern_map_object.uv.0,
+                                        simplex_smoothed_pattern_map_object.uv.0
+                                            + biomes::SPRITE_SIZE.0,
+                                    ),
+                                    vertices[i].0 as f32,
+                                ),
+                                rerange(
+                                    (
+                                        simplex_smoothed_pattern_map_object.uv.1,
+                                        simplex_smoothed_pattern_map_object.uv.1
+                                            + biomes::SPRITE_SIZE.1,
+                                    ),
+                                    vertices[i].1 as f32,
+                                ),
+                            ], // TODO: consider working out how to have larger "tiles" for the uv to be spread across. Perhaps by modulo-ing the real position by 3 or something, then doing some sort of multiplication with the rerange()-ed values.
                         }
                     }
 
@@ -1021,6 +1059,7 @@ fn detect_collision(
 }
 
 fn collide(user_storage: &mut UserStorage, full_position: (u32, u32), detail_index: u8) {
+    // TODO: this is broken on detail 1, work out why, then fix it.
     let detail = user_storage.details[detail_index as usize];
 
     let map_object = user_storage.map_objects[detail_index as usize]
@@ -1092,7 +1131,7 @@ fn deal_with_collision(
     match behaviour {
         biomes::CollisionBehaviour::None => {}
         biomes::CollisionBehaviour::Consume(strength, statistics) => {
-            if user_storage.player.statistics.strength > strength {
+            if user_storage.player.statistics.strength > strength as i8 {
                 *map_object = biomes::MapObject::None;
                 user_storage.player.statistics += statistics;
             } else {
@@ -1100,7 +1139,7 @@ fn deal_with_collision(
             }
         }
         biomes::CollisionBehaviour::Replace(strength, statistics, replacement_map_object) => {
-            if user_storage.player.statistics.strength > strength {
+            if user_storage.player.statistics.strength > strength as i8 {
                 *map_object = replacement_map_object;
                 user_storage.player.statistics += statistics;
             } else {
@@ -1283,4 +1322,13 @@ pub fn get_safe_position(user_storage: &mut UserStorage) -> (u32, u32) {
     }
 
     safe_position
+}
+
+fn wrap(value: f32, start: f32, limit: f32) -> f32 {
+    start + (value - start) % (limit - start)
+}
+
+fn rerange(desired_range: (f32, f32), value: f32) -> f32 {
+    let slope = (desired_range.1 - desired_range.0) / (1.0 - -1.0);
+    desired_range.0 + slope * (value - -1.0)
 }

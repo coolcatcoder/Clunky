@@ -13,9 +13,11 @@ use crate::events;
 use crate::vertex_data;
 
 #[derive(Debug, Copy, Clone)]
-pub enum Menu { // add a pause screen that doesn't call ALIVE.end() and when it changes back to Alive, then it doesn't run ALIVE.start(). This will work.
+pub enum Menu {
+    // add a pause screen that doesn't call ALIVE.end() and when it changes back to Alive, then it doesn't run ALIVE.start(). This will work.
     TitleScreen, // horrible name
     Alive,
+    Paused,
     Dead,
     PerksAndCurses,
 }
@@ -34,18 +36,19 @@ pub const TITLE_SCREEN: MenuData = MenuData {
              render_storage: &mut events::RenderStorage,
              _delta_time: f32,
              _average_fps: f32| {
-                render_storage.vertex_count_text = 0;
-                render_storage.index_count_text = 0;
+        render_storage.vertex_count_text = 0;
+        render_storage.index_count_text = 0;
 
-                let screen_width = 2.0 / render_storage.aspect_ratio;
-                events::draw_text( // don't like drawing text every frame. Perhaps when we call windowdependentsetup() we can call some user code?
-                    render_storage,
-                    (screen_width * -0.5 + screen_width * 0.1, -0.5),
-                    (0.25, 0.5),
-                    0.125,
-                    "No Title! Press Enter!",
-                );
-             },
+        let screen_width = 2.0 / render_storage.aspect_ratio;
+        events::draw_text(
+            // don't like drawing text every frame. Perhaps when we call windowdependentsetup() we can call some user code?
+            render_storage,
+            (screen_width * -0.5 + screen_width * 0.1, -0.5),
+            (0.25, 0.5),
+            0.125,
+            "No Title! Press Enter!",
+        );
+    },
     end: |_user_storage: &mut events::UserStorage, _render_storage: &mut events::RenderStorage| {},
     on_keyboard_input: |user_storage: &mut events::UserStorage,
                         render_storage: &mut events::RenderStorage,
@@ -115,11 +118,22 @@ pub const ALIVE: MenuData = MenuData {
 
         user_storage.player.statistics = biomes::Statistics {
             strength: 1,
-            health: 30,
+            health: 1,
             stamina: 100,
         };
 
         render_storage.camera.position = user_storage.player.position;
+
+        user_storage.fixed_time_passed = render_storage.starting_time.elapsed().as_secs_f32();
+        user_storage.wasd_held = (false, false, false, false);
+
+        user_storage.map_objects[1][events::full_index_from_full_position((10, 10), 2)] =
+            biomes::MapObject::RandomPattern(0);
+
+        // all lines below this one, and before the end of the function, should be removed, they are debug
+        //user_storage.player.position.0 = 15.0;
+        //user_storage.player.position.1 = 15.0;
+        //user_storage.player.previous_position = user_storage.player.position;
     },
     update: |user_storage: &mut events::UserStorage,
              render_storage: &mut events::RenderStorage,
@@ -313,9 +327,35 @@ pub const ALIVE: MenuData = MenuData {
 
         match user_storage.generation_receiver.try_recv() {
             Ok(generation) => {
-                user_storage.map_objects[generation.2 as usize]
-                    [generation.1..generation.1 + generation.0.len()]
-                    .copy_from_slice(generation.0.as_slice());
+                if !(generation.1 + generation.0.len()
+                    > user_storage.map_objects[generation.2 as usize].len())
+                {
+                    // user_storage.map_objects[generation.2 as usize]
+                    //     [generation.1..generation.1 + generation.0.len()]
+                    //     .copy_from_slice(generation.0.as_slice());
+
+                    for i in 0..generation.0.len() {
+                        if match user_storage.map_objects[generation.2 as usize][i + generation.1] {
+                            biomes::MapObject::RandomPattern(i) => {
+                                biomes::RANDOM_PATTERN_MAP_OBJECTS[i as usize].priority
+                            }
+                            biomes::MapObject::SimplexPattern(i) => {
+                                biomes::SIMPLEX_PATTERN_MAP_OBJECTS[i as usize].priority
+                            }
+                            biomes::MapObject::SimplexSmoothedPattern(i, _) => {
+                                biomes::SIMPLEX_SMOOTHED_PATTERN_MAP_OBJECTS[i as usize].priority
+                            }
+                            biomes::MapObject::None => 0,
+                        } == 255
+                        {
+                            continue;
+                        }
+                        user_storage.map_objects[generation.2 as usize][i + generation.1] =
+                            generation.0[i];
+                    }
+                } else {
+                    println!("??????");
+                }
             }
             Err(TryRecvError::Empty) => {}
             Err(TryRecvError::Disconnected) => {
@@ -333,7 +373,7 @@ pub const ALIVE: MenuData = MenuData {
                     events::index_from_position(player_chunk_position, events::CHUNK_GRID_WIDTH)
                         as usize;
 
-                if player_chunk_index > user_storage.chunks_generated.len() {
+                if player_chunk_index >= user_storage.chunks_generated.len() {
                     continue;
                 }
 
@@ -422,6 +462,87 @@ pub const ALIVE: MenuData = MenuData {
                 VirtualKeyCode::Equals => {
                     if events::is_pressed(input.state) {
                         user_storage.chunk_generation += 1;
+                    }
+                }
+                VirtualKeyCode::Escape => {
+                    if events::is_pressed(input.state) {
+                        user_storage.menu = Menu::Paused;
+                    }
+                }
+                _ => (),
+            }
+        }
+    },
+};
+
+pub const PAUSED: MenuData = MenuData {
+    start: |_user_storage: &mut events::UserStorage,
+            _render_storage: &mut events::RenderStorage| {},
+    update: |_user_storage: &mut events::UserStorage,
+             render_storage: &mut events::RenderStorage,
+             _delta_time: f32,
+             _average_fps: f32| {
+        render_storage.vertex_count_text = 0;
+        render_storage.index_count_text = 0;
+
+        let screen_width = 2.0 / render_storage.aspect_ratio;
+        events::draw_text(
+            render_storage,
+            (screen_width * -0.5 + screen_width * 0.1, -0.5),
+            (0.25, 0.5),
+            0.125,
+            "Paused!",
+        );
+    },
+    end: |_user_storage: &mut events::UserStorage, _render_storage: &mut events::RenderStorage| {},
+    on_keyboard_input: |user_storage: &mut events::UserStorage,
+                        render_storage: &mut events::RenderStorage,
+                        input: KeyboardInput| {
+        if let Some(key_code) = input.virtual_keycode {
+            match key_code {
+                VirtualKeyCode::Escape => {
+                    if events::is_pressed(input.state) {
+                        user_storage.menu = Menu::Alive;
+                        user_storage.fixed_time_passed =
+                            render_storage.starting_time.elapsed().as_secs_f32();
+                        user_storage.wasd_held = (false, false, false, false);
+                    }
+                }
+                _ => (),
+            }
+        }
+    },
+};
+
+pub const DEAD: MenuData = MenuData {
+    start: |_user_storage: &mut events::UserStorage,
+            _render_storage: &mut events::RenderStorage| {},
+    update: |_user_storage: &mut events::UserStorage,
+             render_storage: &mut events::RenderStorage,
+             _delta_time: f32,
+             _average_fps: f32| {
+        render_storage.vertex_count_text = 0;
+        render_storage.index_count_text = 0;
+
+        let screen_width = 2.0 / render_storage.aspect_ratio;
+        events::draw_text(
+            render_storage,
+            (screen_width * -0.5 + screen_width * 0.1, -0.5),
+            (0.25, 0.5),
+            0.125,
+            "Dead! Press enter!",
+        );
+    },
+    end: |_user_storage: &mut events::UserStorage, _render_storage: &mut events::RenderStorage| {},
+    on_keyboard_input: |user_storage: &mut events::UserStorage,
+                        render_storage: &mut events::RenderStorage,
+                        input: KeyboardInput| {
+        if let Some(key_code) = input.virtual_keycode {
+            match key_code {
+                VirtualKeyCode::Return => {
+                    if events::is_pressed(input.state) {
+                        user_storage.menu = Menu::Alive;
+                        (ALIVE.start)(user_storage, render_storage);
                     }
                 }
                 _ => (),
