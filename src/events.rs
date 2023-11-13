@@ -15,9 +15,8 @@ use winit::event::KeyboardInput;
 use crate::biomes;
 use crate::marching_squares;
 use crate::menus;
+use crate::ui;
 use crate::vertex_data;
-
-pub const TEXT_SPRITE_SIZE: (f32, f32) = (1.0 / 30.0, 1.0 / 5.0);
 
 pub const FULL_GRID_WIDTH: u32 = CHUNK_WIDTH as u32 * 50; //100;
 pub const FULL_GRID_WIDTH_SQUARED: u32 = FULL_GRID_WIDTH * FULL_GRID_WIDTH;
@@ -31,6 +30,9 @@ pub const CHUNK_GRID_WIDTH_SQUARED: u32 = CHUNK_GRID_WIDTH * CHUNK_GRID_WIDTH;
 
 pub const FIXED_UPDATE_TIME_STEP: f32 = 0.004;
 pub const MAX_SUBSTEPS: u32 = 150;
+
+pub const MAX_VERTICES: usize = CHUNK_WIDTH_SQUARED as usize * 4 * 100;
+pub const MAX_INDICES: usize = CHUNK_WIDTH_SQUARED as usize * 6 * 100;
 
 pub fn start(render_storage: &mut RenderStorage) -> UserStorage {
     render_storage.camera.scale = 0.12;
@@ -89,6 +91,7 @@ pub fn start(render_storage: &mut RenderStorage) -> UserStorage {
         multithread_rendering: false,
         chunk_generation: 0,
         menu: menus::Menu::TitleScreen,
+        screen_texts: vec![ui::ScreenText::new((0.0, 0.0), (0.0, 0.0), 0.0, "")],
     };
 
     let check = user_storage.map_objects_per_thread * available_parallelism;
@@ -131,7 +134,7 @@ pub fn update(
     }
 }
 
-pub fn fixed_update(user_storage: &mut UserStorage) {
+pub fn fixed_update(user_storage: &mut UserStorage, render_storage: &mut RenderStorage) {
     let motion = match user_storage.wasd_held {
         (true, false, false, false) => (0.0, -1.0),
         (false, false, true, false) => (0.0, 1.0),
@@ -182,7 +185,12 @@ pub fn fixed_update(user_storage: &mut UserStorage) {
                         continue;
                     }
 
-                    collide(user_storage, (total_x, total_y), detail_index as u8)
+                    collide(
+                        user_storage,
+                        render_storage,
+                        (total_x, total_y),
+                        detail_index as u8,
+                    )
                 }
             }
         }
@@ -245,8 +253,8 @@ pub fn is_pressed(state: ElementState) -> bool {
 
 #[derive(Debug, Copy, Clone)]
 pub struct Detail {
-    scale: u32, // This is unintuitive. Basically how many of these blocks become 1 block.
-    offset: (f32, f32),
+    pub scale: u32, // This is unintuitive. Basically how many of these blocks become 1 block.
+    pub offset: (f32, f32),
 }
 
 pub struct UserStorage {
@@ -270,6 +278,7 @@ pub struct UserStorage {
     pub multithread_rendering: bool,
     pub chunk_generation: u8,
     pub menu: menus::Menu,
+    pub screen_texts: Vec<ui::ScreenText>, // The plural of text is texts in this situation.
 }
 
 pub struct RenderStorage {
@@ -1058,7 +1067,12 @@ fn detect_collision(
     true
 }
 
-fn collide(user_storage: &mut UserStorage, full_position: (u32, u32), detail_index: u8) {
+fn collide(
+    user_storage: &mut UserStorage,
+    render_storage: &mut RenderStorage,
+    full_position: (u32, u32),
+    detail_index: u8,
+) {
     // TODO: this is broken on detail 1, work out why, then fix it.
     let detail = user_storage.details[detail_index as usize];
 
@@ -1090,6 +1104,7 @@ fn collide(user_storage: &mut UserStorage, full_position: (u32, u32), detail_ind
     ) {
         deal_with_collision(
             user_storage,
+            render_storage,
             user_storage.player.previous_position,
             full_position,
             detail_index,
@@ -1108,12 +1123,16 @@ pub struct Player {
 
 fn deal_with_collision(
     user_storage: &mut UserStorage,
+    render_storage: &mut RenderStorage,
     fallback_position: (f32, f32),
     full_position: (u32, u32),
-    detail: u8,
+    detail_index: u8,
 ) {
-    let map_object = &mut user_storage.map_objects[detail as usize]
-        [full_index_from_full_position(full_position, user_storage.details[detail as usize].scale)];
+    let map_object = &mut user_storage.map_objects[detail_index as usize]
+        [full_index_from_full_position(
+            full_position,
+            user_storage.details[detail_index as usize].scale,
+        )];
 
     let behaviour = match map_object {
         biomes::MapObject::RandomPattern(i) => {
@@ -1146,6 +1165,14 @@ fn deal_with_collision(
                 user_storage.player.position = fallback_position;
             }
         }
+        biomes::CollisionBehaviour::RunCode(function_index) => {
+            biomes::MAP_OBJECT_COLLISION_FUNCTIONS[function_index as usize](
+                user_storage,
+                render_storage,
+                full_position,
+                detail_index,
+            );
+        }
     }
 }
 
@@ -1159,83 +1186,272 @@ pub fn draw_text(
     for character in text.chars() {
         let (uv, individual_letter_spacing) = match character {
             '0' => ((0.0, 0.0), 1.0f32),
-            '1' => ((TEXT_SPRITE_SIZE.0 * 1.0, 0.0), 1.0),
-            '2' => ((TEXT_SPRITE_SIZE.0 * 2.0, 0.0), 1.0),
-            '3' => ((TEXT_SPRITE_SIZE.0 * 3.0, 0.0), 1.0),
-            '4' => ((TEXT_SPRITE_SIZE.0 * 4.0, 0.0), 1.0),
-            '5' => ((TEXT_SPRITE_SIZE.0 * 5.0, 0.0), 1.0),
-            '6' => ((TEXT_SPRITE_SIZE.0 * 6.0, 0.0), 1.0),
-            '7' => ((TEXT_SPRITE_SIZE.0 * 7.0, 0.0), 1.0),
-            '8' => ((TEXT_SPRITE_SIZE.0 * 8.0, 0.0), 1.0),
-            '9' => ((TEXT_SPRITE_SIZE.0 * 9.0, 0.0), 1.0),
+            '1' => ((ui::TEXT_SPRITE_SIZE.0 * 1.0, 0.0), 1.0),
+            '2' => ((ui::TEXT_SPRITE_SIZE.0 * 2.0, 0.0), 1.0),
+            '3' => ((ui::TEXT_SPRITE_SIZE.0 * 3.0, 0.0), 1.0),
+            '4' => ((ui::TEXT_SPRITE_SIZE.0 * 4.0, 0.0), 1.0),
+            '5' => ((ui::TEXT_SPRITE_SIZE.0 * 5.0, 0.0), 1.0),
+            '6' => ((ui::TEXT_SPRITE_SIZE.0 * 6.0, 0.0), 1.0),
+            '7' => ((ui::TEXT_SPRITE_SIZE.0 * 7.0, 0.0), 1.0),
+            '8' => ((ui::TEXT_SPRITE_SIZE.0 * 8.0, 0.0), 1.0),
+            '9' => ((ui::TEXT_SPRITE_SIZE.0 * 9.0, 0.0), 1.0),
 
-            'A' => ((TEXT_SPRITE_SIZE.0 * 0.0, TEXT_SPRITE_SIZE.1 * 1.0), 1.0),
-            'B' => ((TEXT_SPRITE_SIZE.0 * 1.0, TEXT_SPRITE_SIZE.1 * 1.0), 1.0),
-            'C' => ((TEXT_SPRITE_SIZE.0 * 2.0, TEXT_SPRITE_SIZE.1 * 1.0), 1.0),
-            'D' => ((TEXT_SPRITE_SIZE.0 * 3.0, TEXT_SPRITE_SIZE.1 * 1.0), 1.0),
-            'E' => ((TEXT_SPRITE_SIZE.0 * 4.0, TEXT_SPRITE_SIZE.1 * 1.0), 1.0),
-            'F' => ((TEXT_SPRITE_SIZE.0 * 5.0, TEXT_SPRITE_SIZE.1 * 1.0), 1.0),
-            'G' => ((TEXT_SPRITE_SIZE.0 * 6.0, TEXT_SPRITE_SIZE.1 * 1.0), 1.0),
-            'H' => ((TEXT_SPRITE_SIZE.0 * 7.0, TEXT_SPRITE_SIZE.1 * 1.0), 1.5),
-            'I' => ((TEXT_SPRITE_SIZE.0 * 8.0, TEXT_SPRITE_SIZE.1 * 1.0), 1.0),
-            'J' => ((TEXT_SPRITE_SIZE.0 * 9.0, TEXT_SPRITE_SIZE.1 * 1.0), 1.0),
-            'K' => ((TEXT_SPRITE_SIZE.0 * 10.0, TEXT_SPRITE_SIZE.1 * 1.0), 1.0),
-            'L' => ((TEXT_SPRITE_SIZE.0 * 11.0, TEXT_SPRITE_SIZE.1 * 1.0), 1.0),
-            'M' => ((TEXT_SPRITE_SIZE.0 * 12.0, TEXT_SPRITE_SIZE.1 * 1.0), 1.0),
-            'N' => ((TEXT_SPRITE_SIZE.0 * 13.0, TEXT_SPRITE_SIZE.1 * 1.0), 1.0),
-            'O' => ((TEXT_SPRITE_SIZE.0 * 14.0, TEXT_SPRITE_SIZE.1 * 1.0), 1.0),
-            'P' => ((TEXT_SPRITE_SIZE.0 * 15.0, TEXT_SPRITE_SIZE.1 * 1.0), 1.0),
-            'Q' => ((TEXT_SPRITE_SIZE.0 * 16.0, TEXT_SPRITE_SIZE.1 * 1.0), 1.0),
-            'R' => ((TEXT_SPRITE_SIZE.0 * 17.0, TEXT_SPRITE_SIZE.1 * 1.0), 1.0),
-            'S' => ((TEXT_SPRITE_SIZE.0 * 18.0, TEXT_SPRITE_SIZE.1 * 1.0), 1.3),
-            'T' => ((TEXT_SPRITE_SIZE.0 * 19.0, TEXT_SPRITE_SIZE.1 * 1.0), 1.0),
-            'U' => ((TEXT_SPRITE_SIZE.0 * 20.0, TEXT_SPRITE_SIZE.1 * 1.0), 1.0),
-            'V' => ((TEXT_SPRITE_SIZE.0 * 21.0, TEXT_SPRITE_SIZE.1 * 1.0), 1.0),
-            'W' => ((TEXT_SPRITE_SIZE.0 * 22.0, TEXT_SPRITE_SIZE.1 * 1.0), 1.0),
-            'X' => ((TEXT_SPRITE_SIZE.0 * 23.0, TEXT_SPRITE_SIZE.1 * 1.0), 1.0),
-            'Y' => ((TEXT_SPRITE_SIZE.0 * 24.0, TEXT_SPRITE_SIZE.1 * 1.0), 1.0),
-            'Z' => ((TEXT_SPRITE_SIZE.0 * 25.0, TEXT_SPRITE_SIZE.1 * 1.0), 1.0),
+            'A' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 0.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
+                1.0,
+            ),
+            'B' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 1.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
+                1.0,
+            ),
+            'C' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 2.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
+                1.0,
+            ),
+            'D' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 3.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
+                1.0,
+            ),
+            'E' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 4.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
+                1.0,
+            ),
+            'F' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 5.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
+                1.0,
+            ),
+            'G' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 6.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
+                1.0,
+            ),
+            'H' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 7.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
+                1.5,
+            ),
+            'I' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 8.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
+                1.0,
+            ),
+            'J' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 9.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
+                1.0,
+            ),
+            'K' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 10.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
+                1.0,
+            ),
+            'L' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 11.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
+                1.0,
+            ),
+            'M' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 12.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
+                1.0,
+            ),
+            'N' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 13.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
+                1.0,
+            ),
+            'O' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 14.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
+                1.0,
+            ),
+            'P' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 15.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
+                1.0,
+            ),
+            'Q' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 16.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
+                1.0,
+            ),
+            'R' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 17.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
+                1.0,
+            ),
+            'S' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 18.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
+                1.3,
+            ),
+            'T' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 19.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
+                1.0,
+            ),
+            'U' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 20.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
+                1.0,
+            ),
+            'V' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 21.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
+                1.0,
+            ),
+            'W' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 22.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
+                1.0,
+            ),
+            'X' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 23.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
+                1.0,
+            ),
+            'Y' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 24.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
+                1.0,
+            ),
+            'Z' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 25.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
+                1.0,
+            ),
 
-            'a' => ((TEXT_SPRITE_SIZE.0 * 0.0, TEXT_SPRITE_SIZE.1 * 2.0), 1.0),
-            'b' => ((TEXT_SPRITE_SIZE.0 * 1.0, TEXT_SPRITE_SIZE.1 * 2.0), 1.0),
-            'c' => ((TEXT_SPRITE_SIZE.0 * 2.0, TEXT_SPRITE_SIZE.1 * 2.0), 1.0),
-            'd' => ((TEXT_SPRITE_SIZE.0 * 3.0, TEXT_SPRITE_SIZE.1 * 2.0), 1.0),
-            'e' => ((TEXT_SPRITE_SIZE.0 * 4.0, TEXT_SPRITE_SIZE.1 * 2.0), 1.0),
-            'f' => ((TEXT_SPRITE_SIZE.0 * 5.0, TEXT_SPRITE_SIZE.1 * 2.0), 0.5),
-            'g' => ((TEXT_SPRITE_SIZE.0 * 6.0, TEXT_SPRITE_SIZE.1 * 2.0), 1.0),
-            'h' => ((TEXT_SPRITE_SIZE.0 * 7.0, TEXT_SPRITE_SIZE.1 * 2.0), 1.0),
-            'i' => ((TEXT_SPRITE_SIZE.0 * 8.0, TEXT_SPRITE_SIZE.1 * 2.0), 0.5),
-            'j' => ((TEXT_SPRITE_SIZE.0 * 9.0, TEXT_SPRITE_SIZE.1 * 2.0), 1.0),
-            'k' => ((TEXT_SPRITE_SIZE.0 * 10.0, TEXT_SPRITE_SIZE.1 * 2.0), 1.0),
-            'l' => ((TEXT_SPRITE_SIZE.0 * 11.0, TEXT_SPRITE_SIZE.1 * 2.0), 0.5),
-            'm' => ((TEXT_SPRITE_SIZE.0 * 12.0, TEXT_SPRITE_SIZE.1 * 2.0), 1.7),
-            'n' => ((TEXT_SPRITE_SIZE.0 * 13.0, TEXT_SPRITE_SIZE.1 * 2.0), 1.3),
-            'o' => ((TEXT_SPRITE_SIZE.0 * 14.0, TEXT_SPRITE_SIZE.1 * 2.0), 1.0),
-            'p' => ((TEXT_SPRITE_SIZE.0 * 15.0, TEXT_SPRITE_SIZE.1 * 2.0), 1.0),
-            'q' => ((TEXT_SPRITE_SIZE.0 * 16.0, TEXT_SPRITE_SIZE.1 * 2.0), 1.0),
-            'r' => ((TEXT_SPRITE_SIZE.0 * 17.0, TEXT_SPRITE_SIZE.1 * 2.0), 0.5),
-            's' => ((TEXT_SPRITE_SIZE.0 * 18.0, TEXT_SPRITE_SIZE.1 * 2.0), 1.0),
-            't' => ((TEXT_SPRITE_SIZE.0 * 19.0, TEXT_SPRITE_SIZE.1 * 2.0), 0.5),
-            'u' => ((TEXT_SPRITE_SIZE.0 * 20.0, TEXT_SPRITE_SIZE.1 * 2.0), 1.0),
-            'v' => ((TEXT_SPRITE_SIZE.0 * 21.0, TEXT_SPRITE_SIZE.1 * 2.0), 1.0),
-            'w' => ((TEXT_SPRITE_SIZE.0 * 22.0, TEXT_SPRITE_SIZE.1 * 2.0), 1.0),
-            'x' => ((TEXT_SPRITE_SIZE.0 * 23.0, TEXT_SPRITE_SIZE.1 * 2.0), 1.0),
-            'y' => ((TEXT_SPRITE_SIZE.0 * 24.0, TEXT_SPRITE_SIZE.1 * 2.0), 1.0),
-            'z' => ((TEXT_SPRITE_SIZE.0 * 25.0, TEXT_SPRITE_SIZE.1 * 2.0), 1.0),
+            'a' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 0.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
+                1.0,
+            ),
+            'b' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 1.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
+                1.0,
+            ),
+            'c' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 2.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
+                1.0,
+            ),
+            'd' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 3.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
+                1.0,
+            ),
+            'e' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 4.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
+                1.0,
+            ),
+            'f' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 5.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
+                0.5,
+            ),
+            'g' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 6.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
+                1.0,
+            ),
+            'h' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 7.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
+                1.0,
+            ),
+            'i' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 8.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
+                0.5,
+            ),
+            'j' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 9.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
+                1.0,
+            ),
+            'k' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 10.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
+                1.0,
+            ),
+            'l' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 11.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
+                0.5,
+            ),
+            'm' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 12.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
+                1.7,
+            ),
+            'n' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 13.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
+                1.3,
+            ),
+            'o' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 14.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
+                1.0,
+            ),
+            'p' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 15.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
+                1.0,
+            ),
+            'q' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 16.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
+                1.0,
+            ),
+            'r' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 17.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
+                0.5,
+            ),
+            's' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 18.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
+                1.0,
+            ),
+            't' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 19.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
+                0.5,
+            ),
+            'u' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 20.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
+                1.0,
+            ),
+            'v' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 21.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
+                1.0,
+            ),
+            'w' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 22.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
+                1.0,
+            ),
+            'x' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 23.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
+                1.0,
+            ),
+            'y' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 24.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
+                1.0,
+            ),
+            'z' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 25.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
+                1.0,
+            ),
 
-            ' ' => ((TEXT_SPRITE_SIZE.0 * 29.0, TEXT_SPRITE_SIZE.1 * 2.0), 1.0),
-            ':' => ((TEXT_SPRITE_SIZE.0 * 12.0, TEXT_SPRITE_SIZE.1 * 0.0), 1.0),
-            '-' => ((TEXT_SPRITE_SIZE.0 * 11.0, TEXT_SPRITE_SIZE.1 * 0.0), 1.0),
-            '_' => ((TEXT_SPRITE_SIZE.0 * 13.0, TEXT_SPRITE_SIZE.1 * 0.0), 1.0),
-            '.' => ((TEXT_SPRITE_SIZE.0 * 10.0, TEXT_SPRITE_SIZE.1 * 0.0), 0.5),
-            '!' => ((TEXT_SPRITE_SIZE.0 * 15.0, TEXT_SPRITE_SIZE.1 * 0.0), 0.5),
-            '%' => ((TEXT_SPRITE_SIZE.0 * 17.0, TEXT_SPRITE_SIZE.1 * 0.0), 1.0),
-            '(' => ((TEXT_SPRITE_SIZE.0 * 18.0, TEXT_SPRITE_SIZE.1 * 0.0), 0.5),
-            ')' => ((TEXT_SPRITE_SIZE.0 * 19.0, TEXT_SPRITE_SIZE.1 * 0.0), 0.5),
-            ',' => ((TEXT_SPRITE_SIZE.0 * 20.0, TEXT_SPRITE_SIZE.1 * 0.0), 0.5),
+            ' ' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 29.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
+                1.0,
+            ),
+            ':' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 12.0, ui::TEXT_SPRITE_SIZE.1 * 0.0),
+                1.0,
+            ),
+            '-' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 11.0, ui::TEXT_SPRITE_SIZE.1 * 0.0),
+                1.0,
+            ),
+            '_' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 13.0, ui::TEXT_SPRITE_SIZE.1 * 0.0),
+                1.0,
+            ),
+            '.' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 10.0, ui::TEXT_SPRITE_SIZE.1 * 0.0),
+                0.5,
+            ),
+            '!' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 15.0, ui::TEXT_SPRITE_SIZE.1 * 0.0),
+                0.5,
+            ),
+            '%' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 17.0, ui::TEXT_SPRITE_SIZE.1 * 0.0),
+                1.0,
+            ),
+            '(' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 18.0, ui::TEXT_SPRITE_SIZE.1 * 0.0),
+                0.5,
+            ),
+            ')' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 19.0, ui::TEXT_SPRITE_SIZE.1 * 0.0),
+                0.5,
+            ),
+            ',' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 20.0, ui::TEXT_SPRITE_SIZE.1 * 0.0),
+                0.5,
+            ),
 
-            '@' => ((TEXT_SPRITE_SIZE.0 * 0.0, TEXT_SPRITE_SIZE.1 * 3.0), 1.0),
-            _ => ((TEXT_SPRITE_SIZE.0 * 14.0, 0.0), 1.0),
+            '@' => (
+                (ui::TEXT_SPRITE_SIZE.0 * 0.0, ui::TEXT_SPRITE_SIZE.1 * 3.0),
+                1.0,
+            ),
+            _ => ((ui::TEXT_SPRITE_SIZE.0 * 14.0, 0.0), 1.0),
         };
 
         let vertex_start = render_storage.vertex_count_text as usize;
@@ -1247,7 +1463,7 @@ pub fn draw_text(
                 position.0 + character_size.0 * 0.5,
                 position.1 + character_size.1 * 0.5,
             ],
-            uv: [uv.0 + TEXT_SPRITE_SIZE.0, uv.1 + TEXT_SPRITE_SIZE.1],
+            uv: [uv.0 + ui::TEXT_SPRITE_SIZE.0, uv.1 + ui::TEXT_SPRITE_SIZE.1],
         };
 
         render_storage.vertices_text[vertex_start + 1] = vertex_data::VertexData {
@@ -1256,7 +1472,7 @@ pub fn draw_text(
                 position.0 + character_size.0 * 0.5,
                 position.1 - character_size.1 * 0.5,
             ],
-            uv: [uv.0 + TEXT_SPRITE_SIZE.0, uv.1],
+            uv: [uv.0 + ui::TEXT_SPRITE_SIZE.0, uv.1],
         };
 
         render_storage.vertices_text[vertex_start + 2] = vertex_data::VertexData {
@@ -1265,7 +1481,7 @@ pub fn draw_text(
                 position.0 - character_size.0 * 0.5,
                 position.1 + character_size.1 * 0.5,
             ],
-            uv: [uv.0, uv.1 + TEXT_SPRITE_SIZE.1],
+            uv: [uv.0, uv.1 + ui::TEXT_SPRITE_SIZE.1],
         };
 
         render_storage.vertices_text[vertex_start + 3] = vertex_data::VertexData {
@@ -1292,32 +1508,62 @@ pub fn draw_text(
     }
 }
 
-// Absolute garbage, fix asap. This needs to account for player size, whether the block thinks it is safe (add a safe bool to all blocks), and detail.
+// Not good. It can't account for randomly generated map objects, due to non deterministic generation. Also, super slow.
 pub fn get_safe_position(user_storage: &mut UserStorage) -> (u32, u32) {
     let mut rng = thread_rng();
     let position_range = Uniform::new(0u32, FULL_GRID_WIDTH);
 
-    let mut safe = false;
+    let mut not_safe = true;
     let mut safe_position = (10u32, 10u32);
 
-    while !safe {
+    while not_safe {
         safe_position = (
             position_range.sample(&mut rng),
             position_range.sample(&mut rng),
         );
 
-        safe = match generate_position(
-            safe_position,
-            0,
-            1,
-            (0.0, 0.0),
-            &mut rng,
-            user_storage.biome_noise,
-            user_storage.percent_range,
-            user_storage.main_seed,
-        ) {
-            biomes::MapObject::None => true,
-            _ => false,
+        not_safe = false;
+
+        for detail_index in 0..user_storage.details.len() {
+            let detail = user_storage.details[detail_index];
+
+            let rounded_player_position_scaled = (
+                (safe_position.0 * detail.scale) as i32,
+                (safe_position.1 * detail.scale) as i32,
+            );
+
+            let ceil_player_half_size_scaled = (
+                (user_storage.player.size.0 * 0.5 * detail.scale as f32).ceil() as i32,
+                (user_storage.player.size.1 * 0.5 * detail.scale as f32).ceil() as i32,
+            );
+
+            for x in -ceil_player_half_size_scaled.0..ceil_player_half_size_scaled.0 + 1 {
+                for y in -ceil_player_half_size_scaled.1..ceil_player_half_size_scaled.1 + 1 {
+                    let total_x = (rounded_player_position_scaled.0 + x) as u32;
+                    let total_y = (rounded_player_position_scaled.1 + y) as u32;
+
+                    if total_x >= FULL_GRID_WIDTH * detail.scale
+                        || total_y >= FULL_GRID_WIDTH * detail.scale
+                    {
+                        continue;
+                    }
+
+                    not_safe = not_safe
+                        || match generate_position(
+                            (total_x, total_y),
+                            detail_index as u8,
+                            detail.scale,
+                            detail.offset,
+                            &mut rng,
+                            user_storage.biome_noise,
+                            user_storage.percent_range,
+                            user_storage.main_seed,
+                        ) {
+                            biomes::MapObject::None => false,
+                            _ => true,
+                        };
+                }
+            }
         }
     }
 
@@ -1331,4 +1577,25 @@ fn wrap(value: f32, start: f32, limit: f32) -> f32 {
 fn rerange(desired_range: (f32, f32), value: f32) -> f32 {
     let slope = (desired_range.1 - desired_range.0) / (1.0 - -1.0);
     desired_range.0 + slope * (value - -1.0)
+}
+
+pub fn on_window_resize(
+    user_storage: &mut UserStorage,
+    render_storage: &mut RenderStorage,
+) {
+    match user_storage.menu {
+        menus::Menu::TitleScreen => {
+            (menus::TITLE_SCREEN.on_window_resize)(user_storage, render_storage)
+        }
+        menus::Menu::Alive => {
+            (menus::ALIVE.on_window_resize)(user_storage, render_storage)
+        }
+        menus::Menu::Paused => {
+            (menus::PAUSED.on_window_resize)(user_storage, render_storage)
+        }
+        menus::Menu::Dead => {
+            (menus::DEAD.on_window_resize)(user_storage, render_storage)
+        }
+        _ => {}
+    }
 }

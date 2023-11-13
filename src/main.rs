@@ -64,6 +64,8 @@ mod marching_squares;
 
 mod menus;
 
+mod ui;
+
 fn main() {
     let instance = get_instance();
 
@@ -400,6 +402,8 @@ fn main() {
 
     let mut user_storage = events::start(&mut render_storage);
 
+    let mut window_size = [0,0];
+
     // start event loop
     event_loop.run(move |event, _, control_flow| {
         match event {
@@ -429,6 +433,7 @@ fn main() {
                 let window = surface.object().unwrap().downcast_ref::<Window>().unwrap();
 
                 let dimensions = window.inner_size();
+
                 if dimensions.width == 0 || dimensions.height == 0 {
                     // If the window is 0 in size, don't bother drawing the frame.
                     return;
@@ -438,6 +443,13 @@ fn main() {
 
                 render_storage.aspect_ratio =
                     swapchain.image_extent()[1] as f32 / swapchain.image_extent()[0] as f32;
+
+                let previous_window_size = window_size;
+                window_size = swapchain.image_extent();
+
+                if previous_window_size != window_size {
+                    events::on_window_resize(&mut user_storage, &mut render_storage);
+                }
 
                 events::update(
                     &mut user_storage,
@@ -766,7 +778,7 @@ fn create_buffers_map(
                     position: [0.0, 0.0],
                     uv: [0.0, 0.0],
                 };
-                events::CHUNK_WIDTH_SQUARED as usize * 4 * 30
+                events::MAX_VERTICES
             ],
         )
         .unwrap(),
@@ -786,7 +798,7 @@ fn create_buffers_map(
                     position: [0.0, 0.0],
                     uv: [0.0, 0.0],
                 };
-                events::CHUNK_WIDTH_SQUARED as usize * 4 * 30
+                events::MAX_VERTICES
             ],
         )
         .unwrap(),
@@ -804,7 +816,7 @@ fn create_buffers_map(
                 ..Default::default()
             },
             //*events::STARTING_INDICES,
-            vec![0u32; events::CHUNK_WIDTH_SQUARED as usize * 6 * 30],
+            vec![0u32; events::MAX_INDICES],
         )
         .unwrap(),
         Buffer::from_iter(
@@ -818,7 +830,7 @@ fn create_buffers_map(
                 ..Default::default()
             },
             //*events::STARTING_INDICES,
-            vec![0u32; events::CHUNK_WIDTH_SQUARED as usize * 6 * 30],
+            vec![0u32; events::MAX_INDICES],
         )
         .unwrap(),
     ];

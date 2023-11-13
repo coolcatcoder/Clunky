@@ -1,3 +1,7 @@
+use rand::distributions::{Distribution, Uniform};
+use rand::thread_rng;
+
+use crate::events;
 use crate::transform_biomes;
 use std::ops::AddAssign;
 
@@ -135,15 +139,72 @@ pub enum CollisionBehaviour {
     Consume(u8, Statistics),
     Replace(u8, Statistics, MapObject),
     //Push(u8), Some objects should be pushable. This is not possible until we get a proper physics system working.
+    RunCode(u8), // the u8 should be an index into some array of code
 }
 
-// stolen:
+pub const MAP_OBJECT_COLLISION_FUNCTIONS: [fn(
+    &mut events::UserStorage,
+    &mut events::RenderStorage,
+    (u32, u32),
+    u8,
+); 3] = [
+    |user_storage: &mut events::UserStorage,
+     _render_storage: &mut events::RenderStorage,
+     full_position: (u32, u32),
+     detail_index: u8| {
+        let position_range = Uniform::new(1, 50);
+        let mut rng = thread_rng();
+
+        user_storage.map_objects[detail_index as usize][events::full_index_from_full_position(
+            (
+                full_position.0 + position_range.sample(&mut rng),
+                full_position.1 + position_range.sample(&mut rng),
+            ),
+            user_storage.details[detail_index as usize].scale,
+        )] = MapObject::RandomPattern(
+            Uniform::new(0, RANDOM_PATTERN_MAP_OBJECTS.len() as u8).sample(&mut rng),
+        );
+
+        user_storage.map_objects[detail_index as usize][events::full_index_from_full_position(
+            (
+                full_position.0 + position_range.sample(&mut rng),
+                full_position.1 + position_range.sample(&mut rng),
+            ),
+            user_storage.details[detail_index as usize].scale,
+        )] = MapObject::SimplexPattern(
+            Uniform::new(0, SIMPLEX_PATTERN_MAP_OBJECTS.len() as u8).sample(&mut rng),
+        );
+
+        user_storage.map_objects[detail_index as usize][events::full_index_from_full_position(
+            (
+                full_position.0 + position_range.sample(&mut rng),
+                full_position.1 + position_range.sample(&mut rng),
+            ),
+            user_storage.details[detail_index as usize].scale,
+        )] = MapObject::SimplexSmoothedPattern(
+            Uniform::new(0, SIMPLEX_SMOOTHED_PATTERN_MAP_OBJECTS.len() as u8).sample(&mut rng),
+            Uniform::new(0, 16).sample(&mut rng),
+        );
+    },
+    |_user_storage: &mut events::UserStorage,
+     render_storage: &mut events::RenderStorage,
+     _full_position: (u32, u32),
+     _detail_index: u8| {
+        render_storage.brightness -= 1.0 * events::FIXED_UPDATE_TIME_STEP;
+    },
+    |_user_storage: &mut events::UserStorage,
+     render_storage: &mut events::RenderStorage,
+     _full_position: (u32, u32),
+     _detail_index: u8| {
+        render_storage.brightness += 1.0 * events::FIXED_UPDATE_TIME_STEP;
+    },
+];
 
 #[allow(long_running_const_eval)]
 #[allow(unused_assignments)]
 const ALL_BIOME_DATA: (
     [Biome; 6],
-    [RandomPatternMapObject; 11],
+    [RandomPatternMapObject; 13],
     [SimplexPatternMapObject; 7],
     [SimplexSmoothedPatternMapObject; 2],
 ) = transform_biomes![
@@ -169,30 +230,55 @@ const TEMPLATE_BIOME: EasyBiome<0, 0, 0> = EasyBiome {
     simplex_smoothed_pattern: [],
 };
 
-const MANUAL_MAP_OBJECT_STORAGE: EasyBiome<1, 0, 0> = EasyBiome {
+const MANUAL_MAP_OBJECT_STORAGE: EasyBiome<3, 0, 0> = EasyBiome {
     // this biome should store any map objects that are planned to be used druing CollisionBehaviour::Replace, so reordering of biomes and map objects doesn't change the replacement map objects
     aabb: Aabb {
         size: (0.0, 0.0),
         position: (100.0, 100.0),
     },
 
-    random_pattern: [RandomPatternMapObject {
-        // debug testing manual placing of structures, should be index 0 in RANDOM_PATTERN_MAP_OBJECTS
-        detail: 0,
-        chance: 100,
-        priority: 255,
-        behaviour: CollisionBehaviour::Consume(
-            5,
-            Statistics {
-                strength: -5,
-                health: -10,
-                stamina: -10,
-            },
-        ),
-        rendering_size: (1.0, 1.0),
-        collision_size: (1.0, 1.0),
-        uv: (38.0 * SPRITE_SIZE.0, 0.0),
-    }],
+    random_pattern: [
+        RandomPatternMapObject {
+            // debug testing manual placing of structures, should be index 0 in RANDOM_PATTERN_MAP_OBJECTS
+            detail: 0,
+            chance: 100,
+            priority: 255,
+            behaviour: CollisionBehaviour::RunCode(0),
+            rendering_size: (1.0, 1.0),
+            collision_size: (1.0, 1.0),
+            uv: (38.0 * SPRITE_SIZE.0, 0.0),
+        },
+        RandomPatternMapObject {
+            // index 1
+            detail: 0,
+            chance: 100,
+            priority: 255,
+            behaviour: CollisionBehaviour::RunCode(1),
+            rendering_size: (1.0, 1.0),
+            collision_size: (1.0, 1.0),
+            uv: (37.0 * SPRITE_SIZE.0, 0.0),
+        },
+        RandomPatternMapObject {
+            // index 2
+            detail: 0,
+            chance: 100,
+            priority: 255,
+            behaviour: CollisionBehaviour::RunCode(2),
+            rendering_size: (1.0, 1.0),
+            collision_size: (1.0, 1.0),
+            uv: (39.0 * SPRITE_SIZE.0, 0.0),
+        },
+        // RandomPatternMapObject {
+        //     // index 3
+        //     detail: 0,
+        //     chance: 100,
+        //     priority: 255,
+        //     behaviour: CollisionBehaviour::RunCode(3),
+        //     rendering_size: (1.0, 1.0),
+        //     collision_size: (1.0, 1.0),
+        //     uv: (41.0 * SPRITE_SIZE.0, 0.0),
+        // },
+    ],
 
     simplex_pattern: [],
 
