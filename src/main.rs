@@ -66,6 +66,8 @@ mod menus;
 
 mod ui;
 
+mod collision;
+
 fn main() {
     let instance = get_instance();
 
@@ -137,6 +139,9 @@ fn main() {
         );
         let window = surface.object().unwrap().downcast_ref::<Window>().unwrap();
 
+        window.set_title("I Don't Know!");
+        window.set_maximized(true);
+
         Swapchain::new(
             device.clone(),
             surface.clone(),
@@ -162,7 +167,7 @@ fn main() {
 
     let (vertex_buffers_map, index_buffers_map) = create_buffers_map(&memory_allocator);
 
-    let (vertex_buffers_text, index_buffers_text) = create_buffers_text(&memory_allocator);
+    let (vertex_buffers_ui, index_buffers_ui) = create_buffers_ui(&memory_allocator);
 
     let uniform_buffer_main = SubbufferAllocator::new(
         memory_allocator.clone(),
@@ -270,22 +275,22 @@ fn main() {
     let vertex_shader_map = vertex_shader_map::load(device.clone()).unwrap();
     let fragment_shader_map = fragment_shader_map::load(device.clone()).unwrap();
 
-    mod vertex_shader_text {
+    mod vertex_shader_ui {
         vulkano_shaders::shader! {
             ty: "vertex",
-            path: "src/text_shaders/vertex_shader.glsl",
+            path: "src/ui_shaders/vertex_shader.glsl",
         }
     }
 
-    mod fragment_shader_text {
+    mod fragment_shader_ui {
         vulkano_shaders::shader! {
             ty: "fragment",
-            path: "src/text_shaders/fragment_shader.glsl",
+            path: "src/ui_shaders/fragment_shader.glsl",
         }
     }
 
-    let vertex_shader_text = vertex_shader_text::load(device.clone()).unwrap();
-    let fragment_shader_text = fragment_shader_text::load(device.clone()).unwrap();
+    let vertex_shader_ui = vertex_shader_ui::load(device.clone()).unwrap();
+    let fragment_shader_ui = fragment_shader_ui::load(device.clone()).unwrap();
 
     // end of creating shaders
 
@@ -308,12 +313,12 @@ fn main() {
     .unwrap();
     // end of creating render pass
 
-    let (mut pipeline_map, mut pipeline_text, mut framebuffers) = window_size_dependent_setup(
+    let (mut pipeline_map, mut pipeline_ui, mut framebuffers) = window_size_dependent_setup(
         &memory_allocator,
         &vertex_shader_map,
         &fragment_shader_map,
-        &vertex_shader_text,
-        &fragment_shader_text,
+        &vertex_shader_ui,
+        &fragment_shader_ui,
         &images,
         render_pass.clone(),
     );
@@ -333,7 +338,7 @@ fn main() {
     );
 
     let layout_map = pipeline_map.layout().set_layouts().get(1).unwrap();
-    let layout_text = pipeline_text.layout().set_layouts().get(1).unwrap();
+    let layout_ui = pipeline_ui.layout().set_layouts().get(1).unwrap();
 
     let set_sprites_map = PersistentDescriptorSet::new(
         &descriptor_set_allocator,
@@ -348,7 +353,7 @@ fn main() {
 
     let set_sprites_text = PersistentDescriptorSet::new(
         &descriptor_set_allocator,
-        layout_text.clone(),
+        layout_ui.clone(),
         [WriteDescriptorSet::image_view_sampler(
             1,
             sprites_text,
@@ -366,12 +371,12 @@ fn main() {
     let mut vertex_counts_map = [0u32, 0u32];
     let mut index_counts_map = [0u32, 0u32];
 
-    let mut vertex_counts_text = [0u32, 0u32];
-    let mut index_counts_text = [0u32, 0u32];
+    let mut vertex_counts_ui = [0u32, 0u32];
+    let mut index_counts_ui = [0u32, 0u32];
 
     let mut render_storage = events::RenderStorage {
         vertices_map: vec![
-            vertex_data::VertexData {
+            vertex_data::MapVertex {
                 position: [0.0, 0.0],
                 uv: [0.0, 0.0],
             };
@@ -380,16 +385,17 @@ fn main() {
         vertex_count_map: 0,
         indices_map: vec![0u32; index_buffers_map[0].len() as usize],
         index_count_map: 0,
-        vertices_text: vec![
-            vertex_data::VertexData {
+        vertices_ui: vec![
+            vertex_data::UIVertex {
                 position: [0.0, 0.0],
                 uv: [0.0, 0.0],
+                colour: [0.0, 0.0, 0.0, 0.0],
             };
-            vertex_buffers_text[0].len() as usize
+            vertex_buffers_ui[0].len() as usize
         ],
-        vertex_count_text: 0,
-        indices_text: vec![0u32; index_buffers_text[0].len() as usize],
-        index_count_text: 0,
+        vertex_count_ui: 0,
+        indices_ui: vec![0u32; index_buffers_ui[0].len() as usize],
+        index_count_ui: 0,
         aspect_ratio: 0.0,
         camera: events::Camera {
             scale: 1.0,
@@ -402,7 +408,7 @@ fn main() {
 
     let mut user_storage = events::start(&mut render_storage);
 
-    let mut window_size = [0,0];
+    let mut window_size = [0, 0];
 
     // start event loop
     event_loop.run(move |event, _, control_flow| {
@@ -426,6 +432,13 @@ fn main() {
                 ..
             } => {
                 events::on_keyboard_input(&mut user_storage, &mut render_storage, input);
+            }
+
+            Event::WindowEvent {
+                event: WindowEvent::CursorMoved { position, .. },
+                ..
+            } => {
+                events::on_cursor_moved(&mut user_storage, &mut render_storage, position);
             }
 
             Event::RedrawEventsCleared => {
@@ -472,12 +485,12 @@ fn main() {
                     &mut index_counts_map,
                 );
 
-                update_buffers_text(
+                update_buffers_ui(
                     &mut render_storage,
-                    &vertex_buffers_text,
-                    &mut vertex_counts_text,
-                    &index_buffers_text,
-                    &mut index_counts_text,
+                    &vertex_buffers_ui,
+                    &mut vertex_counts_ui,
+                    &index_buffers_ui,
+                    &mut index_counts_ui,
                 );
 
                 if recreate_swapchain {
@@ -494,19 +507,19 @@ fn main() {
 
                     swapchain = new_swapchain;
 
-                    let (new_pipeline_map, new_pipeline_text, new_framebuffers) =
+                    let (new_pipeline_map, new_pipeline_ui, new_framebuffers) =
                         window_size_dependent_setup(
                             &memory_allocator,
                             &vertex_shader_map,
                             &fragment_shader_map,
-                            &vertex_shader_text,
-                            &fragment_shader_text,
+                            &vertex_shader_ui,
+                            &fragment_shader_ui,
                             &new_images,
                             render_pass.clone(),
                         );
 
                     pipeline_map = new_pipeline_map;
-                    pipeline_text = new_pipeline_text;
+                    pipeline_ui = new_pipeline_ui;
                     framebuffers = new_framebuffers;
 
                     recreate_swapchain = false;
@@ -598,22 +611,22 @@ fn main() {
                         0,
                     )
                     .unwrap()
-                    .bind_pipeline_graphics(pipeline_text.clone()) // start of text pipeline
+                    .bind_pipeline_graphics(pipeline_ui.clone()) // start of text pipeline
                     .bind_descriptor_sets(
                         PipelineBindPoint::Graphics,
-                        pipeline_text.layout().clone(),
+                        pipeline_ui.layout().clone(),
                         0,
                         vec![set_main, set_sprites_text.clone()],
                     )
                     .bind_vertex_buffers(
                         0,
-                        vertex_buffers_text[render_storage.frame_count as usize % 2].clone(),
+                        vertex_buffers_ui[render_storage.frame_count as usize % 2].clone(),
                     )
                     .bind_index_buffer(
-                        index_buffers_text[render_storage.frame_count as usize % 2].clone(),
+                        index_buffers_ui[render_storage.frame_count as usize % 2].clone(),
                     )
                     .draw_indexed(
-                        index_counts_text[render_storage.frame_count as usize % 2],
+                        index_counts_ui[render_storage.frame_count as usize % 2],
                         1,
                         0,
                         0,
@@ -677,8 +690,8 @@ fn window_size_dependent_setup(
     memory_allocator: &StandardMemoryAllocator,
     vertex_shader_map: &ShaderModule,
     fragment_shader_map: &ShaderModule,
-    vertex_shader_text: &ShaderModule,
-    fragment_shader_text: &ShaderModule,
+    vertex_shader_ui: &ShaderModule,
+    fragment_shader_ui: &ShaderModule,
     images: &[Arc<SwapchainImage>],
     render_pass: Arc<RenderPass>,
 ) -> (
@@ -706,7 +719,7 @@ fn window_size_dependent_setup(
     let subpass = Subpass::from(render_pass.clone(), 0).unwrap();
     let pipeline_map = GraphicsPipeline::start()
         .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
-        .vertex_input_state(vertex_data::VertexData::per_vertex())
+        .vertex_input_state(vertex_data::MapVertex::per_vertex())
         .input_assembly_state(InputAssemblyState::new())
         .vertex_shader(vertex_shader_map.entry_point("main").unwrap(), ())
         .viewport_state(ViewportState::viewport_fixed_scissor_irrelevant([
@@ -721,11 +734,11 @@ fn window_size_dependent_setup(
         .build(memory_allocator.device().clone())
         .unwrap();
 
-    let pipeline_text = GraphicsPipeline::start()
+    let pipeline_ui = GraphicsPipeline::start()
         .render_pass(Subpass::from(render_pass, 0).unwrap())
-        .vertex_input_state(vertex_data::VertexData::per_vertex())
+        .vertex_input_state(vertex_data::UIVertex::per_vertex())
         .input_assembly_state(InputAssemblyState::new())
-        .vertex_shader(vertex_shader_text.entry_point("main").unwrap(), ())
+        .vertex_shader(vertex_shader_ui.entry_point("main").unwrap(), ())
         .viewport_state(ViewportState::viewport_fixed_scissor_irrelevant([
             Viewport {
                 origin: [0.0, 0.0],
@@ -733,12 +746,12 @@ fn window_size_dependent_setup(
                 depth_range: 0.0..1.0,
             },
         ]))
-        .fragment_shader(fragment_shader_text.entry_point("main").unwrap(), ())
+        .fragment_shader(fragment_shader_ui.entry_point("main").unwrap(), ())
         .color_blend_state(ColorBlendState::new(subpass.num_color_attachments()).blend_alpha())
         .build(memory_allocator.device().clone())
         .unwrap();
 
-    (pipeline_map, pipeline_text, framebuffers)
+    (pipeline_map, pipeline_ui, framebuffers)
 }
 
 fn get_instance() -> Arc<vulkano::instance::Instance> {
@@ -758,7 +771,7 @@ fn get_instance() -> Arc<vulkano::instance::Instance> {
 fn create_buffers_map(
     memory_allocator: &StandardMemoryAllocator,
 ) -> (
-    [Subbuffer<[vertex_data::VertexData]>; 2],
+    [Subbuffer<[vertex_data::MapVertex]>; 2],
     [Subbuffer<[u32]>; 2],
 ) {
     let vertex_buffers_map = [
@@ -774,7 +787,7 @@ fn create_buffers_map(
             },
             //*events::STARTING_VERTICES,
             vec![
-                vertex_data::VertexData {
+                vertex_data::MapVertex {
                     position: [0.0, 0.0],
                     uv: [0.0, 0.0],
                 };
@@ -794,7 +807,7 @@ fn create_buffers_map(
             },
             //*events::STARTING_VERTICES,
             vec![
-                vertex_data::VertexData {
+                vertex_data::MapVertex {
                     position: [0.0, 0.0],
                     uv: [0.0, 0.0],
                 };
@@ -838,13 +851,13 @@ fn create_buffers_map(
     (vertex_buffers_map, index_buffers_map)
 }
 
-fn create_buffers_text(
+fn create_buffers_ui(
     memory_allocator: &StandardMemoryAllocator,
 ) -> (
-    [Subbuffer<[vertex_data::VertexData]>; 2],
+    [Subbuffer<[vertex_data::UIVertex]>; 2],
     [Subbuffer<[u32]>; 2],
 ) {
-    let vertex_buffers_text = [
+    let vertex_buffers_ui = [
         Buffer::from_iter(
             memory_allocator,
             BufferCreateInfo {
@@ -856,9 +869,10 @@ fn create_buffers_text(
                 ..Default::default()
             },
             vec![
-                vertex_data::VertexData {
+                vertex_data::UIVertex {
                     position: [0.0, 0.0],
                     uv: [0.0, 0.0],
+                    colour: [0.0, 0.0, 0.0, 0.0],
                 };
                 events::CHUNK_WIDTH_SQUARED as usize * 4 * 30
             ],
@@ -875,9 +889,10 @@ fn create_buffers_text(
                 ..Default::default()
             },
             vec![
-                vertex_data::VertexData {
+                vertex_data::UIVertex {
                     position: [0.0, 0.0],
                     uv: [0.0, 0.0],
+                    colour: [0.0, 0.0, 0.0, 0.0],
                 };
                 events::CHUNK_WIDTH_SQUARED as usize * 4 * 30
             ],
@@ -885,7 +900,7 @@ fn create_buffers_text(
         .unwrap(),
     ];
 
-    let index_buffers_text = [
+    let index_buffers_ui = [
         Buffer::from_iter(
             memory_allocator,
             BufferCreateInfo {
@@ -914,18 +929,17 @@ fn create_buffers_text(
         .unwrap(),
     ];
 
-    (vertex_buffers_text, index_buffers_text)
+    (vertex_buffers_ui, index_buffers_ui)
 }
 
 fn update_buffers_map(
     render_storage: &mut events::RenderStorage,
-    vertex_buffers_map: &[Subbuffer<[vertex_data::VertexData]>; 2],
+    vertex_buffers_map: &[Subbuffer<[vertex_data::MapVertex]>; 2],
     vertex_counts_map: &mut [u32; 2],
     index_buffers_map: &[Subbuffer<[u32]>; 2],
     index_counts_map: &mut [u32; 2],
 ) {
     let vertex_writer_map = vertex_buffers_map[render_storage.frame_count as usize % 2].write();
-    //let vertex_writer_text = vertex_buffers_text[render_storage.frame_count as usize%2].write();
 
     match vertex_writer_map {
         Ok(mut writer) => {
@@ -958,23 +972,22 @@ fn update_buffers_map(
     };
 }
 
-fn update_buffers_text(
+fn update_buffers_ui(
     render_storage: &mut events::RenderStorage,
-    vertex_buffers_text: &[Subbuffer<[vertex_data::VertexData]>; 2],
-    vertex_counts_text: &mut [u32; 2],
-    index_buffers_text: &[Subbuffer<[u32]>; 2],
-    index_counts_text: &mut [u32; 2],
+    vertex_buffers_ui: &[Subbuffer<[vertex_data::UIVertex]>; 2],
+    vertex_counts_ui: &mut [u32; 2],
+    index_buffers_ui: &[Subbuffer<[u32]>; 2],
+    index_counts_ui: &mut [u32; 2],
 ) {
-    let vertex_writer_text = vertex_buffers_text[render_storage.frame_count as usize % 2].write();
-    //let vertex_writer_text = vertex_buffers_text[render_storage.frame_count as usize%2].write();
+    let vertex_writer_ui = vertex_buffers_ui[render_storage.frame_count as usize % 2].write();
 
-    match vertex_writer_text {
+    match vertex_writer_ui {
         Ok(mut writer) => {
-            writer[0..render_storage.vertex_count_text as usize].copy_from_slice(
-                &render_storage.vertices_text[0..render_storage.vertex_count_text as usize],
+            writer[0..render_storage.vertex_count_ui as usize].copy_from_slice(
+                &render_storage.vertices_ui[0..render_storage.vertex_count_ui as usize],
             );
-            vertex_counts_text[render_storage.frame_count as usize % 2] =
-                render_storage.vertex_count_text;
+            vertex_counts_ui[render_storage.frame_count as usize % 2] =
+                render_storage.vertex_count_ui;
         }
         Err(BufferError::InUseByDevice) => {
             println!("Failed to update vertex buffer. Vertex buffer is being used by the device.")
@@ -982,15 +995,15 @@ fn update_buffers_text(
         Err(e) => panic!("couldn't write to the vertex buffer: {e}"),
     };
 
-    let index_writer = index_buffers_text[render_storage.frame_count as usize % 2].write();
+    let index_writer = index_buffers_ui[render_storage.frame_count as usize % 2].write();
 
     match index_writer {
         Ok(mut writer) => {
-            writer[0..render_storage.index_count_text as usize].copy_from_slice(
-                &render_storage.indices_text[0..render_storage.index_count_text as usize],
+            writer[0..render_storage.index_count_ui as usize].copy_from_slice(
+                &render_storage.indices_ui[0..render_storage.index_count_ui as usize],
             );
-            index_counts_text[render_storage.frame_count as usize % 2] =
-                render_storage.index_count_text;
+            index_counts_ui[render_storage.frame_count as usize % 2] =
+                render_storage.index_count_ui;
         }
         Err(BufferError::InUseByDevice) => {
             println!("Failed to update index buffer. Index buffer is being used by the device.")

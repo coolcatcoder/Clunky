@@ -8,7 +8,7 @@ use crate::vertex_data;
 pub const TEXT_SPRITE_SIZE: (f32, f32) = (1.0 / 30.0, 1.0 / 5.0);
 
 pub struct ScreenText {
-    vertices: Vec<vertex_data::VertexData>,
+    vertices: Vec<vertex_data::UIVertex>,
     indices: Vec<u32>,
 }
 
@@ -18,14 +18,16 @@ impl ScreenText {
         character_size: (f32, f32),
         letter_spacing: f32,
         text: &str,
+        colour: [f32; 4],
     ) -> ScreenText {
         assert!(text.is_ascii());
         let characters = text.as_bytes();
 
         let mut vertices = vec![
-            vertex_data::VertexData {
+            vertex_data::UIVertex {
                 position: [0.0, 0.0],
                 uv: [0.0, 0.0],
+                colour,
             };
             4 * characters.len()
         ];
@@ -39,40 +41,44 @@ impl ScreenText {
 
             let uv = get_uv_for_character(character);
 
-            vertices[vertex_start] = vertex_data::VertexData {
+            vertices[vertex_start] = vertex_data::UIVertex {
                 // top right
                 position: [
                     position.0 + character_size.0 * 0.5,
                     position.1 + character_size.1 * 0.5,
                 ],
                 uv: [uv.0 + TEXT_SPRITE_SIZE.0, uv.1 + TEXT_SPRITE_SIZE.1],
+                colour,
             };
 
-            vertices[vertex_start + 1] = vertex_data::VertexData {
+            vertices[vertex_start + 1] = vertex_data::UIVertex {
                 // bottom right
                 position: [
                     position.0 + character_size.0 * 0.5,
                     position.1 - character_size.1 * 0.5,
                 ],
                 uv: [uv.0 + TEXT_SPRITE_SIZE.0, uv.1],
+                colour,
             };
 
-            vertices[vertex_start + 2] = vertex_data::VertexData {
+            vertices[vertex_start + 2] = vertex_data::UIVertex {
                 // top left
                 position: [
                     position.0 - character_size.0 * 0.5,
                     position.1 + character_size.1 * 0.5,
                 ],
                 uv: [uv.0, uv.1 + TEXT_SPRITE_SIZE.1],
+                colour,
             };
 
-            vertices[vertex_start + 3] = vertex_data::VertexData {
+            vertices[vertex_start + 3] = vertex_data::UIVertex {
                 // bottom left
                 position: [
                     position.0 - character_size.0 * 0.5,
                     position.1 - character_size.1 * 0.5,
                 ],
                 uv: [uv.0, uv.1],
+                colour,
             };
 
             indices[index_start] = vertex_start as u32;
@@ -100,9 +106,16 @@ impl ScreenText {
 
         screen_text
     }
+}
 
-    fn set_text() {
-        todo!();
+pub fn change_screen_text_colour(vertices: Vec<vertex_data::UIVertex>, colour: [f32; 4]) {
+    for mut vertex in vertices {
+        vertex.colour = colour;
+    }
+}
+pub fn change_screen_button_colour(vertices: [vertex_data::UIVertex; 4], colour: [f32; 4]) {
+    for mut vertex in vertices {
+        vertex.colour = colour;
     }
 }
 
@@ -119,6 +132,16 @@ const fn get_distance_between_characters(characters: (char, char)) -> f32 {
         ('n', 't') => 1.1,
         ('t', 'e') => 0.7,
         ('r', '!') => 0.8,
+        ('D', 'e') => 1.5,
+        ('H', 'e') => 1.4,
+        ('l', 't') => 0.5,
+        ('t', 'h') => 0.5,
+        ('S', 't') => 1.2,
+        ('m', 'i') => 1.7,
+        ('i', 'n') => 0.5,
+        ('n', 'a') => 1.1,
+        ('t', 'a') => 0.5,
+        ('t', 'r') => 0.5,
         _ => 1.0,
     }
 }
@@ -201,7 +224,6 @@ fn get_uv_for_character(character: char) -> (f32, f32) {
         ')' => (TEXT_SPRITE_SIZE.0 * 19.0, TEXT_SPRITE_SIZE.1 * 0.0),
         ',' => (TEXT_SPRITE_SIZE.0 * 20.0, TEXT_SPRITE_SIZE.1 * 0.0),
 
-        '@' => (TEXT_SPRITE_SIZE.0 * 0.0, TEXT_SPRITE_SIZE.1 * 3.0),
         _ => (TEXT_SPRITE_SIZE.0 * 14.0, 0.0),
     }
 }
@@ -211,19 +233,96 @@ pub fn render_screen_texts(
     screen_texts: &Vec<ScreenText>,
 ) {
     for screen_text in screen_texts {
-        render_storage.vertices_text[render_storage.vertex_count_text as usize
-            ..render_storage.vertex_count_text as usize + screen_text.vertices.len()]
+        render_storage.vertices_ui[render_storage.vertex_count_ui as usize
+            ..render_storage.vertex_count_ui as usize + screen_text.vertices.len()]
             .copy_from_slice(screen_text.vertices.as_slice());
 
         let mut updated_indices = screen_text.indices.clone();
         updated_indices
             .iter_mut()
-            .for_each(|x| *x += render_storage.vertex_count_text);
-        render_storage.indices_text[render_storage.index_count_text as usize
-            ..render_storage.index_count_text as usize + screen_text.indices.len()]
+            .for_each(|x| *x += render_storage.vertex_count_ui);
+        render_storage.indices_ui[render_storage.index_count_ui as usize
+            ..render_storage.index_count_ui as usize + screen_text.indices.len()]
             .copy_from_slice(updated_indices.as_slice());
 
-        render_storage.vertex_count_text += screen_text.vertices.len() as u32;
-        render_storage.index_count_text += screen_text.indices.len() as u32;
+        render_storage.vertex_count_ui += screen_text.vertices.len() as u32;
+        render_storage.index_count_ui += screen_text.indices.len() as u32;
+    }
+}
+
+pub struct ScreenButton {
+    vertices: [vertex_data::UIVertex; 4],
+}
+
+impl ScreenButton {
+    pub fn new(
+        position: (f32, f32),
+        size: (f32, f32),
+        uv: (f32, f32),
+        colour: [f32; 4],
+    ) -> ScreenButton {
+        let mut vertices = [vertex_data::UIVertex {
+            position: [0.0, 0.0],
+            uv: [0.0, 0.0],
+            colour,
+        }; 4];
+
+        vertices[0] = vertex_data::UIVertex {
+            // top right
+            position: [position.0 + size.0 * 0.5, position.1 + size.1 * 0.5],
+            uv: [uv.0 + TEXT_SPRITE_SIZE.0, uv.1 + TEXT_SPRITE_SIZE.1 * 0.5],
+            colour,
+        };
+
+        vertices[1] = vertex_data::UIVertex {
+            // bottom right
+            position: [position.0 + size.0 * 0.5, position.1 - size.1 * 0.5],
+            uv: [uv.0 + TEXT_SPRITE_SIZE.0, uv.1],
+            colour,
+        };
+
+        vertices[2] = vertex_data::UIVertex {
+            // top left
+            position: [position.0 - size.0 * 0.5, position.1 + size.1 * 0.5],
+            uv: [uv.0, uv.1 + TEXT_SPRITE_SIZE.1 * 0.5],
+            colour,
+        };
+
+        vertices[3] = vertex_data::UIVertex {
+            // bottom left
+            position: [position.0 - size.0 * 0.5, position.1 - size.1 * 0.5],
+            uv: [uv.0, uv.1],
+            colour,
+        };
+
+        ScreenButton { vertices }
+    }
+}
+
+pub fn render_screen_buttons(
+    render_storage: &mut events::RenderStorage,
+    screen_buttons: &Vec<ScreenButton>,
+) {
+    for screen_button in screen_buttons {
+        render_storage.vertices_ui
+            [render_storage.vertex_count_ui as usize..render_storage.vertex_count_ui as usize + 4]
+            .copy_from_slice(screen_button.vertices.as_slice());
+
+        render_storage.indices_ui[render_storage.index_count_ui as usize] =
+            render_storage.vertex_count_ui as u32;
+        render_storage.indices_ui[render_storage.index_count_ui as usize + 1] =
+            render_storage.vertex_count_ui as u32 + 1;
+        render_storage.indices_ui[render_storage.index_count_ui as usize + 2] =
+            render_storage.vertex_count_ui as u32 + 2;
+
+        render_storage.indices_ui[render_storage.index_count_ui as usize + 3] =
+            render_storage.vertex_count_ui as u32 + 1;
+        render_storage.indices_ui[render_storage.index_count_ui as usize + 4] =
+            render_storage.vertex_count_ui as u32 + 3;
+        render_storage.indices_ui[render_storage.index_count_ui as usize + 5] =
+            render_storage.vertex_count_ui as u32 + 2;
+
+        render_storage.vertex_count_ui += 4;
+        render_storage.index_count_ui += 6;
     }
 }

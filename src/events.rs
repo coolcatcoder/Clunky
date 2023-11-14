@@ -9,10 +9,12 @@ use std::sync::mpsc::Receiver;
 use std::sync::mpsc::Sender;
 use std::thread;
 use std::time::Instant;
+use winit::dpi::PhysicalPosition;
 use winit::event::ElementState;
 use winit::event::KeyboardInput;
 
 use crate::biomes;
+use crate::collision;
 use crate::marching_squares;
 use crate::menus;
 use crate::ui;
@@ -75,11 +77,13 @@ pub fn start(render_storage: &mut RenderStorage) -> UserStorage {
         available_parallelism,
         map_objects_per_thread: CHUNK_WIDTH_SQUARED as usize / available_parallelism,
         player: Player {
-            position: (0.0, 0.0),
+            aabb: collision::AabbCentred {
+                position: (0.0, 0.0),
+                size: (0.0, 0.0),
+            },
             previous_position: (0.0, 0.0),
             sprinting: false,
             collision_debug: false,
-            size: (0.0, 0.0),
             statistics: biomes::Statistics {
                 strength: 0,
                 health: 0,
@@ -91,7 +95,8 @@ pub fn start(render_storage: &mut RenderStorage) -> UserStorage {
         multithread_rendering: false,
         chunk_generation: 0,
         menu: menus::Menu::TitleScreen,
-        screen_texts: vec![ui::ScreenText::new((0.0, 0.0), (0.0, 0.0), 0.0, "")],
+        screen_texts: vec![],
+        screen_buttons: vec![],
     };
 
     let check = user_storage.map_objects_per_thread * available_parallelism;
@@ -108,14 +113,8 @@ pub fn start(render_storage: &mut RenderStorage) -> UserStorage {
 pub fn update(
     user_storage: &mut UserStorage,
     render_storage: &mut RenderStorage,
-    //mut vertices: BufferWriteGuard<'_, [vertex_data::VertexData]>,
-    //mut indices: BufferWriteGuard<'_, [u32]>,
-    //index_count: &mut u32,
-    //scale: f32,
     delta_time: f32,
     average_fps: f32,
-    //camera: &mut Camera,
-    //brightness: &mut f32,
 ) {
     match user_storage.menu {
         menus::Menu::TitleScreen => {
@@ -155,23 +154,23 @@ pub fn fixed_update(user_storage: &mut UserStorage, render_storage: &mut RenderS
         true => 10.0,
     };
 
-    user_storage.player.previous_position = user_storage.player.position;
+    user_storage.player.previous_position = user_storage.player.aabb.position;
 
-    user_storage.player.position.0 += motion.0 * FIXED_UPDATE_TIME_STEP * speed;
-    user_storage.player.position.1 += motion.1 * FIXED_UPDATE_TIME_STEP * speed;
+    user_storage.player.aabb.position.0 += motion.0 * FIXED_UPDATE_TIME_STEP * speed;
+    user_storage.player.aabb.position.1 += motion.1 * FIXED_UPDATE_TIME_STEP * speed;
 
     if !user_storage.player.collision_debug {
         for detail_index in 0..user_storage.details.len() {
             let detail = user_storage.details[detail_index];
 
             let rounded_player_position_scaled = (
-                (user_storage.player.position.0 * detail.scale as f32).round() as i32,
-                (user_storage.player.position.1 * detail.scale as f32).round() as i32,
+                (user_storage.player.aabb.position.0 * detail.scale as f32).round() as i32,
+                (user_storage.player.aabb.position.1 * detail.scale as f32).round() as i32,
             );
 
             let ceil_player_half_size_scaled = (
-                (user_storage.player.size.0 * 0.5 * detail.scale as f32).ceil() as i32,
-                (user_storage.player.size.1 * 0.5 * detail.scale as f32).ceil() as i32,
+                (user_storage.player.aabb.size.0 * 0.5 * detail.scale as f32).ceil() as i32,
+                (user_storage.player.aabb.size.1 * 0.5 * detail.scale as f32).ceil() as i32,
             );
 
             for x in -ceil_player_half_size_scaled.0..ceil_player_half_size_scaled.0 + 1 {
@@ -212,17 +211,19 @@ pub fn fixed_update(user_storage: &mut UserStorage, render_storage: &mut RenderS
 
     if user_storage.player.statistics.health <= 0 {
         user_storage.menu = menus::Menu::Dead;
+        (menus::DEAD.on_window_resize)(user_storage, render_storage);
+        return;
     }
 
-    if user_storage.player.position.0 < 0.0 {
-        user_storage.player.position.0 = 0.0;
-    } else if user_storage.player.position.0 > FULL_GRID_WIDTH as f32 {
-        user_storage.player.position.0 = FULL_GRID_WIDTH as f32;
+    if user_storage.player.aabb.position.0 < 0.0 {
+        user_storage.player.aabb.position.0 = 0.0;
+    } else if user_storage.player.aabb.position.0 > FULL_GRID_WIDTH as f32 {
+        user_storage.player.aabb.position.0 = FULL_GRID_WIDTH as f32;
     }
-    if user_storage.player.position.1 < 0.0 {
-        user_storage.player.position.1 = 0.0;
-    } else if user_storage.player.position.1 > FULL_GRID_WIDTH as f32 {
-        user_storage.player.position.1 = FULL_GRID_WIDTH as f32;
+    if user_storage.player.aabb.position.1 < 0.0 {
+        user_storage.player.aabb.position.1 = 0.0;
+    } else if user_storage.player.aabb.position.1 > FULL_GRID_WIDTH as f32 {
+        user_storage.player.aabb.position.1 = FULL_GRID_WIDTH as f32;
     }
 }
 
@@ -279,19 +280,20 @@ pub struct UserStorage {
     pub chunk_generation: u8,
     pub menu: menus::Menu,
     pub screen_texts: Vec<ui::ScreenText>, // The plural of text is texts in this situation.
+    pub screen_buttons: Vec<ui::ScreenButton>,
 }
 
 pub struct RenderStorage {
     // TODO: Perhaps removing or refining what belongs in this struct.
-    pub vertices_map: Vec<vertex_data::VertexData>,
+    pub vertices_map: Vec<vertex_data::MapVertex>,
     pub vertex_count_map: u32,
     pub indices_map: Vec<u32>,
     pub index_count_map: u32,
 
-    pub vertices_text: Vec<vertex_data::VertexData>,
-    pub vertex_count_text: u32,
-    pub indices_text: Vec<u32>,
-    pub index_count_text: u32,
+    pub vertices_ui: Vec<vertex_data::UIVertex>,
+    pub vertex_count_ui: u32,
+    pub indices_ui: Vec<u32>,
+    pub index_count_ui: u32,
 
     pub aspect_ratio: f32,
     pub camera: Camera,
@@ -671,7 +673,7 @@ pub fn render_map(
     user_storage: &mut UserStorage,
     render_storage: &mut RenderStorage,
     detail: u8,
-    render_sender: &Sender<(Vec<vertex_data::VertexData>, u32, Vec<u32>, u32)>,
+    render_sender: &Sender<(Vec<vertex_data::MapVertex>, u32, Vec<u32>, u32)>,
 ) {
     let detail_scale = user_storage.details[detail as usize].scale;
     let float_detail_scale = detail_scale as f32;
@@ -697,7 +699,7 @@ pub fn render_map(
             let render_sender = render_sender.clone();
 
             scope.spawn(move || {
-                let mut vertices = vec![vertex_data::VertexData{
+                let mut vertices = vec![vertex_data::MapVertex{
                     position: [0.0,0.0],
                     uv: [0.0,0.0],
                 };map_objects_per_thread*4];
@@ -764,7 +766,7 @@ pub fn render_map(
                     let vertex_start = vertex_count as usize;
                     let index_start = index_count as usize;
 
-                    vertices[vertex_start] = vertex_data::VertexData {
+                    vertices[vertex_start] = vertex_data::MapVertex {
                         // top right
                         position: [
                             corrected_x + (0.5 * rendering_size.0),
@@ -773,7 +775,7 @@ pub fn render_map(
                         uv: [uv.0 + biomes::SPRITE_SIZE.0, uv.1 + biomes::SPRITE_SIZE.1],
                     };
 
-                    vertices[vertex_start + 1] = vertex_data::VertexData {
+                    vertices[vertex_start + 1] = vertex_data::MapVertex {
                         // bottom right
                         position: [
                             corrected_x + (0.5 * rendering_size.0),
@@ -782,7 +784,7 @@ pub fn render_map(
                         uv: [uv.0 + biomes::SPRITE_SIZE.0, uv.1],
                     };
 
-                    vertices[vertex_start + 2] = vertex_data::VertexData {
+                    vertices[vertex_start + 2] = vertex_data::MapVertex {
                         // top left
                         position: [
                             corrected_x + (-0.5 * rendering_size.0),
@@ -791,7 +793,7 @@ pub fn render_map(
                         uv: [uv.0, uv.1 + biomes::SPRITE_SIZE.1],
                     };
 
-                    vertices[vertex_start + 3] = vertex_data::VertexData {
+                    vertices[vertex_start + 3] = vertex_data::MapVertex {
                         // bottom left
                         position: [
                             corrected_x + (-0.5 * rendering_size.0),
@@ -905,7 +907,7 @@ pub fn render_map_single_threaded(
                                     * vertices[i].1 as f32),
                         ];
 
-                        render_storage.vertices_map[vertex_start + i] = vertex_data::VertexData {
+                        render_storage.vertices_map[vertex_start + i] = vertex_data::MapVertex {
                             position,
                             uv: [
                                 rerange(
@@ -950,7 +952,7 @@ pub fn render_map_single_threaded(
             let vertex_start = render_storage.vertex_count_map as usize;
             let index_start = render_storage.index_count_map as usize;
 
-            render_storage.vertices_map[vertex_start] = vertex_data::VertexData {
+            render_storage.vertices_map[vertex_start] = vertex_data::MapVertex {
                 // top right
                 position: [
                     corrected_x + (0.5 * rendering_size.0),
@@ -959,7 +961,7 @@ pub fn render_map_single_threaded(
                 uv: [uv.0 + biomes::SPRITE_SIZE.0, uv.1 + biomes::SPRITE_SIZE.1],
             };
 
-            render_storage.vertices_map[vertex_start + 1] = vertex_data::VertexData {
+            render_storage.vertices_map[vertex_start + 1] = vertex_data::MapVertex {
                 // bottom right
                 position: [
                     corrected_x + (0.5 * rendering_size.0),
@@ -968,7 +970,7 @@ pub fn render_map_single_threaded(
                 uv: [uv.0 + biomes::SPRITE_SIZE.0, uv.1],
             };
 
-            render_storage.vertices_map[vertex_start + 2] = vertex_data::VertexData {
+            render_storage.vertices_map[vertex_start + 2] = vertex_data::MapVertex {
                 // top left
                 position: [
                     corrected_x + (-0.5 * rendering_size.0),
@@ -977,7 +979,7 @@ pub fn render_map_single_threaded(
                 uv: [uv.0, uv.1 + biomes::SPRITE_SIZE.1],
             };
 
-            render_storage.vertices_map[vertex_start + 3] = vertex_data::VertexData {
+            render_storage.vertices_map[vertex_start + 3] = vertex_data::MapVertex {
                 // bottom left
                 position: [
                     corrected_x + (-0.5 * rendering_size.0),
@@ -1004,38 +1006,38 @@ pub fn render_player(user_storage: &mut UserStorage, render_storage: &mut Render
     let vertex_start = render_storage.vertex_count_map as usize;
     let index_start = render_storage.index_count_map as usize;
 
-    render_storage.vertices_map[vertex_start] = vertex_data::VertexData {
+    render_storage.vertices_map[vertex_start] = vertex_data::MapVertex {
         // top right
         position: [
-            user_storage.player.position.0 + user_storage.player.size.0 * 0.5,
-            user_storage.player.position.1 + user_storage.player.size.1 * 0.5,
+            user_storage.player.aabb.position.0 + user_storage.player.aabb.size.0 * 0.5,
+            user_storage.player.aabb.position.1 + user_storage.player.aabb.size.1 * 0.5,
         ],
         uv: [biomes::SPRITE_SIZE.0, biomes::SPRITE_SIZE.1],
     };
 
-    render_storage.vertices_map[vertex_start + 1] = vertex_data::VertexData {
+    render_storage.vertices_map[vertex_start + 1] = vertex_data::MapVertex {
         // bottom right
         position: [
-            user_storage.player.position.0 + user_storage.player.size.0 * 0.5,
-            user_storage.player.position.1 - user_storage.player.size.1 * 0.5,
+            user_storage.player.aabb.position.0 + user_storage.player.aabb.size.0 * 0.5,
+            user_storage.player.aabb.position.1 - user_storage.player.aabb.size.1 * 0.5,
         ],
         uv: [biomes::SPRITE_SIZE.0, 0.0],
     };
 
-    render_storage.vertices_map[vertex_start + 2] = vertex_data::VertexData {
+    render_storage.vertices_map[vertex_start + 2] = vertex_data::MapVertex {
         // top left
         position: [
-            user_storage.player.position.0 - user_storage.player.size.0 * 0.5,
-            user_storage.player.position.1 + user_storage.player.size.1 * 0.5,
+            user_storage.player.aabb.position.0 - user_storage.player.aabb.size.0 * 0.5,
+            user_storage.player.aabb.position.1 + user_storage.player.aabb.size.1 * 0.5,
         ],
         uv: [0.0, biomes::SPRITE_SIZE.1],
     };
 
-    render_storage.vertices_map[vertex_start + 3] = vertex_data::VertexData {
+    render_storage.vertices_map[vertex_start + 3] = vertex_data::MapVertex {
         // bottom left
         position: [
-            user_storage.player.position.0 - user_storage.player.size.0 * 0.5,
-            user_storage.player.position.1 - user_storage.player.size.1 * 0.5,
+            user_storage.player.aabb.position.0 - user_storage.player.aabb.size.0 * 0.5,
+            user_storage.player.aabb.position.1 - user_storage.player.aabb.size.1 * 0.5,
         ],
         uv: [0.0, 0.0],
     };
@@ -1050,21 +1052,6 @@ pub fn render_player(user_storage: &mut UserStorage, render_storage: &mut Render
 
     render_storage.vertex_count_map += 4;
     render_storage.index_count_map += 6;
-}
-
-fn detect_collision(
-    position_1: (f32, f32),
-    size_1: (f32, f32),
-    position_2: (f32, f32),
-    size_2: (f32, f32),
-) -> bool {
-    if (position_1.0 - position_2.0).abs() > size_1.0 * 0.5 + size_2.0 * 0.5 {
-        return false;
-    }
-    if (position_1.1 - position_2.1).abs() > size_1.1 * 0.5 + size_2.1 * 0.5 {
-        return false;
-    }
-    true
 }
 
 fn collide(
@@ -1093,14 +1080,15 @@ fn collide(
         biomes::MapObject::None => return,
     };
 
-    if detect_collision(
-        user_storage.player.position,
-        user_storage.player.size,
-        (
-            full_position.0 as f32 / detail.scale as f32 + detail.offset.0,
-            full_position.1 as f32 / detail.scale as f32 + detail.offset.1,
-        ), //TODO: probably add the offset to this. I'm fairly certain this won't work without offset.
-        collision_size,
+    if collision::detect_collision_aabb_centred(
+        user_storage.player.aabb,
+        collision::AabbCentred {
+            position: (
+                full_position.0 as f32 / detail.scale as f32 + detail.offset.0,
+                full_position.1 as f32 / detail.scale as f32 + detail.offset.1,
+            ),
+            size: collision_size,
+        },
     ) {
         deal_with_collision(
             user_storage,
@@ -1113,11 +1101,12 @@ fn collide(
 }
 
 pub struct Player {
-    pub position: (f32, f32),
+    pub aabb: collision::AabbCentred,
+    //pub position: (f32, f32),
     pub previous_position: (f32, f32),
     pub sprinting: bool,
     pub collision_debug: bool,
-    pub size: (f32, f32),
+    //pub size: (f32, f32),
     pub statistics: biomes::Statistics,
 }
 
@@ -1154,7 +1143,7 @@ fn deal_with_collision(
                 *map_object = biomes::MapObject::None;
                 user_storage.player.statistics += statistics;
             } else {
-                user_storage.player.position = fallback_position;
+                user_storage.player.aabb.position = fallback_position;
             }
         }
         biomes::CollisionBehaviour::Replace(strength, statistics, replacement_map_object) => {
@@ -1162,7 +1151,7 @@ fn deal_with_collision(
                 *map_object = replacement_map_object;
                 user_storage.player.statistics += statistics;
             } else {
-                user_storage.player.position = fallback_position;
+                user_storage.player.aabb.position = fallback_position;
             }
         }
         biomes::CollisionBehaviour::RunCode(function_index) => {
@@ -1176,6 +1165,7 @@ fn deal_with_collision(
     }
 }
 
+#[deprecated]
 pub fn draw_text(
     render_storage: &mut RenderStorage,
     mut position: (f32, f32),
@@ -1454,55 +1444,59 @@ pub fn draw_text(
             _ => ((ui::TEXT_SPRITE_SIZE.0 * 14.0, 0.0), 1.0),
         };
 
-        let vertex_start = render_storage.vertex_count_text as usize;
-        let index_start = render_storage.index_count_text as usize;
+        let vertex_start = render_storage.vertex_count_ui as usize;
+        let index_start = render_storage.index_count_ui as usize;
 
-        render_storage.vertices_text[vertex_start] = vertex_data::VertexData {
+        render_storage.vertices_ui[vertex_start] = vertex_data::UIVertex {
             // top right
             position: [
                 position.0 + character_size.0 * 0.5,
                 position.1 + character_size.1 * 0.5,
             ],
             uv: [uv.0 + ui::TEXT_SPRITE_SIZE.0, uv.1 + ui::TEXT_SPRITE_SIZE.1],
+            colour: [1.0, 0.0, 0.0, 1.0],
         };
 
-        render_storage.vertices_text[vertex_start + 1] = vertex_data::VertexData {
+        render_storage.vertices_ui[vertex_start + 1] = vertex_data::UIVertex {
             // bottom right
             position: [
                 position.0 + character_size.0 * 0.5,
                 position.1 - character_size.1 * 0.5,
             ],
             uv: [uv.0 + ui::TEXT_SPRITE_SIZE.0, uv.1],
+            colour: [1.0, 0.0, 0.0, 1.0],
         };
 
-        render_storage.vertices_text[vertex_start + 2] = vertex_data::VertexData {
+        render_storage.vertices_ui[vertex_start + 2] = vertex_data::UIVertex {
             // top left
             position: [
                 position.0 - character_size.0 * 0.5,
                 position.1 + character_size.1 * 0.5,
             ],
             uv: [uv.0, uv.1 + ui::TEXT_SPRITE_SIZE.1],
+            colour: [1.0, 0.0, 0.0, 1.0],
         };
 
-        render_storage.vertices_text[vertex_start + 3] = vertex_data::VertexData {
+        render_storage.vertices_ui[vertex_start + 3] = vertex_data::UIVertex {
             // bottom left
             position: [
                 position.0 - character_size.0 * 0.5,
                 position.1 - character_size.1 * 0.5,
             ],
             uv: [uv.0, uv.1],
+            colour: [1.0, 0.0, 0.0, 1.0],
         };
 
-        render_storage.indices_text[index_start] = vertex_start as u32;
-        render_storage.indices_text[index_start + 1] = vertex_start as u32 + 1;
-        render_storage.indices_text[index_start + 2] = vertex_start as u32 + 2;
+        render_storage.indices_ui[index_start] = vertex_start as u32;
+        render_storage.indices_ui[index_start + 1] = vertex_start as u32 + 1;
+        render_storage.indices_ui[index_start + 2] = vertex_start as u32 + 2;
 
-        render_storage.indices_text[index_start + 3] = vertex_start as u32 + 1;
-        render_storage.indices_text[index_start + 4] = vertex_start as u32 + 3;
-        render_storage.indices_text[index_start + 5] = vertex_start as u32 + 2;
+        render_storage.indices_ui[index_start + 3] = vertex_start as u32 + 1;
+        render_storage.indices_ui[index_start + 4] = vertex_start as u32 + 3;
+        render_storage.indices_ui[index_start + 5] = vertex_start as u32 + 2;
 
-        render_storage.vertex_count_text += 4;
-        render_storage.index_count_text += 6;
+        render_storage.vertex_count_ui += 4;
+        render_storage.index_count_ui += 6;
 
         position.0 += individual_letter_spacing * letter_spacing;
     }
@@ -1533,8 +1527,8 @@ pub fn get_safe_position(user_storage: &mut UserStorage) -> (u32, u32) {
             );
 
             let ceil_player_half_size_scaled = (
-                (user_storage.player.size.0 * 0.5 * detail.scale as f32).ceil() as i32,
-                (user_storage.player.size.1 * 0.5 * detail.scale as f32).ceil() as i32,
+                (user_storage.player.aabb.size.0 * 0.5 * detail.scale as f32).ceil() as i32,
+                (user_storage.player.aabb.size.1 * 0.5 * detail.scale as f32).ceil() as i32,
             );
 
             for x in -ceil_player_half_size_scaled.0..ceil_player_half_size_scaled.0 + 1 {
@@ -1579,22 +1573,26 @@ fn rerange(desired_range: (f32, f32), value: f32) -> f32 {
     desired_range.0 + slope * (value - -1.0)
 }
 
-pub fn on_window_resize(
-    user_storage: &mut UserStorage,
-    render_storage: &mut RenderStorage,
-) {
+pub fn on_window_resize(user_storage: &mut UserStorage, render_storage: &mut RenderStorage) {
     match user_storage.menu {
         menus::Menu::TitleScreen => {
             (menus::TITLE_SCREEN.on_window_resize)(user_storage, render_storage)
         }
-        menus::Menu::Alive => {
-            (menus::ALIVE.on_window_resize)(user_storage, render_storage)
-        }
-        menus::Menu::Paused => {
-            (menus::PAUSED.on_window_resize)(user_storage, render_storage)
-        }
-        menus::Menu::Dead => {
-            (menus::DEAD.on_window_resize)(user_storage, render_storage)
+        menus::Menu::Alive => (menus::ALIVE.on_window_resize)(user_storage, render_storage),
+        menus::Menu::Paused => (menus::PAUSED.on_window_resize)(user_storage, render_storage),
+        menus::Menu::Dead => (menus::DEAD.on_window_resize)(user_storage, render_storage),
+        _ => {}
+    }
+}
+
+pub fn on_cursor_moved(
+    user_storage: &mut UserStorage,
+    render_storage: &mut RenderStorage,
+    position: PhysicalPosition<f64>,
+) {
+    match user_storage.menu {
+        menus::Menu::TitleScreen => {
+            (menus::TITLE_SCREEN.on_cursor_moved)(user_storage, render_storage, position)
         }
         _ => {}
     }

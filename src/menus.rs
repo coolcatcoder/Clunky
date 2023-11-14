@@ -6,6 +6,7 @@ use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::Sender;
 use std::sync::mpsc::TryRecvError;
+use winit::dpi::PhysicalPosition;
 use winit::event::{KeyboardInput, VirtualKeyCode};
 
 use crate::biomes;
@@ -13,7 +14,7 @@ use crate::events;
 use crate::ui;
 use crate::vertex_data;
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub enum Menu {
     // add a pause screen that doesn't call ALIVE.end() and when it changes back to Alive, then it doesn't run ALIVE.start(). This will work.
     TitleScreen, // horrible name
@@ -29,19 +30,23 @@ pub struct MenuData {
     pub end: fn(&mut events::UserStorage, &mut events::RenderStorage),
     pub on_keyboard_input: fn(&mut events::UserStorage, &mut events::RenderStorage, KeyboardInput),
     pub on_window_resize: fn(&mut events::UserStorage, &mut events::RenderStorage),
+    pub on_cursor_moved:
+        fn(&mut events::UserStorage, &mut events::RenderStorage, PhysicalPosition<f64>),
 }
 
 pub const TITLE_SCREEN: MenuData = MenuData {
-    start: |_user_storage: &mut events::UserStorage,
-            _render_storage: &mut events::RenderStorage| {},
+    start: |user_storage: &mut events::UserStorage, render_storage: &mut events::RenderStorage| {
+        (TITLE_SCREEN.on_window_resize)(user_storage, render_storage);
+    },
     update: |user_storage: &mut events::UserStorage,
              render_storage: &mut events::RenderStorage,
              _delta_time: f32,
              _average_fps: f32| {
-        render_storage.vertex_count_text = 0;
-        render_storage.index_count_text = 0;
+        render_storage.vertex_count_ui = 0;
+        render_storage.index_count_ui = 0;
 
         ui::render_screen_texts(render_storage, &user_storage.screen_texts);
+        ui::render_screen_buttons(render_storage, &user_storage.screen_buttons)
     },
     end: |_user_storage: &mut events::UserStorage, _render_storage: &mut events::RenderStorage| {},
     on_keyboard_input: |user_storage: &mut events::UserStorage,
@@ -59,17 +64,49 @@ pub const TITLE_SCREEN: MenuData = MenuData {
             }
         }
     },
-    on_window_resize: |user_storage: &mut events::UserStorage, render_storage: &mut events::RenderStorage| {
-        println!("Resized!");
-
+    on_window_resize: |user_storage: &mut events::UserStorage,
+                       render_storage: &mut events::RenderStorage| {
         let screen_width = 2.0 / render_storage.aspect_ratio;
 
         user_storage.screen_texts = vec![ui::ScreenText::new(
             (screen_width * -0.5 + screen_width * 0.1, -0.5),
-            (0.25, 0.25),
+            (0.25, 0.5),
             0.125,
             "No Title! Press Enter!",
+            [1.0, 0.0, 1.0, 1.0],
         )];
+
+        user_storage.screen_buttons = vec![
+            ui::ScreenButton::new(
+                (0.0, 0.0),
+                (screen_width / 2.0, 0.2),
+                (0.0 * ui::TEXT_SPRITE_SIZE.0, 3.0 * ui::TEXT_SPRITE_SIZE.1),
+                [1.0, 0.0, 1.0, 1.0],
+            ),
+            ui::ScreenButton::new(
+                (0.0, 0.3),
+                (screen_width / 2.0, 0.2),
+                (1.0 * ui::TEXT_SPRITE_SIZE.0, 3.0 * ui::TEXT_SPRITE_SIZE.1),
+                [1.0, 0.0, 1.0, 1.0],
+            ),
+            ui::ScreenButton::new(
+                (0.0, 0.6),
+                (screen_width / 2.0, 0.2),
+                (2.0 * ui::TEXT_SPRITE_SIZE.0, 3.0 * ui::TEXT_SPRITE_SIZE.1),
+                [1.0, 0.0, 1.0, 1.0],
+            ),
+            ui::ScreenButton::new(
+                (0.0, 0.9),
+                (screen_width / 2.0, 0.2),
+                (3.0 * ui::TEXT_SPRITE_SIZE.0, 3.0 * ui::TEXT_SPRITE_SIZE.1),
+                [1.0, 0.0, 1.0, 1.0],
+            ),
+        ];
+    },
+    on_cursor_moved: |_user_storage: &mut events::UserStorage,
+                      _render_storage: &mut events::RenderStorage,
+                      position: PhysicalPosition<f64>| {
+        println!("({},{})", position.x, position.y);
     },
 };
 
@@ -81,12 +118,12 @@ pub const ALIVE: MenuData = MenuData {
         let player_size_range = Uniform::new(0.25, 10.0);
 
         if Bernoulli::new(0.1).unwrap().sample(&mut rng) {
-            user_storage.player.size = (
+            user_storage.player.aabb.size = (
                 player_size_range.sample(&mut rng),
                 player_size_range.sample(&mut rng),
             )
         } else {
-            user_storage.player.size = (0.7, 0.7);
+            user_storage.player.aabb.size = (0.7, 0.7);
         }
 
         user_storage.main_seed = seed_range.sample(&mut rng);
@@ -107,8 +144,8 @@ pub const ALIVE: MenuData = MenuData {
 
         let safe_position = events::get_safe_position(user_storage);
 
-        user_storage.player.position = (safe_position.0 as f32, safe_position.1 as f32);
-        user_storage.player.previous_position = user_storage.player.position;
+        user_storage.player.aabb.position = (safe_position.0 as f32, safe_position.1 as f32);
+        user_storage.player.previous_position = user_storage.player.aabb.position;
 
         let starting_chunk = (
             safe_position.0 / events::CHUNK_WIDTH as u32,
@@ -128,7 +165,7 @@ pub const ALIVE: MenuData = MenuData {
             stamina: 100,
         };
 
-        render_storage.camera.position = user_storage.player.position;
+        render_storage.camera.position = user_storage.player.aabb.position;
 
         user_storage.fixed_time_passed = render_storage.starting_time.elapsed().as_secs_f32();
         user_storage.wasd_held = (false, false, false, false);
@@ -142,10 +179,12 @@ pub const ALIVE: MenuData = MenuData {
         user_storage.map_objects[0][events::full_index_from_full_position((5, 8), 1)] =
             biomes::MapObject::RandomPattern(2);
 
+        (ALIVE.on_window_resize)(user_storage, render_storage);
+
         // all lines below this one, and before the end of the function, should be removed, they are debug
-        user_storage.player.position.0 = 15.0;
-        user_storage.player.position.1 = 15.0;
-        user_storage.player.previous_position = user_storage.player.position;
+        user_storage.player.aabb.position.0 = 15.0;
+        user_storage.player.aabb.position.1 = 15.0;
+        user_storage.player.previous_position = user_storage.player.aabb.position;
     },
     update: |user_storage: &mut events::UserStorage,
              render_storage: &mut events::RenderStorage,
@@ -183,7 +222,7 @@ pub const ALIVE: MenuData = MenuData {
 
         render_storage.camera.scale += zoom_motion * delta_time * (camera_speed);
 
-        render_storage.camera.position = user_storage.player.position;
+        render_storage.camera.position = user_storage.player.aabb.position;
 
         render_storage.vertex_count_map = 0;
         render_storage.index_count_map = 0;
@@ -191,8 +230,8 @@ pub const ALIVE: MenuData = MenuData {
         match user_storage.multithread_rendering {
             true => {
                 let (render_sender, render_receiver): (
-                    Sender<(Vec<vertex_data::VertexData>, u32, Vec<u32>, u32)>,
-                    Receiver<(Vec<vertex_data::VertexData>, u32, Vec<u32>, u32)>,
+                    Sender<(Vec<vertex_data::MapVertex>, u32, Vec<u32>, u32)>,
+                    Receiver<(Vec<vertex_data::MapVertex>, u32, Vec<u32>, u32)>,
                 ) = mpsc::channel();
 
                 for detail_index in 0..user_storage.details.len() {
@@ -238,104 +277,44 @@ pub const ALIVE: MenuData = MenuData {
 
         events::render_player(user_storage, render_storage);
 
-        render_storage.vertex_count_text = 0;
-        render_storage.index_count_text = 0;
+        render_storage.vertex_count_ui = 0;
+        render_storage.index_count_ui = 0;
 
-        let screen_width = 2.0 / render_storage.aspect_ratio;
-
-        events::draw_text(
-            render_storage,
-            (screen_width * -0.5 + screen_width * 0.1, -0.8),
-            (0.05, 0.1),
-            0.025,
-            format!("Health: {}", user_storage.player.statistics.health).as_str(),
-        );
-
-        events::draw_text(
-            render_storage,
-            (screen_width * -0.5 + screen_width * 0.1, -0.7),
-            (0.05, 0.1),
-            0.025,
-            format!("Stamina: {}%", user_storage.player.statistics.stamina).as_str(),
-        );
-
-        events::draw_text(
-            render_storage,
-            (screen_width * -0.5 + screen_width * 0.1, -0.6),
-            (0.05, 0.1),
-            0.025,
-            format!("@ Strength: {}", user_storage.player.statistics.strength).as_str(),
-        );
-
-        if user_storage.show_debug {
-            events::draw_text(
-                render_storage,
-                (screen_width * -0.5 + screen_width * 0.1, 0.2),
-                (0.05, 0.1),
-                0.025,
-                format!("chunk_generation: {}", user_storage.chunk_generation).as_str(),
-            );
-
-            events::draw_text(
-                render_storage,
-                (screen_width * -0.5 + screen_width * 0.1, 0.3),
-                (0.05, 0.1),
-                0.025,
-                format!(
-                    "multithread_rendering: {}",
-                    user_storage.multithread_rendering
-                )
-                .as_str(),
-            );
-
-            events::draw_text(
-                render_storage,
-                (screen_width * -0.5 + screen_width * 0.1, 0.4),
-                (0.05, 0.1),
-                0.025,
-                format!("substeps: {}", substeps).as_str(),
-            );
-
-            events::draw_text(
-                render_storage,
-                (screen_width * -0.5 + screen_width * 0.1, 0.5),
-                (0.05, 0.1),
-                0.025,
-                format!(
-                    "player.position: ({},{})",
-                    user_storage.player.position.0, user_storage.player.position.1
-                )
-                .as_str(),
-            );
-
-            events::draw_text(
-                render_storage,
-                (screen_width * -0.5 + screen_width * 0.1, 0.6),
-                (0.05, 0.1),
-                0.025,
-                format!(
-                    "player.size: ({},{})",
-                    user_storage.player.size.0, user_storage.player.size.1
-                )
-                .as_str(),
-            );
-
-            events::draw_text(
-                render_storage,
-                (screen_width * -0.5 + screen_width * 0.1, 0.7),
-                (0.05, 0.1),
-                0.025,
-                format!("average_fps: {}", average_fps).as_str(),
-            );
-
-            events::draw_text(
-                render_storage,
-                (screen_width * -0.5 + screen_width * 0.1, 0.8),
-                (0.05, 0.1),
-                0.025,
-                format!("delta_time: {}", delta_time).as_str(),
-            );
+        if user_storage.menu == Menu::Dead {
+            (DEAD.on_window_resize)(user_storage, render_storage);
+            return;
         }
+
+        (ALIVE.on_window_resize)(user_storage, render_storage); // TODO: make it so I don't call this every frame...
+        if user_storage.show_debug {
+            let screen_width = 2.0 / render_storage.aspect_ratio;
+
+            user_storage.screen_texts.append(&mut vec![
+                ui::ScreenText::new(
+                    (screen_width * -0.5 + screen_width * 0.1, 0.4),
+                    (0.05, 0.1),
+                    0.025,
+                    format!("substeps: {}", substeps).as_str(),
+                    [1.0, 0.0, 1.0, 1.0],
+                ),
+                ui::ScreenText::new(
+                    (screen_width * -0.5 + screen_width * 0.1, 0.7),
+                    (0.05, 0.1),
+                    0.025,
+                    format!("average_fps: {}", average_fps).as_str(),
+                    [1.0, 0.0, 1.0, 1.0],
+                ),
+                ui::ScreenText::new(
+                    (screen_width * -0.5 + screen_width * 0.1, 0.8),
+                    (0.05, 0.1),
+                    0.025,
+                    format!("delta_time: {}", delta_time).as_str(),
+                    [1.0, 0.0, 1.0, 1.0],
+                ),
+            ]);
+        }
+
+        ui::render_screen_texts(render_storage, &user_storage.screen_texts);
 
         match user_storage.generation_receiver.try_recv() {
             Ok(generation) => {
@@ -378,15 +357,18 @@ pub const ALIVE: MenuData = MenuData {
         for x in -1..2 {
             for y in -1..2 {
                 let player_chunk_position_dangerous = (
-                    user_storage.player.position.0 as i32 / events::CHUNK_WIDTH as i32 + x,
-                    user_storage.player.position.1 as i32 / events::CHUNK_WIDTH as i32 + y,
+                    user_storage.player.aabb.position.0 as i32 / events::CHUNK_WIDTH as i32 + x,
+                    user_storage.player.aabb.position.1 as i32 / events::CHUNK_WIDTH as i32 + y,
                 );
 
                 if player_chunk_position_dangerous.0 < 0 || player_chunk_position_dangerous.1 < 0 {
                     continue;
                 }
 
-                let player_chunk_position = (player_chunk_position_dangerous.0 as u32, player_chunk_position_dangerous.1 as u32);
+                let player_chunk_position = (
+                    player_chunk_position_dangerous.0 as u32,
+                    player_chunk_position_dangerous.1 as u32,
+                );
 
                 let player_chunk_index =
                     events::index_from_position(player_chunk_position, events::CHUNK_GRID_WIDTH)
@@ -405,7 +387,7 @@ pub const ALIVE: MenuData = MenuData {
     },
     end: |_user_storage: &mut events::UserStorage, _render_storage: &mut events::RenderStorage| {},
     on_keyboard_input: |user_storage: &mut events::UserStorage,
-                        _render_storage: &mut events::RenderStorage,
+                        render_storage: &mut events::RenderStorage,
                         input: KeyboardInput| {
         if let Some(key_code) = input.virtual_keycode {
             match key_code {
@@ -425,10 +407,10 @@ pub const ALIVE: MenuData = MenuData {
                                 events::generate_chunk_old(
                                     &user_storage,
                                     (
-                                        (user_storage.player.position.0
+                                        (user_storage.player.aabb.position.0
                                             / events::CHUNK_WIDTH as f32)
                                             .floor() as u32,
-                                        (user_storage.player.position.1
+                                        (user_storage.player.aabb.position.1
                                             / events::CHUNK_WIDTH as f32)
                                             .floor() as u32,
                                     ),
@@ -439,10 +421,10 @@ pub const ALIVE: MenuData = MenuData {
                                 events::generate_chunk(
                                     &user_storage,
                                     (
-                                        (user_storage.player.position.0
+                                        (user_storage.player.aabb.position.0
                                             / events::CHUNK_WIDTH as f32)
                                             .floor() as u32,
-                                        (user_storage.player.position.1
+                                        (user_storage.player.aabb.position.1
                                             / events::CHUNK_WIDTH as f32)
                                             .floor() as u32,
                                     ),
@@ -464,6 +446,7 @@ pub const ALIVE: MenuData = MenuData {
                 VirtualKeyCode::V => {
                     if events::is_pressed(input.state) {
                         user_storage.show_debug = !user_storage.show_debug;
+                        (ALIVE.on_window_resize)(user_storage, render_storage);
                     }
                 }
 
@@ -486,33 +469,102 @@ pub const ALIVE: MenuData = MenuData {
                 VirtualKeyCode::Escape => {
                     if events::is_pressed(input.state) {
                         user_storage.menu = Menu::Paused;
+                        (PAUSED.on_window_resize)(user_storage, render_storage);
                     }
                 }
                 _ => (),
             }
         }
     },
-    on_window_resize: |_user_storage: &mut events::UserStorage, _render_storage: &mut events::RenderStorage| {},
+    on_window_resize: |user_storage: &mut events::UserStorage,
+                       render_storage: &mut events::RenderStorage| {
+        let screen_width = 2.0 / render_storage.aspect_ratio;
+
+        user_storage.screen_texts = vec![
+            ui::ScreenText::new(
+                (screen_width * -0.5 + screen_width * 0.1, -0.8),
+                (0.05, 0.1),
+                0.025,
+                format!("Health: {}", user_storage.player.statistics.health).as_str(),
+                [1.0, 0.0, 1.0, 1.0],
+            ),
+            ui::ScreenText::new(
+                (screen_width * -0.5 + screen_width * 0.1, -0.7),
+                (0.05, 0.1),
+                0.025,
+                format!("Stamina: {}%", user_storage.player.statistics.stamina).as_str(),
+                [1.0, 0.0, 1.0, 1.0],
+            ),
+            ui::ScreenText::new(
+                (screen_width * -0.5 + screen_width * 0.1, -0.6),
+                (0.05, 0.1),
+                0.025,
+                format!("Strength: {}", user_storage.player.statistics.strength).as_str(),
+                [1.0, 0.0, 1.0, 1.0],
+            ),
+        ];
+
+        if user_storage.show_debug {
+            user_storage.screen_texts.append(&mut vec![
+                ui::ScreenText::new(
+                    (screen_width * -0.5 + screen_width * 0.1, 0.2),
+                    (0.05, 0.1),
+                    0.025,
+                    format!("chunk_generation: {}", user_storage.chunk_generation).as_str(),
+                    [1.0, 0.0, 1.0, 1.0],
+                ),
+                ui::ScreenText::new(
+                    (screen_width * -0.5 + screen_width * 0.1, 0.3),
+                    (0.05, 0.1),
+                    0.025,
+                    format!(
+                        "multithread_rendering: {}",
+                        user_storage.multithread_rendering
+                    )
+                    .as_str(),
+                    [1.0, 0.0, 1.0, 1.0],
+                ),
+                ui::ScreenText::new(
+                    (screen_width * -0.5 + screen_width * 0.1, 0.5),
+                    (0.05, 0.1),
+                    0.025,
+                    format!(
+                        "player.position: ({},{})",
+                        user_storage.player.aabb.position.0, user_storage.player.aabb.position.1
+                    )
+                    .as_str(),
+                    [1.0, 0.0, 1.0, 1.0],
+                ),
+                ui::ScreenText::new(
+                    (screen_width * -0.5 + screen_width * 0.1, 0.6),
+                    (0.05, 0.1),
+                    0.025,
+                    format!(
+                        "player.size: ({},{})",
+                        user_storage.player.aabb.size.0, user_storage.player.aabb.size.1
+                    )
+                    .as_str(),
+                    [1.0, 0.0, 1.0, 1.0],
+                ),
+            ])
+        }
+    },
+    on_cursor_moved: |_user_storage: &mut events::UserStorage,
+                      _render_storage: &mut events::RenderStorage,
+                      _position: PhysicalPosition<f64>| {},
 };
 
 pub const PAUSED: MenuData = MenuData {
     start: |_user_storage: &mut events::UserStorage,
             _render_storage: &mut events::RenderStorage| {},
-    update: |_user_storage: &mut events::UserStorage,
+    update: |user_storage: &mut events::UserStorage,
              render_storage: &mut events::RenderStorage,
              _delta_time: f32,
              _average_fps: f32| {
-        render_storage.vertex_count_text = 0;
-        render_storage.index_count_text = 0;
+        render_storage.vertex_count_ui = 0;
+        render_storage.index_count_ui = 0;
 
-        let screen_width = 2.0 / render_storage.aspect_ratio;
-        events::draw_text(
-            render_storage,
-            (screen_width * -0.5 + screen_width * 0.1, -0.5),
-            (0.25, 0.5),
-            0.125,
-            "Paused!",
-        );
+        ui::render_screen_texts(render_storage, &user_storage.screen_texts);
     },
     end: |_user_storage: &mut events::UserStorage, _render_storage: &mut events::RenderStorage| {},
     on_keyboard_input: |user_storage: &mut events::UserStorage,
@@ -532,27 +584,34 @@ pub const PAUSED: MenuData = MenuData {
             }
         }
     },
-    on_window_resize: |_user_storage: &mut events::UserStorage, _render_storage: &mut events::RenderStorage| {},
+    on_window_resize: |user_storage: &mut events::UserStorage,
+                       render_storage: &mut events::RenderStorage| {
+        let screen_width = 2.0 / render_storage.aspect_ratio;
+
+        user_storage.screen_texts = vec![ui::ScreenText::new(
+            (screen_width * -0.5 + screen_width * 0.1, -0.5),
+            (0.25, 0.5),
+            0.125,
+            "Paused!",
+            [1.0, 0.0, 1.0, 1.0],
+        )];
+    },
+    on_cursor_moved: |_user_storage: &mut events::UserStorage,
+                      _render_storage: &mut events::RenderStorage,
+                      _position: PhysicalPosition<f64>| {},
 };
 
 pub const DEAD: MenuData = MenuData {
     start: |_user_storage: &mut events::UserStorage,
             _render_storage: &mut events::RenderStorage| {},
-    update: |_user_storage: &mut events::UserStorage,
+    update: |user_storage: &mut events::UserStorage,
              render_storage: &mut events::RenderStorage,
              _delta_time: f32,
              _average_fps: f32| {
-        render_storage.vertex_count_text = 0;
-        render_storage.index_count_text = 0;
+        render_storage.vertex_count_ui = 0;
+        render_storage.index_count_ui = 0;
 
-        let screen_width = 2.0 / render_storage.aspect_ratio;
-        events::draw_text(
-            render_storage,
-            (screen_width * -0.5 + screen_width * 0.1, -0.5),
-            (0.25, 0.5),
-            0.125,
-            "Dead! Press enter!",
-        );
+        ui::render_screen_texts(render_storage, &user_storage.screen_texts)
     },
     end: |_user_storage: &mut events::UserStorage, _render_storage: &mut events::RenderStorage| {},
     on_keyboard_input: |user_storage: &mut events::UserStorage,
@@ -570,44 +629,20 @@ pub const DEAD: MenuData = MenuData {
             }
         }
     },
-    on_window_resize: |_user_storage: &mut events::UserStorage, _render_storage: &mut events::RenderStorage| {},
-};
-
-pub const PERKS_AND_CURSES: MenuData = MenuData {
-    start: |_user_storage: &mut events::UserStorage,
-            _render_storage: &mut events::RenderStorage| {},
-    update: |_user_storage: &mut events::UserStorage,
-             render_storage: &mut events::RenderStorage,
-             _delta_time: f32,
-             _average_fps: f32| {
-        render_storage.vertex_count_text = 0;
-        render_storage.index_count_text = 0;
-
+    on_window_resize: |user_storage: &mut events::UserStorage,
+                       render_storage: &mut events::RenderStorage| {
         let screen_width = 2.0 / render_storage.aspect_ratio;
-        events::draw_text(
-            // don't like drawing text every frame. Perhaps when we call windowdependentsetup() we can call some user code?
-            render_storage,
+
+        user_storage.screen_texts = vec![ui::ScreenText::new(
             (screen_width * -0.5 + screen_width * 0.1, -0.5),
             (0.25, 0.5),
             0.125,
-            "No Title! Press Enter!",
-        );
+            "Dead! Press Enter!",
+            [1.0, 0.0, 1.0, 1.0],
+        )];
     },
-    end: |_user_storage: &mut events::UserStorage, _render_storage: &mut events::RenderStorage| {},
-    on_keyboard_input: |user_storage: &mut events::UserStorage,
-                        render_storage: &mut events::RenderStorage,
-                        input: KeyboardInput| {
-        if let Some(key_code) = input.virtual_keycode {
-            match key_code {
-                VirtualKeyCode::Return => {
-                    if events::is_pressed(input.state) {
-                        user_storage.menu = Menu::Alive;
-                        (ALIVE.start)(user_storage, render_storage);
-                    }
-                }
-                _ => (),
-            }
-        }
-    },
-    on_window_resize: |_user_storage: &mut events::UserStorage, _render_storage: &mut events::RenderStorage| {},
+
+    on_cursor_moved: |_user_storage: &mut events::UserStorage,
+                      _render_storage: &mut events::RenderStorage,
+                      _position: PhysicalPosition<f64>| {},
 };
