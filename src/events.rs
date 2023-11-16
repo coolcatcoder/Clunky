@@ -12,6 +12,7 @@ use std::time::Instant;
 use winit::dpi::PhysicalPosition;
 use winit::event::ElementState;
 use winit::event::KeyboardInput;
+use winit::event::MouseButton;
 
 use crate::biomes;
 use crate::collision;
@@ -300,6 +301,7 @@ pub struct RenderStorage {
     pub brightness: f32,
     pub frame_count: u32, // This will crash the game after 2 years, assuming 60 fps.
     pub starting_time: Instant,
+    pub window_size: [u32; 2],
 }
 
 pub fn generate_chunk(user_storage: &UserStorage, chunk_position: (u32, u32)) {
@@ -666,8 +668,6 @@ pub struct Camera {
     pub position: (f32, f32),
 }
 
-fn render_chunk() {} // instead of rendering every frame, which is slow, you can just render the 9 chunks around the player, keeping an array of which chunks are rendered
-
 #[deprecated]
 pub fn render_map(
     user_storage: &mut UserStorage,
@@ -694,13 +694,14 @@ pub fn render_map(
 
     thread::scope(|scope| {
         for thread_index in 0..user_storage.available_parallelism {
-            let map_objects = &user_storage.map_objects;
+            let map_objects_old = &user_storage.map_objects[detail as usize];
+            //let map_objects = &user_storage.map_objects[detail as usize][]
 
             let render_sender = render_sender.clone();
 
             scope.spawn(move || {
                 let mut vertices = vec![vertex_data::MapVertex{
-                    position: [0.0,0.0],
+                    position: [0.0,0.0,0.0],
                     uv: [0.0,0.0],
                 };map_objects_per_thread*4];
                 let mut indices = vec![0u32;map_objects_per_thread*6];
@@ -729,14 +730,15 @@ pub fn render_map(
                         panic!("Something has gone wrong with the index. It is beyond reasonable array bounds. full index: {}, bounds: {}", full_index, FULL_GRID_WIDTH_SQUARED * (detail_scale * detail_scale))
                     }
 
-                    let map_object = map_objects[detail as usize][full_index];
+                    let map_object = map_objects_old[full_index];
 
-                    let (rendering_size, uv) = match map_object {
+                    let (rendering_size, uv, depth) = match map_object {
                         biomes::MapObject::RandomPattern(i) => {
                             let random_pattern_map_object = &biomes::RANDOM_PATTERN_MAP_OBJECTS[i as usize];
                             (
                                 random_pattern_map_object.rendering_size,
                                 random_pattern_map_object.uv,
+                                random_pattern_map_object.depth,
                             )
                         }
                         biomes::MapObject::SimplexPattern(i) => {
@@ -745,6 +747,7 @@ pub fn render_map(
                             (
                                 simplex_pattern_map_object.rendering_size,
                                 simplex_pattern_map_object.uv,
+                                simplex_pattern_map_object.depth,
                             )
                         }
                         biomes::MapObject::SimplexSmoothedPattern(i,_) => {
@@ -753,6 +756,7 @@ pub fn render_map(
                             (
                                 simplex_smoothed_pattern_map_object.rendering_size,
                                 simplex_smoothed_pattern_map_object.uv,
+                                simplex_smoothed_pattern_map_object.depth,
                             )
                         }
                         biomes::MapObject::None => {
@@ -771,6 +775,7 @@ pub fn render_map(
                         position: [
                             corrected_x + (0.5 * rendering_size.0),
                             corrected_y + (0.5 * rendering_size.1),
+                            depth,
                         ],
                         uv: [uv.0 + biomes::SPRITE_SIZE.0, uv.1 + biomes::SPRITE_SIZE.1],
                     };
@@ -780,6 +785,7 @@ pub fn render_map(
                         position: [
                             corrected_x + (0.5 * rendering_size.0),
                             corrected_y + (-0.5 * rendering_size.1),
+                            depth,
                         ],
                         uv: [uv.0 + biomes::SPRITE_SIZE.0, uv.1],
                     };
@@ -789,6 +795,7 @@ pub fn render_map(
                         position: [
                             corrected_x + (-0.5 * rendering_size.0),
                             corrected_y + (0.5 * rendering_size.1),
+                            depth,
                         ],
                         uv: [uv.0, uv.1 + biomes::SPRITE_SIZE.1],
                     };
@@ -798,6 +805,7 @@ pub fn render_map(
                         position: [
                             corrected_x + (-0.5 * rendering_size.0),
                             corrected_y + (-0.5 * rendering_size.1),
+                            depth,
                         ],
                         uv: [uv.0, uv.1],
                     };
@@ -867,12 +875,13 @@ pub fn render_map_single_threaded(
 
             let map_object = user_storage.map_objects[detail as usize][full_index];
 
-            let (rendering_size, uv) = match map_object {
+            let (rendering_size, uv, depth) = match map_object {
                 biomes::MapObject::RandomPattern(i) => {
                     let random_pattern_map_object = &biomes::RANDOM_PATTERN_MAP_OBJECTS[i as usize];
                     (
                         random_pattern_map_object.rendering_size,
                         random_pattern_map_object.uv,
+                        random_pattern_map_object.depth,
                     )
                 }
                 biomes::MapObject::SimplexPattern(i) => {
@@ -881,6 +890,7 @@ pub fn render_map_single_threaded(
                     (
                         simplex_pattern_map_object.rendering_size,
                         simplex_pattern_map_object.uv,
+                        simplex_pattern_map_object.depth,
                     )
                 }
                 biomes::MapObject::SimplexSmoothedPattern(i, square_index) => {
@@ -905,12 +915,13 @@ pub fn render_map_single_threaded(
                                 + (simplex_smoothed_pattern_map_object.rendering_size.1
                                     * 0.5
                                     * vertices[i].1 as f32),
+                            simplex_smoothed_pattern_map_object.depth,
                         ];
 
                         render_storage.vertices_map[vertex_start + i] = vertex_data::MapVertex {
                             position,
                             uv: [
-                                rerange(
+                                rerange_from_neg_1_pos_1_range(
                                     (
                                         simplex_smoothed_pattern_map_object.uv.0,
                                         simplex_smoothed_pattern_map_object.uv.0
@@ -918,7 +929,7 @@ pub fn render_map_single_threaded(
                                     ),
                                     vertices[i].0 as f32,
                                 ),
-                                rerange(
+                                rerange_from_neg_1_pos_1_range(
                                     (
                                         simplex_smoothed_pattern_map_object.uv.1,
                                         simplex_smoothed_pattern_map_object.uv.1
@@ -957,6 +968,7 @@ pub fn render_map_single_threaded(
                 position: [
                     corrected_x + (0.5 * rendering_size.0),
                     corrected_y + (0.5 * rendering_size.1),
+                    depth,
                 ],
                 uv: [uv.0 + biomes::SPRITE_SIZE.0, uv.1 + biomes::SPRITE_SIZE.1],
             };
@@ -966,6 +978,7 @@ pub fn render_map_single_threaded(
                 position: [
                     corrected_x + (0.5 * rendering_size.0),
                     corrected_y + (-0.5 * rendering_size.1),
+                    depth,
                 ],
                 uv: [uv.0 + biomes::SPRITE_SIZE.0, uv.1],
             };
@@ -975,6 +988,7 @@ pub fn render_map_single_threaded(
                 position: [
                     corrected_x + (-0.5 * rendering_size.0),
                     corrected_y + (0.5 * rendering_size.1),
+                    depth,
                 ],
                 uv: [uv.0, uv.1 + biomes::SPRITE_SIZE.1],
             };
@@ -984,6 +998,7 @@ pub fn render_map_single_threaded(
                 position: [
                     corrected_x + (-0.5 * rendering_size.0),
                     corrected_y + (-0.5 * rendering_size.1),
+                    depth,
                 ],
                 uv: [uv.0, uv.1],
             };
@@ -1011,6 +1026,7 @@ pub fn render_player(user_storage: &mut UserStorage, render_storage: &mut Render
         position: [
             user_storage.player.aabb.position.0 + user_storage.player.aabb.size.0 * 0.5,
             user_storage.player.aabb.position.1 + user_storage.player.aabb.size.1 * 0.5,
+            0.0,
         ],
         uv: [biomes::SPRITE_SIZE.0, biomes::SPRITE_SIZE.1],
     };
@@ -1020,6 +1036,7 @@ pub fn render_player(user_storage: &mut UserStorage, render_storage: &mut Render
         position: [
             user_storage.player.aabb.position.0 + user_storage.player.aabb.size.0 * 0.5,
             user_storage.player.aabb.position.1 - user_storage.player.aabb.size.1 * 0.5,
+            0.0,
         ],
         uv: [biomes::SPRITE_SIZE.0, 0.0],
     };
@@ -1029,6 +1046,7 @@ pub fn render_player(user_storage: &mut UserStorage, render_storage: &mut Render
         position: [
             user_storage.player.aabb.position.0 - user_storage.player.aabb.size.0 * 0.5,
             user_storage.player.aabb.position.1 + user_storage.player.aabb.size.1 * 0.5,
+            0.0,
         ],
         uv: [0.0, biomes::SPRITE_SIZE.1],
     };
@@ -1038,6 +1056,7 @@ pub fn render_player(user_storage: &mut UserStorage, render_storage: &mut Render
         position: [
             user_storage.player.aabb.position.0 - user_storage.player.aabb.size.0 * 0.5,
             user_storage.player.aabb.position.1 - user_storage.player.aabb.size.1 * 0.5,
+            0.0,
         ],
         uv: [0.0, 0.0],
     };
@@ -1568,9 +1587,14 @@ fn wrap(value: f32, start: f32, limit: f32) -> f32 {
     start + (value - start) % (limit - start)
 }
 
-fn rerange(desired_range: (f32, f32), value: f32) -> f32 {
+pub fn rerange_from_neg_1_pos_1_range(desired_range: (f32, f32), value: f32) -> f32 {
     let slope = (desired_range.1 - desired_range.0) / (1.0 - -1.0);
     desired_range.0 + slope * (value - -1.0)
+}
+
+pub fn rerange(old_range: (f32, f32), desired_range: (f32, f32), value: f32) -> f32 {
+    (((value - old_range.0) * (desired_range.1 - desired_range.0)) / (old_range.1 - old_range.0))
+        + desired_range.0
 }
 
 pub fn on_window_resize(user_storage: &mut UserStorage, render_storage: &mut RenderStorage) {
@@ -1593,6 +1617,20 @@ pub fn on_cursor_moved(
     match user_storage.menu {
         menus::Menu::TitleScreen => {
             (menus::TITLE_SCREEN.on_cursor_moved)(user_storage, render_storage, position)
+        }
+        _ => {}
+    }
+}
+
+pub fn on_mouse_input(
+    user_storage: &mut UserStorage,
+    render_storage: &mut RenderStorage,
+    state: ElementState,
+    button: MouseButton,
+) {
+    match user_storage.menu {
+        menus::Menu::TitleScreen => {
+            (menus::TITLE_SCREEN.on_mouse_input)(user_storage, render_storage, state, button)
         }
         _ => {}
     }

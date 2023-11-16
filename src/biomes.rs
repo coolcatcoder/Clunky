@@ -1,6 +1,7 @@
 use rand::distributions::{Distribution, Uniform};
 use rand::thread_rng;
 
+use crate::collision;
 use crate::events;
 use crate::transform_biomes;
 use std::ops::AddAssign;
@@ -8,7 +9,7 @@ use std::ops::AddAssign;
 pub fn get_biome(biome_noise: (f64, f64)) -> usize {
     // To handle overlapping shapes we should instead go through each biome, if it is a correct biome, add it to a vector, then pick randomly from the vector at the end.
     for biome_index in 0..BIOMES.len() {
-        if BIOMES[biome_index].aabb.point_intersects(biome_noise) {
+        if collision::point_intersects_aabb(BIOMES[biome_index].aabb, biome_noise) {
             //println!("{}",biome_index); // good for debugging
             return biome_index;
         }
@@ -42,6 +43,7 @@ pub struct RandomPatternMapObject {
     pub rendering_size: (f32, f32),
     pub collision_size: (f32, f32),
     pub uv: (f32, f32),
+    pub depth: f32,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -56,6 +58,7 @@ pub struct SimplexPatternMapObject {
     pub acceptable_noise: (f64, f64),
     pub noise_scale: f64,
     pub uv: (f32, f32),
+    pub depth: f32,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -70,6 +73,7 @@ pub struct SimplexSmoothedPatternMapObject {
     pub acceptable_noise: (f64, f64),
     pub noise_scale: f64,
     pub uv: (f32, f32),
+    pub depth: f32,
 }
 
 // leaving this structh here, so no one makes the mistake of trying this again. You still gotta match, to get the right array, so this is useless, unless we wanted to store these in their own array, which is a big NO, until we have the easy biomes in testing_biomes.rs sorted. Even then we would still need some sort of index into this array, which sounds slow.
@@ -87,26 +91,10 @@ pub enum MapObject {
 
 #[derive(Debug, Clone, Copy)]
 pub struct Biome {
-    pub aabb: Aabb,
+    pub aabb: collision::Aabb,
     pub random_pattern: PatternArray,
     pub simplex_pattern: PatternArray,
     pub simplex_smoothed_pattern: PatternArray,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct Aabb {
-    pub size: (f64, f64),
-
-    pub position: (f64, f64),
-}
-
-impl Aabb {
-    fn point_intersects(&self, position: (f64, f64)) -> bool {
-        position.0 < self.position.0 + self.size.0
-            && position.0 > self.position.0
-            && position.1 < self.position.1 + self.size.1
-            && position.1 > self.position.1
-    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -218,7 +206,7 @@ const ALL_BIOME_DATA: (
 
 #[allow(dead_code)]
 const TEMPLATE_BIOME: EasyBiome<0, 0, 0> = EasyBiome {
-    aabb: Aabb {
+    aabb: collision::Aabb {
         size: (0.0, 0.0),
         position: (0.0, 0.0),
     },
@@ -232,7 +220,7 @@ const TEMPLATE_BIOME: EasyBiome<0, 0, 0> = EasyBiome {
 
 const MANUAL_MAP_OBJECT_STORAGE: EasyBiome<3, 0, 0> = EasyBiome {
     // this biome should store any map objects that are planned to be used druing CollisionBehaviour::Replace, so reordering of biomes and map objects doesn't change the replacement map objects
-    aabb: Aabb {
+    aabb: collision::Aabb {
         size: (0.0, 0.0),
         position: (100.0, 100.0),
     },
@@ -247,6 +235,7 @@ const MANUAL_MAP_OBJECT_STORAGE: EasyBiome<3, 0, 0> = EasyBiome {
             rendering_size: (1.0, 1.0),
             collision_size: (1.0, 1.0),
             uv: (38.0 * SPRITE_SIZE.0, 0.0),
+            depth: 0.1,
         },
         RandomPatternMapObject {
             // index 1
@@ -257,6 +246,7 @@ const MANUAL_MAP_OBJECT_STORAGE: EasyBiome<3, 0, 0> = EasyBiome {
             rendering_size: (1.0, 1.0),
             collision_size: (1.0, 1.0),
             uv: (37.0 * SPRITE_SIZE.0, 0.0),
+            depth: 0.1,
         },
         RandomPatternMapObject {
             // index 2
@@ -267,6 +257,7 @@ const MANUAL_MAP_OBJECT_STORAGE: EasyBiome<3, 0, 0> = EasyBiome {
             rendering_size: (1.0, 1.0),
             collision_size: (1.0, 1.0),
             uv: (39.0 * SPRITE_SIZE.0, 0.0),
+            depth: 0.1,
         },
         // RandomPatternMapObject {
         //     // index 3
@@ -286,7 +277,7 @@ const MANUAL_MAP_OBJECT_STORAGE: EasyBiome<3, 0, 0> = EasyBiome {
 };
 
 const SPARSE_ROCK: EasyBiome<1, 1, 0> = EasyBiome {
-    aabb: Aabb {
+    aabb: collision::Aabb {
         size: (1.0 / 3.0 + 0.01, 0.5),
         position: (0.0, 0.5),
     },
@@ -307,6 +298,7 @@ const SPARSE_ROCK: EasyBiome<1, 1, 0> = EasyBiome {
         rendering_size: (1.0, 1.0),
         collision_size: (1.0, 1.0),
         uv: (8.0 * SPRITE_SIZE.0, 0.0),
+        depth: 0.1,
     }],
 
     simplex_pattern: [SimplexPatternMapObject {
@@ -329,13 +321,14 @@ const SPARSE_ROCK: EasyBiome<1, 1, 0> = EasyBiome {
         acceptable_noise: (0.2, 0.8),
         noise_scale: 0.15,
         uv: (7.0 * SPRITE_SIZE.0, 0.0),
+        depth: 0.1,
     }],
 
     simplex_smoothed_pattern: [],
 };
 
 const MIXED_JUNGLE: EasyBiome<2, 3, 2> = EasyBiome {
-    aabb: Aabb {
+    aabb: collision::Aabb {
         size: (2.0 / 3.0, 0.5),
         position: (1.0 / 3.0, 0.5),
     },
@@ -357,6 +350,7 @@ const MIXED_JUNGLE: EasyBiome<2, 3, 2> = EasyBiome {
             rendering_size: (0.75, 0.75),
             collision_size: (0.6, 0.6),
             uv: (20.0 * SPRITE_SIZE.0, 0.0),
+            depth: 0.1,
         },
         RandomPatternMapObject {
             // health fruit large
@@ -374,6 +368,7 @@ const MIXED_JUNGLE: EasyBiome<2, 3, 2> = EasyBiome {
             rendering_size: (1.3, 1.3),
             collision_size: (1.0, 1.0),
             uv: (20.0 * SPRITE_SIZE.0, 0.0),
+            depth: 0.1,
         },
     ],
 
@@ -384,12 +379,13 @@ const MIXED_JUNGLE: EasyBiome<2, 3, 2> = EasyBiome {
             chance: 100,
             priority: 2,
             behaviour: CollisionBehaviour::None,
-            rendering_size: (0.0, 0.0),
+            rendering_size: (0.5, 0.5),
             collision_size: (0.0, 0.0),
             seed: 1,
             acceptable_noise: (-0.2, 1.15),
             noise_scale: 0.15,
             uv: (0.0 * SPRITE_SIZE.0, 0.0),
+            depth: 0.1,
         },
         SimplexPatternMapObject {
             // velvet slicer
@@ -410,6 +406,7 @@ const MIXED_JUNGLE: EasyBiome<2, 3, 2> = EasyBiome {
             acceptable_noise: (0.2, 0.5),
             noise_scale: 0.1,
             uv: (16.0 * SPRITE_SIZE.0, 0.0),
+            depth: 0.1,
         },
         SimplexPatternMapObject {
             // Large test
@@ -423,6 +420,7 @@ const MIXED_JUNGLE: EasyBiome<2, 3, 2> = EasyBiome {
             acceptable_noise: (-1.0, -0.6),
             noise_scale: 0.05,
             uv: (9.0 * SPRITE_SIZE.0, 0.0),
+            depth: 0.1,
         },
     ],
 
@@ -447,6 +445,7 @@ const MIXED_JUNGLE: EasyBiome<2, 3, 2> = EasyBiome {
             acceptable_noise: (0.0, 1.0),
             noise_scale: 0.15,
             uv: (7.0 * SPRITE_SIZE.0, 0.0),
+            depth: 0.5,
         },
         SimplexSmoothedPatternMapObject {
             // the weird stamina rock
@@ -467,12 +466,13 @@ const MIXED_JUNGLE: EasyBiome<2, 3, 2> = EasyBiome {
             acceptable_noise: (-0.2, 0.08),
             noise_scale: 0.15,
             uv: (8.0 * SPRITE_SIZE.0, 0.0),
+            depth: 0.1,
         },
     ],
 };
 
 const GRASSLANDS: EasyBiome<1, 1, 0> = EasyBiome {
-    aabb: Aabb {
+    aabb: collision::Aabb {
         size: (1.0 / 3.0 + 0.01, 0.501),
         position: (0.0, 0.0),
     },
@@ -486,6 +486,7 @@ const GRASSLANDS: EasyBiome<1, 1, 0> = EasyBiome {
         rendering_size: (1.0, 1.0),
         collision_size: (0.0, 0.0),
         uv: (14.0 * SPRITE_SIZE.0, 0.0),
+        depth: 0.1,
     }],
 
     simplex_pattern: [SimplexPatternMapObject {
@@ -508,13 +509,14 @@ const GRASSLANDS: EasyBiome<1, 1, 0> = EasyBiome {
         acceptable_noise: (0.2, 0.5),
         noise_scale: 0.1,
         uv: (15.0 * SPRITE_SIZE.0, 0.0),
+        depth: 0.1,
     }],
 
     simplex_smoothed_pattern: [],
 };
 
 const DESERT: EasyBiome<1, 1, 0> = EasyBiome {
-    aabb: Aabb {
+    aabb: collision::Aabb {
         size: (1.0 / 3.0 + 0.01, 0.501),
         position: (1.0 / 3.0, 0.0),
     },
@@ -528,6 +530,7 @@ const DESERT: EasyBiome<1, 1, 0> = EasyBiome {
         rendering_size: (1.0, 1.0),
         collision_size: (0.0, 0.0),
         uv: (11.0 * SPRITE_SIZE.0, 0.0),
+        depth: 0.1,
     }],
 
     simplex_pattern: [SimplexPatternMapObject {
@@ -550,13 +553,14 @@ const DESERT: EasyBiome<1, 1, 0> = EasyBiome {
         acceptable_noise: (0.2, 0.5),
         noise_scale: 0.17,
         uv: (12.0 * SPRITE_SIZE.0, 0.0),
+        depth: 0.1,
     }],
 
     simplex_smoothed_pattern: [],
 };
 
 const MOUNTAINS: EasyBiome<5, 1, 0> = EasyBiome {
-    aabb: Aabb {
+    aabb: collision::Aabb {
         size: (1.0 / 3.0, 0.501),
         position: (2.0 / 3.0, 0.0),
     },
@@ -578,6 +582,7 @@ const MOUNTAINS: EasyBiome<5, 1, 0> = EasyBiome {
             rendering_size: (0.75, 0.75),
             collision_size: (0.6, 0.6),
             uv: (21.0 * SPRITE_SIZE.0, 0.0),
+            depth: 0.1,
         },
         RandomPatternMapObject {
             // spiccaro purple
@@ -595,6 +600,7 @@ const MOUNTAINS: EasyBiome<5, 1, 0> = EasyBiome {
             rendering_size: (0.75, 0.75),
             collision_size: (0.6, 0.6),
             uv: (22.0 * SPRITE_SIZE.0, 0.0),
+            depth: 0.1,
         },
         RandomPatternMapObject {
             // spiccaro blue
@@ -612,6 +618,7 @@ const MOUNTAINS: EasyBiome<5, 1, 0> = EasyBiome {
             rendering_size: (0.75, 0.75),
             collision_size: (0.6, 0.6),
             uv: (23.0 * SPRITE_SIZE.0, 0.0),
+            depth: 0.1,
         },
         RandomPatternMapObject {
             // spiccaro orange
@@ -629,6 +636,7 @@ const MOUNTAINS: EasyBiome<5, 1, 0> = EasyBiome {
             rendering_size: (0.75, 0.75),
             collision_size: (0.6, 0.6),
             uv: (24.0 * SPRITE_SIZE.0, 0.0),
+            depth: 0.1,
         },
         RandomPatternMapObject {
             // dark velvet slicer
@@ -646,6 +654,7 @@ const MOUNTAINS: EasyBiome<5, 1, 0> = EasyBiome {
             rendering_size: (1.3, 1.3),
             collision_size: (1.0, 1.0),
             uv: (19.0 * SPRITE_SIZE.0, 0.0),
+            depth: 0.1,
         },
     ],
 
@@ -669,13 +678,14 @@ const MOUNTAINS: EasyBiome<5, 1, 0> = EasyBiome {
         acceptable_noise: (0.0, 1.0),
         noise_scale: 0.5,
         uv: (7.0 * SPRITE_SIZE.0, 0.0),
+        depth: 0.1,
     }],
 
     simplex_smoothed_pattern: [],
 };
 
 struct EasyBiome<const R: usize, const S: usize, const SS: usize> {
-    aabb: Aabb,
+    aabb: collision::Aabb,
     pub random_pattern: [RandomPatternMapObject; R],
     pub simplex_pattern: [SimplexPatternMapObject; S],
     pub simplex_smoothed_pattern: [SimplexSmoothedPatternMapObject; SS],
@@ -705,7 +715,7 @@ macro_rules! transform_biomes {
             const SIMPLEX_SMOOTHED_AMOUNT: usize = ALL_AMOUNTS.3;
 
             let mut biomes = [Biome {
-                aabb: Aabb {
+                aabb: collision::Aabb {
                     position: (0.0,0.0),
                     size: (0.0,0.0),
                 },
@@ -731,6 +741,7 @@ macro_rules! transform_biomes {
                 rendering_size: (0.0, 0.0),
                 collision_size: (0.0, 0.0),
                 uv: (0.0, 0.0),
+                depth: 0.1,
             }; RANDOM_AMOUNT];
 
             let mut simplex_pattern_map_objects = [SimplexPatternMapObject {
@@ -744,6 +755,7 @@ macro_rules! transform_biomes {
                 acceptable_noise: (0.0, 0.0),
                 noise_scale: 0.0,
                 uv: (0.0, 0.0),
+                depth: 0.1,
             }; SIMPLEX_AMOUNT];
 
             let mut simplex_smoothed_pattern_map_objects = [SimplexSmoothedPatternMapObject {
@@ -757,6 +769,7 @@ macro_rules! transform_biomes {
                 acceptable_noise: (0.0, 0.0),
                 noise_scale: 0.0,
                 uv: (0.0,0.0),
+                depth: 0.1,
             }; SIMPLEX_SMOOTHED_AMOUNT];
 
             let mut biome_index = 0;

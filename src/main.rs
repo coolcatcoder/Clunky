@@ -15,17 +15,20 @@ use vulkano::{
         physical::PhysicalDeviceType, Device, DeviceCreateInfo, DeviceExtensions, DeviceOwned,
         QueueCreateInfo, QueueFlags,
     },
-    image::{view::ImageView, ImageAccess, ImageUsage, ImmutableImage, SwapchainImage},
+    image::{
+        view::ImageView, AttachmentImage, ImageAccess, ImageUsage, ImmutableImage, SwapchainImage,
+    },
     instance::{Instance, InstanceCreateInfo},
     memory::allocator::{AllocationCreateInfo, MemoryUsage, StandardMemoryAllocator},
     pipeline::{
         graphics::{
             color_blend::ColorBlendState,
+            depth_stencil::{CompareOp, DepthState, DepthStencilState},
             input_assembly::InputAssemblyState,
             vertex_input::Vertex,
             viewport::{Viewport, ViewportState},
         },
-        GraphicsPipeline, Pipeline, PipelineBindPoint,
+        GraphicsPipeline, Pipeline, PipelineBindPoint, StateMode,
     },
     render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass, Subpass},
     sampler::{Filter, SamplerAddressMode},
@@ -67,6 +70,10 @@ mod menus;
 mod ui;
 
 mod collision;
+
+mod chunks;
+
+const DEPTH_FORMAT: Format = Format::D24_UNORM_S8_UINT; // TODO: work out what this should be
 
 fn main() {
     let instance = get_instance();
@@ -304,10 +311,16 @@ fn main() {
                 format: swapchain.image_format(),
                 samples: 1,
             },
+            depth: {
+                load: Clear,
+                store: DontCare,
+                format: DEPTH_FORMAT,
+                samples: 1,
+            }
         },
         pass: {
             color: [color],
-            depth_stencil: {},
+            depth_stencil: {depth},
         },
     )
     .unwrap();
@@ -377,7 +390,7 @@ fn main() {
     let mut render_storage = events::RenderStorage {
         vertices_map: vec![
             vertex_data::MapVertex {
-                position: [0.0, 0.0],
+                position: [0.0, 0.0, 0.0],
                 uv: [0.0, 0.0],
             };
             vertex_buffers_map[0].len() as usize
@@ -404,11 +417,10 @@ fn main() {
         brightness: 0.0,
         frame_count: 0,
         starting_time: Instant::now(),
+        window_size: [0, 0],
     };
 
     let mut user_storage = events::start(&mut render_storage);
-
-    let mut window_size = [0, 0];
 
     // start event loop
     event_loop.run(move |event, _, control_flow| {
@@ -441,6 +453,13 @@ fn main() {
                 events::on_cursor_moved(&mut user_storage, &mut render_storage, position);
             }
 
+            Event::WindowEvent {
+                event: WindowEvent::MouseInput { state, button, .. },
+                ..
+            } => {
+                events::on_mouse_input(&mut user_storage, &mut render_storage, state, button);
+            }
+
             Event::RedrawEventsCleared => {
                 // This should run once per frame.
                 let window = surface.object().unwrap().downcast_ref::<Window>().unwrap();
@@ -457,10 +476,10 @@ fn main() {
                 render_storage.aspect_ratio =
                     swapchain.image_extent()[1] as f32 / swapchain.image_extent()[0] as f32;
 
-                let previous_window_size = window_size;
-                window_size = swapchain.image_extent();
+                let previous_window_size = render_storage.window_size;
+                render_storage.window_size = swapchain.image_extent();
 
-                if previous_window_size != window_size {
+                if previous_window_size != render_storage.window_size {
                     events::on_window_resize(&mut user_storage, &mut render_storage);
                 }
 
@@ -580,7 +599,7 @@ fn main() {
                     .begin_render_pass(
                         // begin the render pass so we can later draw
                         RenderPassBeginInfo {
-                            clear_values: vec![Some([0.0, 0.0, 1.0, 1.0].into())], // Sets background colour.
+                            clear_values: vec![Some([0.0, 0.0, 1.0, 1.0].into()), Some((1.0,0u32).into())], // Sets background colour and something else.
                             ..RenderPassBeginInfo::framebuffer(
                                 framebuffers[image_index as usize].clone(),
                             )
@@ -661,7 +680,17 @@ fn main() {
                     }
 
                     Err(e) => {
-                        panic!("failed to flush future: {e}");
+                        match e {
+                            FlushError::ResourceAccessError { error, use_ref } => {
+                                let use_ref = use_ref.unwrap();
+                                println!("ResourceAccessError: {}, More info: command_index:{}, command_name:{}", error, use_ref.command_index, use_ref.command_name);
+                                recreate_swapchain = true;
+                                previous_frame_end = Some(sync::now(device.clone()).boxed());
+                            }
+                            _ => {
+                                panic!("failed to flush future: {e}");
+                            }
+                        }
                     }
                 }
 
@@ -705,10 +734,14 @@ fn window_size_dependent_setup(
         .iter()
         .map(|image| {
             let view = ImageView::new_default(image.clone()).unwrap();
+            let depth = ImageView::new_default(
+                AttachmentImage::transient(memory_allocator, dimensions, DEPTH_FORMAT).unwrap(),
+            )
+            .unwrap();
             Framebuffer::new(
                 render_pass.clone(),
                 FramebufferCreateInfo {
-                    attachments: vec![view],
+                    attachments: vec![view, depth],
                     ..Default::default()
                 },
             )
@@ -730,6 +763,21 @@ fn window_size_dependent_setup(
             },
         ]))
         .fragment_shader(fragment_shader_map.entry_point("main").unwrap(), ())
+        //.depth_stencil_simple_depth() // TODO: mess around with
+        //.depth_write(true)
+        .depth_stencil_state(DepthStencilState {
+            depth: Some(DepthState {
+                enable_dynamic: false,
+                write_enable: StateMode::<bool>::Fixed(true),
+                compare_op: StateMode::<CompareOp>::Fixed(CompareOp::Less),
+            }),
+            depth_bounds: None,
+            // depth_bounds: Some(DepthBoundsState {
+            //     enable_dynamic: false,
+            //     bounds: StateMode::<RangeInclusive<f32>>::Fixed(0.0..=1.0),
+            // }),
+            stencil: None,
+        })
         .color_blend_state(ColorBlendState::new(subpass.num_color_attachments()).blend_alpha())
         .build(memory_allocator.device().clone())
         .unwrap();
@@ -788,7 +836,7 @@ fn create_buffers_map(
             //*events::STARTING_VERTICES,
             vec![
                 vertex_data::MapVertex {
-                    position: [0.0, 0.0],
+                    position: [0.0, 0.0, 0.0],
                     uv: [0.0, 0.0],
                 };
                 events::MAX_VERTICES
@@ -808,7 +856,7 @@ fn create_buffers_map(
             //*events::STARTING_VERTICES,
             vec![
                 vertex_data::MapVertex {
-                    position: [0.0, 0.0],
+                    position: [0.0, 0.0, 0.0],
                     uv: [0.0, 0.0],
                 };
                 events::MAX_VERTICES

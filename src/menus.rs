@@ -7,12 +7,12 @@ use std::sync::mpsc::Receiver;
 use std::sync::mpsc::Sender;
 use std::sync::mpsc::TryRecvError;
 use winit::dpi::PhysicalPosition;
-use winit::event::{KeyboardInput, VirtualKeyCode};
+use winit::event::{ElementState, KeyboardInput, MouseButton, VirtualKeyCode};
 
-use crate::biomes;
 use crate::events;
 use crate::ui;
 use crate::vertex_data;
+use crate::{biomes, collision};
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum Menu {
@@ -32,6 +32,8 @@ pub struct MenuData {
     pub on_window_resize: fn(&mut events::UserStorage, &mut events::RenderStorage),
     pub on_cursor_moved:
         fn(&mut events::UserStorage, &mut events::RenderStorage, PhysicalPosition<f64>),
+    pub on_mouse_input:
+        fn(&mut events::UserStorage, &mut events::RenderStorage, ElementState, MouseButton),
 }
 
 pub const TITLE_SCREEN: MenuData = MenuData {
@@ -78,35 +80,81 @@ pub const TITLE_SCREEN: MenuData = MenuData {
 
         user_storage.screen_buttons = vec![
             ui::ScreenButton::new(
-                (0.0, 0.0),
-                (screen_width / 2.0, 0.2),
+                collision::AabbCentred {
+                    position: (0.0, 0.0),
+                    size: (screen_width / 2.0, 0.2),
+                },
                 (0.0 * ui::TEXT_SPRITE_SIZE.0, 3.0 * ui::TEXT_SPRITE_SIZE.1),
                 [1.0, 0.0, 1.0, 1.0],
+                [0.0, 1.0, 1.0, 1.0],
+                |user_storage: &mut events::UserStorage, render_storage: &mut events::RenderStorage| {
+                    user_storage.menu = Menu::Alive;
+                    (ALIVE.start)(user_storage,render_storage);
+                },
             ),
             ui::ScreenButton::new(
-                (0.0, 0.3),
-                (screen_width / 2.0, 0.2),
+                collision::AabbCentred {
+                    position: (0.0, 0.3),
+                    size: (screen_width / 2.0, 0.2),
+                },
                 (1.0 * ui::TEXT_SPRITE_SIZE.0, 3.0 * ui::TEXT_SPRITE_SIZE.1),
                 [1.0, 0.0, 1.0, 1.0],
+                [0.0, 1.0, 1.0, 1.0],
+                ALIVE.start,
             ),
             ui::ScreenButton::new(
-                (0.0, 0.6),
-                (screen_width / 2.0, 0.2),
+                collision::AabbCentred {
+                    position: (0.0, 0.6),
+                    size: (screen_width / 2.0, 0.2),
+                },
                 (2.0 * ui::TEXT_SPRITE_SIZE.0, 3.0 * ui::TEXT_SPRITE_SIZE.1),
                 [1.0, 0.0, 1.0, 1.0],
+                [0.0, 1.0, 1.0, 1.0],
+                ALIVE.start,
             ),
             ui::ScreenButton::new(
-                (0.0, 0.9),
-                (screen_width / 2.0, 0.2),
+                collision::AabbCentred {
+                    position: (0.0, 0.9),
+                    size: (screen_width / 2.0, 0.2),
+                },
                 (3.0 * ui::TEXT_SPRITE_SIZE.0, 3.0 * ui::TEXT_SPRITE_SIZE.1),
                 [1.0, 0.0, 1.0, 1.0],
+                [0.0, 1.0, 1.0, 1.0],
+                ALIVE.start,
             ),
         ];
     },
-    on_cursor_moved: |_user_storage: &mut events::UserStorage,
-                      _render_storage: &mut events::RenderStorage,
+    on_cursor_moved: |user_storage: &mut events::UserStorage,
+                      render_storage: &mut events::RenderStorage,
                       position: PhysicalPosition<f64>| {
-        println!("({},{})", position.x, position.y);
+        let mouse_position = (
+            events::rerange(
+                (0.0, render_storage.window_size[0] as f32),
+                (-1.0, 1.0),
+                position.x as f32,
+            ) / render_storage.aspect_ratio,
+            events::rerange(
+                (0.0, render_storage.window_size[1] as f32),
+                (-1.0, 1.0),
+                position.y as f32,
+            ),
+        );
+
+        ui::hover_screen_buttons(
+            render_storage,
+            &mut user_storage.screen_buttons,
+            mouse_position,
+        )
+    },
+    on_mouse_input: |user_storage: &mut events::UserStorage,
+                     render_storage: &mut events::RenderStorage,
+                     state: ElementState,
+                     button: MouseButton| {
+        println!("{:?}, {:?}", state, button);
+
+        if state == ElementState::Released && button == MouseButton::Left {
+            ui::process_hovered_screen_buttons(user_storage, render_storage);//, user_storage.screen_buttons);
+        }
     },
 };
 
@@ -552,6 +600,10 @@ pub const ALIVE: MenuData = MenuData {
     on_cursor_moved: |_user_storage: &mut events::UserStorage,
                       _render_storage: &mut events::RenderStorage,
                       _position: PhysicalPosition<f64>| {},
+    on_mouse_input: |_user_storage: &mut events::UserStorage,
+                     _render_storage: &mut events::RenderStorage,
+                     _state: ElementState,
+                     _button: MouseButton| {},
 };
 
 pub const PAUSED: MenuData = MenuData {
@@ -599,6 +651,10 @@ pub const PAUSED: MenuData = MenuData {
     on_cursor_moved: |_user_storage: &mut events::UserStorage,
                       _render_storage: &mut events::RenderStorage,
                       _position: PhysicalPosition<f64>| {},
+    on_mouse_input: |_user_storage: &mut events::UserStorage,
+                     _render_storage: &mut events::RenderStorage,
+                     _state: ElementState,
+                     _button: MouseButton| {},
 };
 
 pub const DEAD: MenuData = MenuData {
@@ -645,4 +701,8 @@ pub const DEAD: MenuData = MenuData {
     on_cursor_moved: |_user_storage: &mut events::UserStorage,
                       _render_storage: &mut events::RenderStorage,
                       _position: PhysicalPosition<f64>| {},
+    on_mouse_input: |_user_storage: &mut events::UserStorage,
+                     _render_storage: &mut events::RenderStorage,
+                     _state: ElementState,
+                     _button: MouseButton| {},
 };

@@ -1,3 +1,4 @@
+use crate::collision;
 use crate::events;
 use crate::vertex_data;
 
@@ -113,7 +114,7 @@ pub fn change_screen_text_colour(vertices: Vec<vertex_data::UIVertex>, colour: [
         vertex.colour = colour;
     }
 }
-pub fn change_screen_button_colour(vertices: [vertex_data::UIVertex; 4], colour: [f32; 4]) {
+pub fn change_screen_button_colour(vertices: &mut [vertex_data::UIVertex; 4], colour: [f32; 4]) {
     for mut vertex in vertices {
         vertex.colour = colour;
     }
@@ -250,16 +251,23 @@ pub fn render_screen_texts(
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct ScreenButton {
     vertices: [vertex_data::UIVertex; 4],
+    aabb: collision::AabbCentred,
+    colour: [f32; 4],
+    hover_colour: [f32; 4],
+    hovered: bool,
+    on_click: fn(&mut events::UserStorage, &mut events::RenderStorage),
 }
 
 impl ScreenButton {
     pub fn new(
-        position: (f32, f32),
-        size: (f32, f32),
+        aabb: collision::AabbCentred,
         uv: (f32, f32),
         colour: [f32; 4],
+        hover_colour: [f32; 4],
+        on_click: fn(&mut events::UserStorage, &mut events::RenderStorage),
     ) -> ScreenButton {
         let mut vertices = [vertex_data::UIVertex {
             position: [0.0, 0.0],
@@ -269,33 +277,52 @@ impl ScreenButton {
 
         vertices[0] = vertex_data::UIVertex {
             // top right
-            position: [position.0 + size.0 * 0.5, position.1 + size.1 * 0.5],
+            position: [
+                aabb.position.0 + aabb.size.0 * 0.5,
+                aabb.position.1 + aabb.size.1 * 0.5,
+            ],
             uv: [uv.0 + TEXT_SPRITE_SIZE.0, uv.1 + TEXT_SPRITE_SIZE.1 * 0.5],
             colour,
         };
 
         vertices[1] = vertex_data::UIVertex {
             // bottom right
-            position: [position.0 + size.0 * 0.5, position.1 - size.1 * 0.5],
+            position: [
+                aabb.position.0 + aabb.size.0 * 0.5,
+                aabb.position.1 - aabb.size.1 * 0.5,
+            ],
             uv: [uv.0 + TEXT_SPRITE_SIZE.0, uv.1],
             colour,
         };
 
         vertices[2] = vertex_data::UIVertex {
             // top left
-            position: [position.0 - size.0 * 0.5, position.1 + size.1 * 0.5],
+            position: [
+                aabb.position.0 - aabb.size.0 * 0.5,
+                aabb.position.1 + aabb.size.1 * 0.5,
+            ],
             uv: [uv.0, uv.1 + TEXT_SPRITE_SIZE.1 * 0.5],
             colour,
         };
 
         vertices[3] = vertex_data::UIVertex {
             // bottom left
-            position: [position.0 - size.0 * 0.5, position.1 - size.1 * 0.5],
+            position: [
+                aabb.position.0 - aabb.size.0 * 0.5,
+                aabb.position.1 - aabb.size.1 * 0.5,
+            ],
             uv: [uv.0, uv.1],
             colour,
         };
 
-        ScreenButton { vertices }
+        ScreenButton {
+            vertices,
+            aabb,
+            colour,
+            hover_colour,
+            hovered: false,
+            on_click,
+        }
     }
 }
 
@@ -324,5 +351,46 @@ pub fn render_screen_buttons(
 
         render_storage.vertex_count_ui += 4;
         render_storage.index_count_ui += 6;
+    }
+}
+
+pub fn hover_screen_buttons(
+    render_storage: &mut events::RenderStorage,
+    screen_buttons: &mut Vec<ScreenButton>,
+    mouse_position: (f32, f32),
+) {
+    let mut render_buttons = false;
+    for screen_button in &mut *screen_buttons {
+        if collision::point_intersects_aabb_centred(screen_button.aabb, mouse_position) {
+            if !screen_button.hovered {
+                render_buttons = true;
+                screen_button.hovered = true;
+                change_screen_button_colour(
+                    &mut screen_button.vertices,
+                    screen_button.hover_colour,
+                );
+            }
+        } else if screen_button.hovered {
+            render_buttons = true;
+            screen_button.hovered = false;
+            change_screen_button_colour(&mut screen_button.vertices, screen_button.colour);
+        }
+    }
+
+    if render_buttons {
+        render_screen_buttons(render_storage, screen_buttons);
+    }
+}
+
+pub fn process_hovered_screen_buttons(
+    user_storage: &mut events::UserStorage,
+    render_storage: &mut events::RenderStorage,
+    //screen_buttons: Vec<ScreenButton>,
+) {
+    for screen_button_index in 0..user_storage.screen_buttons.len() {
+        let screen_button = user_storage.screen_buttons[screen_button_index];
+        if screen_button.hovered {
+            (screen_button.on_click)(user_storage, render_storage);
+        }
     }
 }
