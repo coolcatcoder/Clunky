@@ -18,6 +18,7 @@ use crate::biomes;
 use crate::collision;
 use crate::marching_squares;
 use crate::menus;
+use crate::perks_and_curses;
 use crate::ui;
 use crate::vertex_data;
 
@@ -90,6 +91,11 @@ pub fn start(render_storage: &mut RenderStorage) -> UserStorage {
                 health: 0,
                 stamina: 0,
             },
+            starting_statistics: biomes::Statistics {
+                strength: 1,
+                health: 1,
+                stamina: 100,
+            },
         },
         stop_watch: Instant::now(),
         fixed_time_passed: 0.0,
@@ -98,6 +104,14 @@ pub fn start(render_storage: &mut RenderStorage) -> UserStorage {
         menu: menus::Menu::TitleScreen,
         screen_texts: vec![],
         screen_buttons: vec![],
+        screen_toggleable_buttons: vec![],
+        perks_and_curses: perks_and_curses::PerksAndCurses {
+            cost: 0,
+            one_time_perks_owned: vec![],
+            one_time_curses_owned: vec![],
+            offered_perks: vec![],
+            offered_curses: vec![],
+        },
     };
 
     let check = user_storage.map_objects_per_thread * available_parallelism;
@@ -130,7 +144,9 @@ pub fn update(
         menus::Menu::Dead => {
             (menus::DEAD.update)(user_storage, render_storage, delta_time, average_fps)
         }
-        _ => {}
+        menus::Menu::PerksAndCurses => {
+            (menus::PERKS_AND_CURSES.update)(user_storage, render_storage, delta_time, average_fps)
+        } //_ => {}
     }
 }
 
@@ -242,7 +258,9 @@ pub fn on_keyboard_input(
             (menus::PAUSED.on_keyboard_input)(user_storage, render_storage, input)
         }
         menus::Menu::Dead => (menus::DEAD.on_keyboard_input)(user_storage, render_storage, input),
-        _ => {}
+        menus::Menu::PerksAndCurses => {
+            (menus::PERKS_AND_CURSES.on_keyboard_input)(user_storage, render_storage, input)
+        } //_ => {}
     }
 }
 
@@ -282,6 +300,8 @@ pub struct UserStorage {
     pub menu: menus::Menu,
     pub screen_texts: Vec<ui::ScreenText>, // The plural of text is texts in this situation.
     pub screen_buttons: Vec<ui::ScreenButton>,
+    pub screen_toggleable_buttons: Vec<ui::ScreenToggleableButton>,
+    pub perks_and_curses: perks_and_curses::PerksAndCurses,
 }
 
 pub struct RenderStorage {
@@ -1127,6 +1147,7 @@ pub struct Player {
     pub collision_debug: bool,
     //pub size: (f32, f32),
     pub statistics: biomes::Statistics,
+    pub starting_statistics: biomes::Statistics,
 }
 
 fn deal_with_collision(
@@ -1181,343 +1202,6 @@ fn deal_with_collision(
                 detail_index,
             );
         }
-    }
-}
-
-#[deprecated]
-pub fn draw_text(
-    render_storage: &mut RenderStorage,
-    mut position: (f32, f32),
-    character_size: (f32, f32),
-    letter_spacing: f32,
-    text: &str,
-) {
-    for character in text.chars() {
-        let (uv, individual_letter_spacing) = match character {
-            '0' => ((0.0, 0.0), 1.0f32),
-            '1' => ((ui::TEXT_SPRITE_SIZE.0 * 1.0, 0.0), 1.0),
-            '2' => ((ui::TEXT_SPRITE_SIZE.0 * 2.0, 0.0), 1.0),
-            '3' => ((ui::TEXT_SPRITE_SIZE.0 * 3.0, 0.0), 1.0),
-            '4' => ((ui::TEXT_SPRITE_SIZE.0 * 4.0, 0.0), 1.0),
-            '5' => ((ui::TEXT_SPRITE_SIZE.0 * 5.0, 0.0), 1.0),
-            '6' => ((ui::TEXT_SPRITE_SIZE.0 * 6.0, 0.0), 1.0),
-            '7' => ((ui::TEXT_SPRITE_SIZE.0 * 7.0, 0.0), 1.0),
-            '8' => ((ui::TEXT_SPRITE_SIZE.0 * 8.0, 0.0), 1.0),
-            '9' => ((ui::TEXT_SPRITE_SIZE.0 * 9.0, 0.0), 1.0),
-
-            'A' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 0.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
-                1.0,
-            ),
-            'B' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 1.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
-                1.0,
-            ),
-            'C' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 2.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
-                1.0,
-            ),
-            'D' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 3.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
-                1.0,
-            ),
-            'E' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 4.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
-                1.0,
-            ),
-            'F' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 5.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
-                1.0,
-            ),
-            'G' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 6.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
-                1.0,
-            ),
-            'H' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 7.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
-                1.5,
-            ),
-            'I' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 8.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
-                1.0,
-            ),
-            'J' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 9.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
-                1.0,
-            ),
-            'K' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 10.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
-                1.0,
-            ),
-            'L' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 11.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
-                1.0,
-            ),
-            'M' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 12.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
-                1.0,
-            ),
-            'N' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 13.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
-                1.0,
-            ),
-            'O' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 14.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
-                1.0,
-            ),
-            'P' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 15.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
-                1.0,
-            ),
-            'Q' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 16.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
-                1.0,
-            ),
-            'R' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 17.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
-                1.0,
-            ),
-            'S' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 18.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
-                1.3,
-            ),
-            'T' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 19.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
-                1.0,
-            ),
-            'U' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 20.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
-                1.0,
-            ),
-            'V' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 21.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
-                1.0,
-            ),
-            'W' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 22.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
-                1.0,
-            ),
-            'X' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 23.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
-                1.0,
-            ),
-            'Y' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 24.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
-                1.0,
-            ),
-            'Z' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 25.0, ui::TEXT_SPRITE_SIZE.1 * 1.0),
-                1.0,
-            ),
-
-            'a' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 0.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
-                1.0,
-            ),
-            'b' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 1.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
-                1.0,
-            ),
-            'c' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 2.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
-                1.0,
-            ),
-            'd' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 3.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
-                1.0,
-            ),
-            'e' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 4.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
-                1.0,
-            ),
-            'f' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 5.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
-                0.5,
-            ),
-            'g' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 6.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
-                1.0,
-            ),
-            'h' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 7.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
-                1.0,
-            ),
-            'i' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 8.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
-                0.5,
-            ),
-            'j' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 9.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
-                1.0,
-            ),
-            'k' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 10.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
-                1.0,
-            ),
-            'l' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 11.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
-                0.5,
-            ),
-            'm' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 12.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
-                1.7,
-            ),
-            'n' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 13.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
-                1.3,
-            ),
-            'o' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 14.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
-                1.0,
-            ),
-            'p' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 15.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
-                1.0,
-            ),
-            'q' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 16.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
-                1.0,
-            ),
-            'r' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 17.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
-                0.5,
-            ),
-            's' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 18.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
-                1.0,
-            ),
-            't' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 19.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
-                0.5,
-            ),
-            'u' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 20.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
-                1.0,
-            ),
-            'v' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 21.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
-                1.0,
-            ),
-            'w' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 22.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
-                1.0,
-            ),
-            'x' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 23.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
-                1.0,
-            ),
-            'y' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 24.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
-                1.0,
-            ),
-            'z' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 25.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
-                1.0,
-            ),
-
-            ' ' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 29.0, ui::TEXT_SPRITE_SIZE.1 * 2.0),
-                1.0,
-            ),
-            ':' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 12.0, ui::TEXT_SPRITE_SIZE.1 * 0.0),
-                1.0,
-            ),
-            '-' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 11.0, ui::TEXT_SPRITE_SIZE.1 * 0.0),
-                1.0,
-            ),
-            '_' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 13.0, ui::TEXT_SPRITE_SIZE.1 * 0.0),
-                1.0,
-            ),
-            '.' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 10.0, ui::TEXT_SPRITE_SIZE.1 * 0.0),
-                0.5,
-            ),
-            '!' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 15.0, ui::TEXT_SPRITE_SIZE.1 * 0.0),
-                0.5,
-            ),
-            '%' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 17.0, ui::TEXT_SPRITE_SIZE.1 * 0.0),
-                1.0,
-            ),
-            '(' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 18.0, ui::TEXT_SPRITE_SIZE.1 * 0.0),
-                0.5,
-            ),
-            ')' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 19.0, ui::TEXT_SPRITE_SIZE.1 * 0.0),
-                0.5,
-            ),
-            ',' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 20.0, ui::TEXT_SPRITE_SIZE.1 * 0.0),
-                0.5,
-            ),
-
-            '@' => (
-                (ui::TEXT_SPRITE_SIZE.0 * 0.0, ui::TEXT_SPRITE_SIZE.1 * 3.0),
-                1.0,
-            ),
-            _ => ((ui::TEXT_SPRITE_SIZE.0 * 14.0, 0.0), 1.0),
-        };
-
-        let vertex_start = render_storage.vertex_count_ui as usize;
-        let index_start = render_storage.index_count_ui as usize;
-
-        render_storage.vertices_ui[vertex_start] = vertex_data::UIVertex {
-            // top right
-            position: [
-                position.0 + character_size.0 * 0.5,
-                position.1 + character_size.1 * 0.5,
-            ],
-            uv: [uv.0 + ui::TEXT_SPRITE_SIZE.0, uv.1 + ui::TEXT_SPRITE_SIZE.1],
-            colour: [1.0, 0.0, 0.0, 1.0],
-        };
-
-        render_storage.vertices_ui[vertex_start + 1] = vertex_data::UIVertex {
-            // bottom right
-            position: [
-                position.0 + character_size.0 * 0.5,
-                position.1 - character_size.1 * 0.5,
-            ],
-            uv: [uv.0 + ui::TEXT_SPRITE_SIZE.0, uv.1],
-            colour: [1.0, 0.0, 0.0, 1.0],
-        };
-
-        render_storage.vertices_ui[vertex_start + 2] = vertex_data::UIVertex {
-            // top left
-            position: [
-                position.0 - character_size.0 * 0.5,
-                position.1 + character_size.1 * 0.5,
-            ],
-            uv: [uv.0, uv.1 + ui::TEXT_SPRITE_SIZE.1],
-            colour: [1.0, 0.0, 0.0, 1.0],
-        };
-
-        render_storage.vertices_ui[vertex_start + 3] = vertex_data::UIVertex {
-            // bottom left
-            position: [
-                position.0 - character_size.0 * 0.5,
-                position.1 - character_size.1 * 0.5,
-            ],
-            uv: [uv.0, uv.1],
-            colour: [1.0, 0.0, 0.0, 1.0],
-        };
-
-        render_storage.indices_ui[index_start] = vertex_start as u32;
-        render_storage.indices_ui[index_start + 1] = vertex_start as u32 + 1;
-        render_storage.indices_ui[index_start + 2] = vertex_start as u32 + 2;
-
-        render_storage.indices_ui[index_start + 3] = vertex_start as u32 + 1;
-        render_storage.indices_ui[index_start + 4] = vertex_start as u32 + 3;
-        render_storage.indices_ui[index_start + 5] = vertex_start as u32 + 2;
-
-        render_storage.vertex_count_ui += 4;
-        render_storage.index_count_ui += 6;
-
-        position.0 += individual_letter_spacing * letter_spacing;
     }
 }
 
@@ -1605,7 +1289,9 @@ pub fn on_window_resize(user_storage: &mut UserStorage, render_storage: &mut Ren
         menus::Menu::Alive => (menus::ALIVE.on_window_resize)(user_storage, render_storage),
         menus::Menu::Paused => (menus::PAUSED.on_window_resize)(user_storage, render_storage),
         menus::Menu::Dead => (menus::DEAD.on_window_resize)(user_storage, render_storage),
-        _ => {}
+        menus::Menu::PerksAndCurses => {
+            (menus::PERKS_AND_CURSES.on_window_resize)(user_storage, render_storage)
+        } //_ => {}
     }
 }
 
@@ -1617,6 +1303,10 @@ pub fn on_cursor_moved(
     match user_storage.menu {
         menus::Menu::TitleScreen => {
             (menus::TITLE_SCREEN.on_cursor_moved)(user_storage, render_storage, position)
+        }
+        menus::Menu::Dead => (menus::DEAD.on_cursor_moved)(user_storage, render_storage, position),
+        menus::Menu::PerksAndCurses => {
+            (menus::PERKS_AND_CURSES.on_cursor_moved)(user_storage, render_storage, position)
         }
         _ => {}
     }
@@ -1631,6 +1321,12 @@ pub fn on_mouse_input(
     match user_storage.menu {
         menus::Menu::TitleScreen => {
             (menus::TITLE_SCREEN.on_mouse_input)(user_storage, render_storage, state, button)
+        }
+        menus::Menu::Dead => {
+            (menus::DEAD.on_mouse_input)(user_storage, render_storage, state, button)
+        }
+        menus::Menu::PerksAndCurses => {
+            (menus::PERKS_AND_CURSES.on_mouse_input)(user_storage, render_storage, state, button)
         }
         _ => {}
     }

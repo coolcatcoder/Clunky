@@ -73,6 +73,8 @@ mod collision;
 
 mod chunks;
 
+mod perks_and_curses;
+
 const DEPTH_FORMAT: Format = Format::D24_UNORM_S8_UINT; // TODO: work out what this should be
 
 fn main() {
@@ -292,7 +294,7 @@ fn main() {
     mod fragment_shader_ui {
         vulkano_shaders::shader! {
             ty: "fragment",
-            path: "src/ui_shaders/fragment_shader.glsl",
+            path: "src/ui_shaders/fragment_shader.frag",
         }
     }
 
@@ -486,14 +488,8 @@ fn main() {
                 events::update(
                     &mut user_storage,
                     &mut render_storage,
-                    //vertex_writer.unwrap(),
-                    //index_writer.unwrap(),
-                    //&mut index_count,
-                    //swapchain.image_extent()[1] as f32 / swapchain.image_extent()[0] as f32,
                     delta_time,
                     average_fps,
-                    //&mut camera,
-                    //&mut brightness,
                 ); // call update once per frame
 
                 update_buffers_map(

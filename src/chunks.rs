@@ -1,4 +1,4 @@
-use crate::events;
+use crate::{biomes, events, vertex_data};
 // This will probably have more comments than code, as everything here is confusing, and not easy to think about.
 
 fn render_chunk(
@@ -12,3 +12,13 @@ fn render_chunk(
 
 // Potential revolution:
 // each chunk stores a Vec containing their map objects. This will save a lot of memory. Might be slow though.
+
+pub struct ChunkIdea1 {
+    map_objects: Vec<biomes::MapObject>,
+    generated: bool,
+}
+
+pub struct ChunkIdea2 {
+    map_objects: Vec<(biomes::MapObject, Vec<vertex_data::MapVertex>, Vec<u32>)>, // map object, vertices, indices. Then do memcpy every frame
+    generated: bool,
+}

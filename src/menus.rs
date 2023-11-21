@@ -10,6 +10,7 @@ use winit::dpi::PhysicalPosition;
 use winit::event::{ElementState, KeyboardInput, MouseButton, VirtualKeyCode};
 
 use crate::events;
+use crate::perks_and_curses;
 use crate::ui;
 use crate::vertex_data;
 use crate::{biomes, collision};
@@ -47,8 +48,8 @@ pub const TITLE_SCREEN: MenuData = MenuData {
         render_storage.vertex_count_ui = 0;
         render_storage.index_count_ui = 0;
 
+        ui::render_screen_buttons(render_storage, &user_storage.screen_buttons);
         ui::render_screen_texts(render_storage, &user_storage.screen_texts);
-        ui::render_screen_buttons(render_storage, &user_storage.screen_buttons)
     },
     end: |_user_storage: &mut events::UserStorage, _render_storage: &mut events::RenderStorage| {},
     on_keyboard_input: |user_storage: &mut events::UserStorage,
@@ -70,59 +71,50 @@ pub const TITLE_SCREEN: MenuData = MenuData {
                        render_storage: &mut events::RenderStorage| {
         let screen_width = 2.0 / render_storage.aspect_ratio;
 
-        user_storage.screen_texts = vec![ui::ScreenText::new(
-            (screen_width * -0.5 + screen_width * 0.1, -0.5),
-            (0.25, 0.5),
-            0.125,
-            "No Title! Press Enter!",
-            [1.0, 0.0, 1.0, 1.0],
-        )];
-
-        user_storage.screen_buttons = vec![
-            ui::ScreenButton::new(
-                collision::AabbCentred {
-                    position: (0.0, 0.0),
-                    size: (screen_width / 2.0, 0.2),
-                },
-                (0.0 * ui::TEXT_SPRITE_SIZE.0, 3.0 * ui::TEXT_SPRITE_SIZE.1),
+        user_storage.screen_texts = vec![
+            ui::ScreenText::new(
+                (0.0, -0.5),
+                (0.25, 0.5),
+                0.125,
+                "No Title! Press Enter!",
                 [1.0, 0.0, 1.0, 1.0],
-                [0.0, 1.0, 1.0, 1.0],
-                |user_storage: &mut events::UserStorage, render_storage: &mut events::RenderStorage| {
-                    user_storage.menu = Menu::Alive;
-                    (ALIVE.start)(user_storage,render_storage);
-                },
             ),
-            ui::ScreenButton::new(
-                collision::AabbCentred {
-                    position: (0.0, 0.3),
-                    size: (screen_width / 2.0, 0.2),
-                },
-                (1.0 * ui::TEXT_SPRITE_SIZE.0, 3.0 * ui::TEXT_SPRITE_SIZE.1),
-                [1.0, 0.0, 1.0, 1.0],
-                [0.0, 1.0, 1.0, 1.0],
-                ALIVE.start,
-            ),
-            ui::ScreenButton::new(
-                collision::AabbCentred {
-                    position: (0.0, 0.6),
-                    size: (screen_width / 2.0, 0.2),
-                },
-                (2.0 * ui::TEXT_SPRITE_SIZE.0, 3.0 * ui::TEXT_SPRITE_SIZE.1),
-                [1.0, 0.0, 1.0, 1.0],
-                [0.0, 1.0, 1.0, 1.0],
-                ALIVE.start,
-            ),
-            ui::ScreenButton::new(
-                collision::AabbCentred {
-                    position: (0.0, 0.9),
-                    size: (screen_width / 2.0, 0.2),
-                },
-                (3.0 * ui::TEXT_SPRITE_SIZE.0, 3.0 * ui::TEXT_SPRITE_SIZE.1),
-                [1.0, 0.0, 1.0, 1.0],
-                [0.0, 1.0, 1.0, 1.0],
-                ALIVE.start,
+            ui::ScreenText::new(
+                (0.0, 0.1), // DON'T TRY TO USE LOGIC! Just guess for the y position, please. Don't make it perfect. You will go insane.
+                (0.25, 0.5),
+                0.125,
+                "Play!",
+                [0.0, 1.0, 0.25, 1.0],
             ),
         ];
+
+        user_storage
+            .screen_texts
+            .push(ui::outline_screen_text(&user_storage.screen_texts[0], 0.7));
+
+        ui::change_screen_text_colour(
+            &mut user_storage.screen_texts[2].vertices,
+            [0.0, 0.0, 0.0, 1.0],
+        );
+
+        //ui::center_screen_text(&mut user_storage.screen_texts[0].vertices);
+        ui::center_screen_text(&mut user_storage.screen_texts[1].vertices);
+        //ui::center_screen_text(&mut user_storage.screen_texts[2].vertices);
+
+        user_storage.screen_buttons = vec![ui::ScreenButton::new(
+            collision::AabbCentred {
+                position: (0.0, 0.0),
+                size: (screen_width / 2.0, 0.2),
+            },
+            (0.0 * ui::TEXT_SPRITE_SIZE.0, 3.0 * ui::TEXT_SPRITE_SIZE.1),
+            [1.0, 0.0, 1.0, 1.0],
+            [0.0, 1.0, 1.0, 1.0],
+            Some((1, [0.0, 1.0, 0.25, 1.0], [0.0, 0.0, 0.0, 1.0])),
+            |user_storage: &mut events::UserStorage, render_storage: &mut events::RenderStorage| {
+                user_storage.menu = Menu::Alive;
+                (ALIVE.start)(user_storage, render_storage);
+            },
+        )];
     },
     on_cursor_moved: |user_storage: &mut events::UserStorage,
                       render_storage: &mut events::RenderStorage,
@@ -143,6 +135,7 @@ pub const TITLE_SCREEN: MenuData = MenuData {
         ui::hover_screen_buttons(
             render_storage,
             &mut user_storage.screen_buttons,
+            &mut user_storage.screen_texts,
             mouse_position,
         )
     },
@@ -150,10 +143,8 @@ pub const TITLE_SCREEN: MenuData = MenuData {
                      render_storage: &mut events::RenderStorage,
                      state: ElementState,
                      button: MouseButton| {
-        println!("{:?}, {:?}", state, button);
-
         if state == ElementState::Released && button == MouseButton::Left {
-            ui::process_hovered_screen_buttons(user_storage, render_storage);//, user_storage.screen_buttons);
+            ui::process_hovered_screen_buttons(user_storage, render_storage);
         }
     },
 };
@@ -207,11 +198,7 @@ pub const ALIVE: MenuData = MenuData {
 
         user_storage.player.sprinting = false;
 
-        user_storage.player.statistics = biomes::Statistics {
-            strength: 1,
-            health: 1,
-            stamina: 100,
-        };
+        user_storage.player.statistics = user_storage.player.starting_statistics;
 
         render_storage.camera.position = user_storage.player.aabb.position;
 
@@ -667,7 +654,244 @@ pub const DEAD: MenuData = MenuData {
         render_storage.vertex_count_ui = 0;
         render_storage.index_count_ui = 0;
 
+        ui::render_screen_buttons(render_storage, &user_storage.screen_buttons);
         ui::render_screen_texts(render_storage, &user_storage.screen_texts)
+    },
+    end: |_user_storage: &mut events::UserStorage, _render_storage: &mut events::RenderStorage| {},
+    on_keyboard_input: |user_storage: &mut events::UserStorage,
+                        render_storage: &mut events::RenderStorage,
+                        input: KeyboardInput| {
+        if let Some(key_code) = input.virtual_keycode {
+            match key_code {
+                VirtualKeyCode::Return => {
+                    if events::is_pressed(input.state) {
+                        user_storage.menu = Menu::Alive;
+                        (PERKS_AND_CURSES.start)(user_storage, render_storage);
+                    }
+                }
+                _ => (),
+            }
+        }
+    },
+    on_window_resize: |user_storage: &mut events::UserStorage,
+                       render_storage: &mut events::RenderStorage| {
+        let screen_width = 2.0 / render_storage.aspect_ratio;
+
+        user_storage.screen_texts = vec![
+            ui::ScreenText::new(
+                (0.0, -0.5),
+                (0.25, 0.5),
+                0.125,
+                "Dead! Press Enter!",
+                [1.0, 0.0, 0.0, 1.0],
+            ),
+            ui::ScreenText::new(
+                (0.0, 0.1),
+                (0.25, 0.5),
+                0.125,
+                "Continue!",
+                [0.0, 1.0, 0.25, 1.0],
+            ),
+        ];
+
+        ui::center_screen_text(&mut user_storage.screen_texts[0].vertices);
+        ui::center_screen_text(&mut user_storage.screen_texts[1].vertices);
+
+        user_storage.screen_buttons = vec![ui::ScreenButton::new(
+            collision::AabbCentred {
+                position: (0.0, 0.0),
+                size: (screen_width / 2.0, 0.2),
+            },
+            (0.0 * ui::TEXT_SPRITE_SIZE.0, 3.0 * ui::TEXT_SPRITE_SIZE.1),
+            [1.0, 0.0, 1.0, 1.0],
+            [0.0, 1.0, 1.0, 1.0],
+            None,
+            |user_storage: &mut events::UserStorage, render_storage: &mut events::RenderStorage| {
+                user_storage.menu = Menu::PerksAndCurses;
+                (PERKS_AND_CURSES.start)(user_storage, render_storage);
+            },
+        )];
+    },
+
+    on_cursor_moved: |user_storage: &mut events::UserStorage,
+                      render_storage: &mut events::RenderStorage,
+                      position: PhysicalPosition<f64>| {
+        let mouse_position = (
+            events::rerange(
+                (0.0, render_storage.window_size[0] as f32),
+                (-1.0, 1.0),
+                position.x as f32,
+            ) / render_storage.aspect_ratio,
+            events::rerange(
+                (0.0, render_storage.window_size[1] as f32),
+                (-1.0, 1.0),
+                position.y as f32,
+            ),
+        );
+
+        ui::hover_screen_buttons(
+            render_storage,
+            &mut user_storage.screen_buttons,
+            &mut user_storage.screen_texts,
+            mouse_position,
+        )
+    },
+    on_mouse_input: |user_storage: &mut events::UserStorage,
+                     render_storage: &mut events::RenderStorage,
+                     state: ElementState,
+                     button: MouseButton| {
+        if state == ElementState::Released && button == MouseButton::Left {
+            ui::process_hovered_screen_buttons(user_storage, render_storage);
+        }
+    },
+};
+
+pub const PERKS_AND_CURSES: MenuData = MenuData {
+    start: |user_storage: &mut events::UserStorage, render_storage: &mut events::RenderStorage| {
+        user_storage.perks_and_curses.offered_perks = vec![];
+        user_storage.perks_and_curses.offered_curses = vec![];
+        user_storage.perks_and_curses.cost = 0;
+
+        let mut one_time_perks_offered = vec![];
+
+        let mut rng = thread_rng();
+
+        let bool_uniform = Uniform::new(0, 2u8);
+
+        let mut perks = vec![];
+
+        for perk_index in 0..perks_and_curses::PERKS.len() {
+            let perk = &perks_and_curses::PERKS[perk_index];
+
+            if (perk.condition)(user_storage, render_storage) {
+                perks.push(perk_index);
+            }
+        }
+
+        let mut perks_no_duplicates = vec![];
+
+        for perk_index in 0..perks_and_curses::PERKS_NO_DUPLICATES.len() {
+            let perk = &perks_and_curses::PERKS_NO_DUPLICATES[perk_index];
+
+            if (perk.condition)(user_storage, render_storage) {
+                perks_no_duplicates.push(perk_index);
+            }
+        }
+
+        let perks_duplicates_uniform = Uniform::new(0, perks.len());
+        let perks_no_duplicates_uniform = Uniform::new(0, perks_no_duplicates.len());
+
+        for _perk_index in 0..5 {
+            if user_storage.perks_and_curses.one_time_perks_owned.len()
+                + one_time_perks_offered.len()
+                >= perks_no_duplicates.len()
+                || bool_uniform.sample(&mut rng) == 0
+            {
+                // duplicates allowed
+                user_storage.perks_and_curses.offered_perks.push(
+                    perks_and_curses::PerkOrCursePointer::Duplicates(
+                        perks[perks_duplicates_uniform.sample(&mut rng)],
+                    ),
+                );
+            } else {
+                // duplicates not allowed
+                loop {
+                    let index = perks_no_duplicates[perks_no_duplicates_uniform.sample(&mut rng)];
+
+                    if (!one_time_perks_offered.contains(&index))
+                        && (!user_storage
+                            .perks_and_curses
+                            .one_time_curses_owned
+                            .contains(&index))
+                    {
+                        user_storage
+                            .perks_and_curses
+                            .offered_perks
+                            .push(perks_and_curses::PerkOrCursePointer::NoDuplicates(index));
+                        one_time_perks_offered.push(index);
+                        break;
+                    }
+                }
+            }
+        }
+
+        let mut one_time_curses_offered = vec![];
+
+        let mut curses = vec![];
+
+        for curse_index in 0..perks_and_curses::CURSES.len() {
+            let curse = &perks_and_curses::CURSES[curse_index];
+
+            if (curse.condition)(user_storage, render_storage) {
+                curses.push(curse_index);
+            }
+        }
+
+        let mut curses_no_duplicates = vec![];
+
+        for curse_index in 0..perks_and_curses::CURSES_NO_DUPLICATES.len() {
+            let curse = &perks_and_curses::CURSES_NO_DUPLICATES[curse_index];
+
+            if (curse.condition)(user_storage, render_storage) {
+                curses_no_duplicates.push(curse_index);
+            }
+        }
+
+        let curses_duplicates_uniform = Uniform::new(0, curses.len());
+        let curses_no_duplicates_uniform =
+            Uniform::new(0, curses_no_duplicates.len());
+
+        for _curse_index in 0..5 {
+            if user_storage.perks_and_curses.one_time_curses_owned.len()
+                + one_time_curses_offered.len()
+                == perks_and_curses::CURSES_NO_DUPLICATES.len()
+                || bool_uniform.sample(&mut rng) == 0
+            {
+                // duplicates allowed
+                user_storage.perks_and_curses.offered_curses.push(
+                    perks_and_curses::PerkOrCursePointer::Duplicates(
+                        curses[curses_duplicates_uniform.sample(&mut rng)],
+                    ),
+                );
+            } else {
+                // duplicates not allowed
+                loop {
+                    let index = curses_no_duplicates[curses_no_duplicates_uniform.sample(&mut rng)];
+
+                    if (!one_time_curses_offered.contains(&index))
+                        && (!user_storage
+                            .perks_and_curses
+                            .one_time_curses_owned
+                            .contains(&index))
+                    {
+                        user_storage
+                            .perks_and_curses
+                            .offered_curses
+                            .push(perks_and_curses::PerkOrCursePointer::NoDuplicates(index));
+                        one_time_curses_offered.push(index);
+                        break;
+                    }
+                }
+            }
+        }
+
+        (PERKS_AND_CURSES.on_window_resize)(user_storage, render_storage);
+        render_storage.vertex_count_map = 0;
+        render_storage.index_count_map = 0;
+    },
+    update: |user_storage: &mut events::UserStorage,
+             render_storage: &mut events::RenderStorage,
+             _delta_time: f32,
+             _average_fps: f32| {
+        render_storage.vertex_count_ui = 0;
+        render_storage.index_count_ui = 0;
+
+        ui::render_screen_buttons(render_storage, &user_storage.screen_buttons);
+        ui::render_screen_toggleable_buttons(
+            render_storage,
+            &user_storage.screen_toggleable_buttons,
+        );
+        ui::render_screen_texts(render_storage, &user_storage.screen_texts);
     },
     end: |_user_storage: &mut events::UserStorage, _render_storage: &mut events::RenderStorage| {},
     on_keyboard_input: |user_storage: &mut events::UserStorage,
@@ -681,6 +905,11 @@ pub const DEAD: MenuData = MenuData {
                         (ALIVE.start)(user_storage, render_storage);
                     }
                 }
+                VirtualKeyCode::Slash => {
+                    if events::is_pressed(input.state) {
+                        println!("{:?}", user_storage.perks_and_curses);
+                    }
+                }
                 _ => (),
             }
         }
@@ -689,20 +918,413 @@ pub const DEAD: MenuData = MenuData {
                        render_storage: &mut events::RenderStorage| {
         let screen_width = 2.0 / render_storage.aspect_ratio;
 
-        user_storage.screen_texts = vec![ui::ScreenText::new(
-            (screen_width * -0.5 + screen_width * 0.1, -0.5),
-            (0.25, 0.5),
-            0.125,
-            "Dead! Press Enter!",
-            [1.0, 0.0, 1.0, 1.0],
-        )];
-    },
+        user_storage.screen_texts = vec![
+            ui::ScreenText::new(
+                (0.0, -0.8),
+                (0.25, 0.5),
+                0.125,
+                "Perks and Curses!",
+                [1.0, 0.0, 1.0, 1.0],
+            ),
+            ui::ScreenText::new(
+                (0.0, 1.0), // DON'T TRY TO USE LOGIC! Just guess for the y position, please. Don't make it perfect. You will go insane.
+                (0.25, 0.5),
+                0.125,
+                "Continue!",
+                [0.0, 1.0, 0.25, 1.0],
+            ),
+            ui::ScreenText::new(
+                (screen_width * -0.5 + screen_width * 0.9 + 0.054, -0.6),
+                (0.25, 0.5),
+                0.125,
+                "?",
+                [0.0, 1.0, 0.0, 1.0],
+            ),
+            ui::ScreenText::new(
+                (0.0, perks_and_curses::COST_Y),
+                (0.25, 0.5),
+                0.125,
+                "0",
+                [0.0, 1.0, 0.0, 1.0],
+            ),
+            ui::ScreenText::new(
+                (0.0, perks_and_curses::DESCRIPTION_Y),
+                (0.25, 0.5),
+                0.125,
+                "",
+                [0.0, 1.0, 0.0, 1.0],
+            ),
+        ];
 
-    on_cursor_moved: |_user_storage: &mut events::UserStorage,
-                      _render_storage: &mut events::RenderStorage,
-                      _position: PhysicalPosition<f64>| {},
-    on_mouse_input: |_user_storage: &mut events::UserStorage,
-                     _render_storage: &mut events::RenderStorage,
-                     _state: ElementState,
-                     _button: MouseButton| {},
+        ui::center_screen_text(&mut user_storage.screen_texts[0].vertices);
+        ui::center_screen_text(&mut user_storage.screen_texts[1].vertices);
+        ui::center_screen_text(&mut user_storage.screen_texts[3].vertices);
+
+        user_storage.screen_buttons = vec![
+            ui::ScreenButton::new(
+                collision::AabbCentred {
+                    // continue button
+                    position: (0.0, 0.9),
+                    size: (screen_width / 2.0, 0.2),
+                },
+                (0.0 * ui::TEXT_SPRITE_SIZE.0, 3.0 * ui::TEXT_SPRITE_SIZE.1),
+                [1.0, 0.0, 1.0, 1.0],
+                [0.0, 1.0, 1.0, 1.0],
+                None,
+                |user_storage: &mut events::UserStorage,
+                 render_storage: &mut events::RenderStorage| {
+                    if user_storage.perks_and_curses.cost <= 0 {
+                        for perk_pointer_index in
+                            0..user_storage.perks_and_curses.offered_perks.len()
+                        {
+                            if !user_storage.screen_toggleable_buttons[perk_pointer_index].toggled {
+                                continue;
+                            }
+
+                            let perk_pointer =
+                                &user_storage.perks_and_curses.offered_perks[perk_pointer_index];
+
+                            match perk_pointer {
+                                perks_and_curses::PerkOrCursePointer::Duplicates(perk_index) => {
+                                    let perk = &perks_and_curses::PERKS[*perk_index];
+                                    (perk.effect)(user_storage, render_storage);
+                                }
+                                perks_and_curses::PerkOrCursePointer::NoDuplicates(perk_index) => {
+                                    let perk = &perks_and_curses::PERKS_NO_DUPLICATES[*perk_index];
+                                    user_storage
+                                        .perks_and_curses
+                                        .one_time_perks_owned
+                                        .push(*perk_index);
+                                    (perk.effect)(user_storage, render_storage);
+                                }
+                            }
+                        }
+
+                        for curse_pointer_index in
+                            0..user_storage.perks_and_curses.offered_curses.len()
+                        {
+                            if !user_storage.screen_toggleable_buttons[curse_pointer_index + 5]
+                                .toggled
+                            {
+                                continue;
+                            }
+
+                            let curse_pointer =
+                                &user_storage.perks_and_curses.offered_curses[curse_pointer_index];
+
+                            match curse_pointer {
+                                perks_and_curses::PerkOrCursePointer::Duplicates(curse_index) => {
+                                    let curse = &perks_and_curses::CURSES[*curse_index];
+                                    (curse.effect)(user_storage, render_storage);
+                                }
+                                perks_and_curses::PerkOrCursePointer::NoDuplicates(curse_index) => {
+                                    let curse =
+                                        &perks_and_curses::CURSES_NO_DUPLICATES[*curse_index];
+                                    user_storage
+                                        .perks_and_curses
+                                        .one_time_curses_owned
+                                        .push(*curse_index);
+                                    (curse.effect)(user_storage, render_storage);
+                                }
+                            }
+                        }
+
+                        user_storage.menu = Menu::Alive;
+                        (ALIVE.start)(user_storage, render_storage);
+                    }
+                },
+            ),
+            ui::ScreenButton::new(
+                collision::AabbCentred {
+                    // ? button
+                    position: (screen_width * -0.5 + screen_width * 0.9, -0.7),
+                    size: (0.2, 0.2),
+                },
+                (3.0 * ui::TEXT_SPRITE_SIZE.0, 3.0 * ui::TEXT_SPRITE_SIZE.1),
+                [1.0, 0.0, 1.0, 1.0],
+                [0.0, 1.0, 1.0, 1.0],
+                None,
+                |user_storage: &mut events::UserStorage,
+                 render_storage: &mut events::RenderStorage| {
+                    user_storage.menu = Menu::Alive;
+                    (ALIVE.start)(user_storage, render_storage);
+                },
+            ),
+        ];
+
+        user_storage.screen_toggleable_buttons = vec![];
+
+        let stored_screen_texts_len = user_storage.screen_texts.len();
+        println!("stored screen texts len {}", stored_screen_texts_len);
+
+        for perk_index in 0..5 {
+            let name = match user_storage.perks_and_curses.offered_perks[perk_index] {
+                perks_and_curses::PerkOrCursePointer::Duplicates(perk_pointer) => {
+                    let perk = &perks_and_curses::PERKS[perk_pointer];
+                    perk.name
+                }
+                perks_and_curses::PerkOrCursePointer::NoDuplicates(perk_pointer) => {
+                    let perk = &perks_and_curses::PERKS_NO_DUPLICATES[perk_pointer];
+                    perk.name
+                }
+            };
+            user_storage.screen_texts.push(ui::ScreenText::new(
+                (
+                    screen_width * -0.5 + screen_width / 4.0,
+                    0.25 * perk_index as f32 + -0.4,
+                ),
+                (0.25, 0.5),
+                0.125,
+                name,
+                [1.0, 0.0, 1.0, 1.0],
+            ));
+
+            ui::center_screen_text(
+                &mut user_storage.screen_texts[perk_index + stored_screen_texts_len].vertices,
+            );
+
+            user_storage
+                .screen_toggleable_buttons
+                .push(ui::ScreenToggleableButton::new(
+                    collision::AabbCentred {
+                        position: (
+                            screen_width * -0.5 + screen_width / 4.0,
+                            0.25 * perk_index as f32 + -0.5,
+                        ),
+                        size: (screen_width / 8.0, 0.2),
+                    },
+                    (0.0 * ui::TEXT_SPRITE_SIZE.0, 3.0 * ui::TEXT_SPRITE_SIZE.1),
+                    [[0.0, 0.5, 0.0, 1.0], [0.0, 1.0, 0.0, 1.0]],
+                    [[0.0, 0.5, 0.7, 1.0], [0.0, 1.0, 0.7, 1.0]],
+                    None,
+                    [
+                        |user_storage: &mut events::UserStorage,
+                         render_storage: &mut events::RenderStorage,
+                         screen_toggleable_button_index| {
+                            let cost = match user_storage.perks_and_curses.offered_perks
+                                [screen_toggleable_button_index]
+                            {
+                                perks_and_curses::PerkOrCursePointer::Duplicates(perk_pointer) => {
+                                    let perk = &perks_and_curses::PERKS[perk_pointer];
+                                    perk.cost
+                                }
+                                perks_and_curses::PerkOrCursePointer::NoDuplicates(
+                                    perk_pointer,
+                                ) => {
+                                    let perk = &perks_and_curses::PERKS_NO_DUPLICATES[perk_pointer];
+                                    perk.cost
+                                }
+                            };
+                            user_storage.perks_and_curses.cost -= cost as i16;
+
+                            user_storage.screen_texts[3] = ui::ScreenText::new(
+                                (0.0, perks_and_curses::COST_Y),
+                                (0.25, 0.5),
+                                0.125,
+                                format!("{}", user_storage.perks_and_curses.cost.max(0)).as_str(),
+                                [0.0, 1.0, 0.0, 1.0],
+                            );
+                            ui::center_screen_text(&mut user_storage.screen_texts[3].vertices);
+                            ui::render_screen_texts(render_storage, &user_storage.screen_texts);
+                        },
+                        |user_storage: &mut events::UserStorage,
+                         render_storage: &mut events::RenderStorage,
+                         screen_toggleable_button_index| {
+                            let cost = match user_storage.perks_and_curses.offered_perks
+                                [screen_toggleable_button_index]
+                            {
+                                perks_and_curses::PerkOrCursePointer::Duplicates(perk_pointer) => {
+                                    let perk = &perks_and_curses::PERKS[perk_pointer];
+                                    perk.cost
+                                }
+                                perks_and_curses::PerkOrCursePointer::NoDuplicates(
+                                    perk_pointer,
+                                ) => {
+                                    let perk = &perks_and_curses::PERKS_NO_DUPLICATES[perk_pointer];
+                                    perk.cost
+                                }
+                            };
+                            user_storage.perks_and_curses.cost += cost as i16;
+
+                            user_storage.screen_texts[3] = ui::ScreenText::new(
+                                (0.0, perks_and_curses::COST_Y),
+                                (0.25, 0.5),
+                                0.125,
+                                format!("{}", user_storage.perks_and_curses.cost.max(0)).as_str(),
+                                [0.0, 1.0, 0.0, 1.0],
+                            );
+                            ui::center_screen_text(&mut user_storage.screen_texts[3].vertices);
+                            ui::render_screen_texts(render_storage, &user_storage.screen_texts);
+                        },
+                    ],
+                    |_user_storage, _render_storage, _screen_toggleable_button_index| {},
+                    |_user_storage, _render_storage, _screen_toggleable_button_index| {},
+                    false,
+                ));
+        }
+
+        for curse_index in 0..5 {
+            let name = match user_storage.perks_and_curses.offered_curses[curse_index] {
+                perks_and_curses::PerkOrCursePointer::Duplicates(curse_pointer) => {
+                    let curse = &perks_and_curses::CURSES[curse_pointer];
+                    curse.name
+                }
+                perks_and_curses::PerkOrCursePointer::NoDuplicates(curse_pointer) => {
+                    let curse = &perks_and_curses::CURSES_NO_DUPLICATES[curse_pointer];
+                    curse.name
+                }
+            };
+
+            user_storage.screen_texts.push(ui::ScreenText::new(
+                (
+                    screen_width * -0.5 + screen_width / 4.0 * 3.0,
+                    0.25 * curse_index as f32 + -0.4,
+                ),
+                (0.25, 0.5),
+                0.125,
+                name,
+                [1.0, 0.0, 1.0, 1.0],
+            ));
+
+            ui::center_screen_text(
+                &mut user_storage.screen_texts[curse_index + stored_screen_texts_len + 5].vertices,
+            );
+
+            user_storage
+                .screen_toggleable_buttons
+                .push(ui::ScreenToggleableButton::new(
+                    collision::AabbCentred {
+                        position: (
+                            screen_width * -0.5 + screen_width / 4.0 * 3.0,
+                            0.25 * curse_index as f32 + -0.5,
+                        ),
+                        size: (screen_width / 8.0, 0.2),
+                    },
+                    (0.0 * ui::TEXT_SPRITE_SIZE.0, 3.0 * ui::TEXT_SPRITE_SIZE.1),
+                    [[0.5, 0.0, 0.0, 1.0], [1.0, 0.0, 0.0, 1.0]],
+                    [[0.5, 0.7, 0.7, 1.0], [1.0, 0.7, 0.7, 1.0]],
+                    None,
+                    [
+                        |user_storage: &mut events::UserStorage,
+                         render_storage: &mut events::RenderStorage,
+                         screen_toggleable_button_index| {
+                            let cost = match user_storage.perks_and_curses.offered_curses
+                                [screen_toggleable_button_index - 5]
+                            {
+                                perks_and_curses::PerkOrCursePointer::Duplicates(curse_pointer) => {
+                                    let curse = &perks_and_curses::CURSES[curse_pointer];
+                                    curse.cost
+                                }
+                                perks_and_curses::PerkOrCursePointer::NoDuplicates(
+                                    curse_pointer,
+                                ) => {
+                                    let curse =
+                                        &perks_and_curses::CURSES_NO_DUPLICATES[curse_pointer];
+                                    curse.cost
+                                }
+                            };
+                            user_storage.perks_and_curses.cost += cost as i16;
+
+                            user_storage.screen_texts[3] = ui::ScreenText::new(
+                                (0.0, perks_and_curses::COST_Y),
+                                (0.25, 0.5),
+                                0.125,
+                                format!("{}", user_storage.perks_and_curses.cost.max(0)).as_str(),
+                                [0.0, 1.0, 0.0, 1.0],
+                            );
+                            ui::center_screen_text(&mut user_storage.screen_texts[3].vertices);
+                            ui::render_screen_texts(render_storage, &user_storage.screen_texts);
+                        },
+                        |user_storage: &mut events::UserStorage,
+                         render_storage: &mut events::RenderStorage,
+                         screen_toggleable_button_index| {
+                            let cost = match user_storage.perks_and_curses.offered_curses
+                                [screen_toggleable_button_index - 5]
+                            {
+                                perks_and_curses::PerkOrCursePointer::Duplicates(curse_pointer) => {
+                                    let curse = &perks_and_curses::CURSES[curse_pointer];
+                                    curse.cost
+                                }
+                                perks_and_curses::PerkOrCursePointer::NoDuplicates(
+                                    curse_pointer,
+                                ) => {
+                                    let curse =
+                                        &perks_and_curses::CURSES_NO_DUPLICATES[curse_pointer];
+                                    curse.cost
+                                }
+                            };
+                            user_storage.perks_and_curses.cost -= cost as i16;
+
+                            user_storage.screen_texts[3] = ui::ScreenText::new(
+                                (0.0, perks_and_curses::COST_Y),
+                                (0.25, 0.5),
+                                0.125,
+                                format!("{}", user_storage.perks_and_curses.cost.max(0)).as_str(),
+                                [0.0, 1.0, 0.0, 1.0],
+                            );
+                            ui::center_screen_text(&mut user_storage.screen_texts[3].vertices);
+                            ui::render_screen_texts(render_storage, &user_storage.screen_texts);
+                        },
+                    ],
+                    |user_storage, render_storage, _screen_toggleable_button_index| {
+                        println!("Started hover!");
+                        user_storage.screen_texts[4] = ui::ScreenText::new(
+                            (0.0, perks_and_curses::DESCRIPTION_Y),
+                            (0.25, 0.5),
+                            0.125,
+                            "started hover",
+                            [0.0, 1.0, 0.0, 1.0],
+                        );
+                        ui::center_screen_text(&mut user_storage.screen_texts[4].vertices);
+                        ui::render_screen_texts(render_storage, &user_storage.screen_texts);
+                    },
+                    |user_storage, render_storage, _screen_toggleable_button_index| {
+                        println!("Stopped hover!");
+                        user_storage.screen_texts[4] = ui::ScreenText::new(
+                            (0.0, perks_and_curses::DESCRIPTION_Y),
+                            (0.25, 0.5),
+                            0.125,
+                            "",
+                            [0.0, 1.0, 0.0, 1.0],
+                        );
+                        ui::render_screen_texts(render_storage, &user_storage.screen_texts);
+                    },
+                    false,
+                ));
+        }
+    },
+    on_cursor_moved: |user_storage: &mut events::UserStorage,
+                      render_storage: &mut events::RenderStorage,
+                      position: PhysicalPosition<f64>| {
+        let mouse_position = (
+            events::rerange(
+                (0.0, render_storage.window_size[0] as f32),
+                (-1.0, 1.0),
+                position.x as f32,
+            ) / render_storage.aspect_ratio,
+            events::rerange(
+                (0.0, render_storage.window_size[1] as f32),
+                (-1.0, 1.0),
+                position.y as f32,
+            ),
+        );
+
+        ui::hover_screen_buttons(
+            render_storage,
+            &mut user_storage.screen_buttons,
+            &mut user_storage.screen_texts,
+            mouse_position,
+        );
+
+        ui::hover_screen_toggleable_buttons(render_storage, user_storage, mouse_position);
+    },
+    on_mouse_input: |user_storage: &mut events::UserStorage,
+                     render_storage: &mut events::RenderStorage,
+                     state: ElementState,
+                     button: MouseButton| {
+        if state == ElementState::Released && button == MouseButton::Left {
+            ui::process_hovered_screen_buttons(user_storage, render_storage);
+            ui::process_hovered_screen_toggleable_buttons(user_storage, render_storage);
+        }
+    },
 };
