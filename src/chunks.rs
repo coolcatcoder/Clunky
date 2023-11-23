@@ -22,3 +22,7 @@ pub struct ChunkIdea2 {
     map_objects: Vec<(biomes::MapObject, Vec<vertex_data::MapVertex>, Vec<u32>)>, // map object, vertices, indices. Then do memcpy every frame
     generated: bool,
 }
+
+pub fn generate_chunk() {
+    
+}
