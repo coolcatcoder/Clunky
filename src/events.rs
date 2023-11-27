@@ -3,6 +3,7 @@ use noise::OpenSimplex;
 use rand::distributions::{Distribution, Uniform};
 use rand::rngs::ThreadRng;
 use rand::thread_rng;
+//use winit::event::KeyEvent;
 use std::ops::{Add, Div, Mul, Rem};
 use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
@@ -12,6 +13,7 @@ use std::time::Instant;
 use winit::dpi::PhysicalPosition;
 use winit::event::ElementState;
 use winit::event::KeyboardInput;
+//use winit::event::WindowEvent::KeyboardInput;
 use winit::event::MouseButton;
 
 use crate::biomes;

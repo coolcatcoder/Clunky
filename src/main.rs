@@ -2,45 +2,47 @@ use std::{io::Cursor, sync::Arc, time::Instant};
 use vulkano::{
     buffer::{
         allocator::{SubbufferAllocator, SubbufferAllocatorCreateInfo},
-        Buffer, BufferCreateInfo, BufferError, BufferUsage,
+        Buffer, BufferCreateInfo, BufferUsage,
     },
     command_buffer::{
         allocator::StandardCommandBufferAllocator, AutoCommandBufferBuilder, CommandBufferUsage,
-        RenderPassBeginInfo, SubpassContents,
+        CopyBufferToImageInfo, RenderPassBeginInfo, SubpassContents,
     },
     descriptor_set::{
-        allocator::StandardDescriptorSetAllocator, PersistentDescriptorSet, WriteDescriptorSet,
+        allocator::{StandardDescriptorSetAllocator, StandardDescriptorSetAllocatorCreateInfo},
+        PersistentDescriptorSet, WriteDescriptorSet,
     },
     device::{
         physical::PhysicalDeviceType, Device, DeviceCreateInfo, DeviceExtensions, DeviceOwned,
         QueueCreateInfo, QueueFlags,
     },
-    image::{
-        view::ImageView, AttachmentImage, ImageAccess, ImageUsage, ImmutableImage, SwapchainImage,
-    },
-    instance::{Instance, InstanceCreateInfo},
-    memory::allocator::{AllocationCreateInfo, MemoryUsage, StandardMemoryAllocator},
+    image::sampler::{Filter, SamplerAddressMode},
+    image::{view::ImageView, ImageCreateInfo, ImageType, ImageUsage},
+    instance::{Instance, InstanceCreateFlags, InstanceCreateInfo},
+    memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator},
     pipeline::{
         graphics::{
-            color_blend::ColorBlendState,
+            color_blend::{AttachmentBlend, ColorBlendAttachmentState, ColorBlendState},
             depth_stencil::{CompareOp, DepthState, DepthStencilState},
-            input_assembly::InputAssemblyState,
-            vertex_input::Vertex,
-            viewport::{Viewport, ViewportState},
+            input_assembly::{InputAssemblyState, PrimitiveTopology},
+            multisample::MultisampleState,
+            rasterization::RasterizationState,
+            vertex_input::{Vertex, VertexDefinition},
+            viewport::{Scissor, Viewport, ViewportState},
+            GraphicsPipelineCreateInfo,
         },
-        GraphicsPipeline, Pipeline, PipelineBindPoint, StateMode,
+        layout::PipelineDescriptorSetLayoutCreateInfo,
+        DynamicState, GraphicsPipeline, Pipeline, PipelineBindPoint, PipelineLayout,
+        PipelineShaderStageCreateInfo,
     },
     render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass, Subpass},
-    sampler::{Filter, SamplerAddressMode},
     shader::ShaderModule,
     swapchain::{
-        acquire_next_image, AcquireError, Swapchain, SwapchainCreateInfo, SwapchainCreationError,
-        SwapchainPresentInfo,
+        acquire_next_image, Surface, Swapchain, SwapchainCreateInfo, SwapchainPresentInfo,
     },
-    sync::{self, FlushError, GpuFuture},
-    VulkanLibrary,
+    sync::{self, AccessConflict, GpuFuture, HostAccessError},
+    DeviceSize, Validated, VulkanError, VulkanLibrary,
 };
-use vulkano_win::VkSurfaceBuild;
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
@@ -48,14 +50,14 @@ use winit::{
 };
 
 use vulkano::format::Format;
-use vulkano::image::ImageDimensions;
-use vulkano::image::MipmapsCount;
-use vulkano::sampler::Sampler;
-use vulkano::sampler::SamplerCreateInfo;
+use vulkano::image::sampler::Sampler;
+use vulkano::image::sampler::SamplerCreateInfo;
 
 use vulkano::command_buffer::PrimaryCommandBufferAbstract;
 
 use vulkano::buffer::Subbuffer;
+
+use vulkano::image::Image;
 
 mod vertex_data;
 
@@ -75,15 +77,46 @@ mod chunks;
 
 mod perks_and_curses;
 
+mod vertex_shader_map {
+    vulkano_shaders::shader! {
+        ty: "vertex",
+        path: "src/map_shaders/vertex_shader.glsl",
+    }
+}
+
+mod fragment_shader_map {
+    vulkano_shaders::shader! {
+        ty: "fragment",
+        path: "src/map_shaders/fragment_shader.glsl",
+    }
+}
+
+mod vertex_shader_ui {
+    vulkano_shaders::shader! {
+        ty: "vertex",
+        path: "src/ui_shaders/vertex_shader.glsl",
+    }
+}
+
+mod fragment_shader_ui {
+    vulkano_shaders::shader! {
+        ty: "fragment",
+        path: "src/ui_shaders/fragment_shader.frag",
+    }
+}
+
 const DEPTH_FORMAT: Format = Format::D24_UNORM_S8_UINT; // TODO: work out what this should be
 
 fn main() {
-    let instance = get_instance();
+    let (instance, event_loop) = get_instance_and_event_loop();
 
-    let event_loop = EventLoop::new();
-    let surface = WindowBuilder::new()
-        .build_vk_surface(&event_loop, instance.clone())
-        .unwrap();
+    let window = Arc::new(WindowBuilder::new().build(&event_loop).unwrap());
+
+    let surface = Surface::from_window(instance.clone(), window.clone()).unwrap();
+
+    // let surface = WindowBuilder::new()
+    //     .build_vk_surface(&event_loop, instance.clone())
+    //     .unwrap();
 
     let device_extensions = DeviceExtensions {
         khr_swapchain: true,
@@ -139,13 +172,12 @@ fn main() {
             .physical_device()
             .surface_capabilities(&surface, Default::default())
             .unwrap();
-        let image_format = Some(
-            device
-                .physical_device()
-                .surface_formats(&surface, Default::default())
-                .unwrap()[0]
-                .0,
-        );
+        let image_format = device
+            .physical_device()
+            .surface_formats(&surface, Default::default())
+            .unwrap()[0]
+            .0;
+
         let window = surface.object().unwrap().downcast_ref::<Window>().unwrap();
 
         window.set_title("I Don't Know!");
@@ -174,14 +206,16 @@ fn main() {
     // start creating buffers
     let memory_allocator = Arc::new(StandardMemoryAllocator::new_default(device.clone()));
 
-    let (vertex_buffers_map, index_buffers_map) = create_buffers_map(&memory_allocator);
+    let (vertex_buffers_map, index_buffers_map) = create_buffers_map(memory_allocator.clone());
 
-    let (vertex_buffers_ui, index_buffers_ui) = create_buffers_ui(&memory_allocator);
+    let (vertex_buffers_ui, index_buffers_ui) = create_buffers_ui(memory_allocator.clone());
 
     let uniform_buffer_main = SubbufferAllocator::new(
         memory_allocator.clone(),
         SubbufferAllocatorCreateInfo {
             buffer_usage: BufferUsage::UNIFORM_BUFFER,
+            memory_type_filter: MemoryTypeFilter::PREFER_DEVICE
+                | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
             ..Default::default()
         },
     );
@@ -200,56 +234,100 @@ fn main() {
     .unwrap();
 
     let sprites_map = {
-        let png_bytes = include_bytes!("sprite_sheet.png").to_vec();
-        let cursor = Cursor::new(png_bytes);
-        let decoder = png::Decoder::new(cursor);
+        let png_bytes = include_bytes!("sprite_sheet.png").as_slice();
+        let decoder = png::Decoder::new(png_bytes);
         let mut reader = decoder.read_info().unwrap();
         let info = reader.info();
-        let dimensions = ImageDimensions::Dim2d {
-            width: info.width,
-            height: info.height,
-            array_layers: 1,
-        };
-        let mut image_data = Vec::new();
-        image_data.resize((info.width * info.height * 4) as usize, 0);
-        reader.next_frame(&mut image_data).unwrap();
+        let extent = [info.width, info.height, 1];
 
-        let image = ImmutableImage::from_iter(
-            &memory_allocator,
-            image_data,
-            dimensions,
-            MipmapsCount::One,
-            Format::R8G8B8A8_SRGB,
-            &mut uploads,
+        let upload_buffer = Buffer::new_slice(
+            memory_allocator.clone(),
+            BufferCreateInfo {
+                usage: BufferUsage::TRANSFER_SRC,
+                ..Default::default()
+            },
+            AllocationCreateInfo {
+                memory_type_filter: MemoryTypeFilter::PREFER_HOST
+                    | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
+                ..Default::default()
+            },
+            (info.width * info.height * 4) as DeviceSize,
         )
         .unwrap();
+
+        reader
+            .next_frame(&mut upload_buffer.write().unwrap())
+            .unwrap();
+
+        let image = Image::new(
+            memory_allocator.clone(),
+            ImageCreateInfo {
+                image_type: ImageType::Dim2d,
+                format: Format::R8G8B8A8_SRGB,
+                extent,
+                usage: ImageUsage::TRANSFER_DST | ImageUsage::SAMPLED,
+                ..Default::default()
+            },
+            AllocationCreateInfo::default(),
+        )
+        .unwrap();
+
+        uploads
+            .copy_buffer_to_image(CopyBufferToImageInfo::buffer_image(
+                upload_buffer,
+                image.clone(),
+            ))
+            .unwrap();
+
         ImageView::new_default(image).unwrap()
     };
 
     let sprites_text = {
-        let png_bytes = include_bytes!("Text.png").to_vec();
-        let cursor = Cursor::new(png_bytes);
-        let decoder = png::Decoder::new(cursor);
+        let png_bytes = include_bytes!("Text.png").as_slice();
+        let decoder = png::Decoder::new(png_bytes);
         let mut reader = decoder.read_info().unwrap();
         let info = reader.info();
-        let dimensions = ImageDimensions::Dim2d {
-            width: info.width,
-            height: info.height,
-            array_layers: 1,
-        };
-        let mut image_data = Vec::new();
-        image_data.resize((info.width * info.height * 4) as usize, 0);
-        reader.next_frame(&mut image_data).unwrap();
+        let extent = [info.width, info.height, 1];
 
-        let image = ImmutableImage::from_iter(
-            &memory_allocator,
-            image_data,
-            dimensions,
-            MipmapsCount::One,
-            Format::R8G8B8A8_SRGB,
-            &mut uploads,
+        let upload_buffer = Buffer::new_slice(
+            memory_allocator.clone(),
+            BufferCreateInfo {
+                usage: BufferUsage::TRANSFER_SRC,
+                ..Default::default()
+            },
+            AllocationCreateInfo {
+                memory_type_filter: MemoryTypeFilter::PREFER_HOST
+                    | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
+                ..Default::default()
+            },
+            (info.width * info.height * 4) as DeviceSize,
         )
         .unwrap();
+
+        reader
+            .next_frame(&mut upload_buffer.write().unwrap())
+            .unwrap();
+
+        let image = Image::new(
+            memory_allocator.clone(),
+            ImageCreateInfo {
+                image_type: ImageType::Dim2d,
+                format: Format::R8G8B8A8_SRGB,
+                extent,
+                usage: ImageUsage::TRANSFER_DST | ImageUsage::SAMPLED,
+                ..Default::default()
+            },
+            AllocationCreateInfo::default(),
+        )
+        .unwrap();
+
+        uploads
+            .copy_buffer_to_image(CopyBufferToImageInfo::buffer_image(
+                upload_buffer,
+                image.clone(),
+            ))
+            .unwrap();
+
         ImageView::new_default(image).unwrap()
     };
 
@@ -267,36 +345,36 @@ fn main() {
     // start creating shaders
     //let (vertex_shader_map, fragment_shader_map, vertex_shader_text, fragment_shader_text) = create_shaders(device);
 
-    mod vertex_shader_map {
-        vulkano_shaders::shader! {
-            ty: "vertex",
-            path: "src/map_shaders/vertex_shader.glsl",
-        }
-    }
+    // mod vertex_shader_map {
+    //     vulkano_shaders::shader! {
+    //         ty: "vertex",
+    //         path: "src/map_shaders/vertex_shader.glsl",
+    //     }
+    // }
 
-    mod fragment_shader_map {
-        vulkano_shaders::shader! {
-            ty: "fragment",
-            path: "src/map_shaders/fragment_shader.glsl",
-        }
-    }
+    // mod fragment_shader_map {
+    //     vulkano_shaders::shader! {
+    //         ty: "fragment",
+    //         path: "src/map_shaders/fragment_shader.glsl",
+    //     }
+    // }
 
-    let vertex_shader_map = vertex_shader_map::load(device.clone()).unwrap();
-    let fragment_shader_map = fragment_shader_map::load(device.clone()).unwrap();
+    //let vertex_shader_map = vertex_shader_map::load(device.clone()).unwrap();
+    //let fragment_shader_map = fragment_shader_map::load(device.clone()).unwrap();
 
-    mod vertex_shader_ui {
-        vulkano_shaders::shader! {
-            ty: "vertex",
-            path: "src/ui_shaders/vertex_shader.glsl",
-        }
-    }
+    // mod vertex_shader_ui {
+    //     vulkano_shaders::shader! {
+    //         ty: "vertex",
+    //         path: "src/ui_shaders/vertex_shader.glsl",
+    //     }
+    // }
 
-    mod fragment_shader_ui {
-        vulkano_shaders::shader! {
-            ty: "fragment",
-            path: "src/ui_shaders/fragment_shader.frag",
-        }
-    }
+    // mod fragment_shader_ui {
+    //     vulkano_shaders::shader! {
+    //         ty: "fragment",
+    //         path: "src/ui_shaders/fragment_shader.frag",
+    //     }
+    // }
 
     let vertex_shader_ui = vertex_shader_ui::load(device.clone()).unwrap();
     let fragment_shader_ui = fragment_shader_ui::load(device.clone()).unwrap();
@@ -308,16 +386,16 @@ fn main() {
         device.clone(),
         attachments: {
             color: {
-                load: Clear,
-                store: Store,
                 format: swapchain.image_format(),
                 samples: 1,
+                load_op: Clear,
+                store_op: Store,
             },
             depth: {
-                load: Clear,
-                store: DontCare,
                 format: DEPTH_FORMAT,
                 samples: 1,
+                load_op: Clear,
+                store_op: Store,
             }
         },
         pass: {
@@ -329,16 +407,18 @@ fn main() {
     // end of creating render pass
 
     let (mut pipeline_map, mut pipeline_ui, mut framebuffers) = window_size_dependent_setup(
-        &memory_allocator,
-        &vertex_shader_map,
-        &fragment_shader_map,
-        &vertex_shader_ui,
-        &fragment_shader_ui,
+        memory_allocator.clone(),
+        //&vertex_shader_map,
+        //&fragment_shader_map,
+        //&vertex_shader_ui,
+        //&fragment_shader_ui,
         &images,
         render_pass.clone(),
+        device.clone(),
     );
 
-    let descriptor_set_allocator = StandardDescriptorSetAllocator::new(device.clone());
+    let descriptor_set_allocator =
+        StandardDescriptorSetAllocator::new(device.clone(), Default::default());
 
     let mut recreate_swapchain = false; // sometimes the swapchain is broken, and need to be fixed
 
@@ -363,10 +443,12 @@ fn main() {
             sprites_map,
             sampler.clone(),
         )],
+        [],
     )
     .unwrap();
 
     let set_sprites_text = PersistentDescriptorSet::new(
+        // TODO: check the examples, as I'm not so certain this is 100% right...
         &descriptor_set_allocator,
         layout_ui.clone(),
         [WriteDescriptorSet::image_view_sampler(
@@ -374,6 +456,7 @@ fn main() {
             sprites_text,
             sampler,
         )],
+        [],
     )
     .unwrap();
 
@@ -466,9 +549,10 @@ fn main() {
                 // This should run once per frame.
                 let window = surface.object().unwrap().downcast_ref::<Window>().unwrap();
 
-                let dimensions = window.inner_size();
+                //let dimensions = window.inner_size();
+                let image_extent: [u32; 2] = window.inner_size().into();
 
-                if dimensions.width == 0 || dimensions.height == 0 {
+                if image_extent.contains(&0) {
                     // If the window is 0 in size, don't bother drawing the frame.
                     return;
                 }
@@ -510,27 +594,25 @@ fn main() {
 
                 if recreate_swapchain {
                     // When the window resizes we need to recreate everything dependent on the window size.
-                    let (new_swapchain, new_images) =
-                        match swapchain.recreate(SwapchainCreateInfo {
-                            image_extent: dimensions.into(),
+                    let (new_swapchain, new_images) = swapchain
+                        .recreate(SwapchainCreateInfo {
+                            image_extent,
                             ..swapchain.create_info()
-                        }) {
-                            Ok(r) => r,
-                            Err(SwapchainCreationError::ImageExtentNotSupported { .. }) => return,
-                            Err(e) => panic!("failed to recreate swapchain: {e}"),
-                        };
+                        })
+                        .expect("failed to recreate swapchain");
 
                     swapchain = new_swapchain;
 
                     let (new_pipeline_map, new_pipeline_ui, new_framebuffers) =
                         window_size_dependent_setup(
-                            &memory_allocator,
-                            &vertex_shader_map,
-                            &fragment_shader_map,
-                            &vertex_shader_ui,
-                            &fragment_shader_ui,
+                            memory_allocator.clone(),
+                            //&vertex_shader_map,
+                            //&fragment_shader_map,
+                            //&vertex_shader_ui,
+                            //&fragment_shader_ui,
                             &new_images,
                             render_pass.clone(),
+                            device.clone(),
                         );
 
                     pipeline_map = new_pipeline_map;
@@ -564,14 +646,15 @@ fn main() {
                     &descriptor_set_allocator,
                     layout_main.clone(),
                     [WriteDescriptorSet::buffer(0, uniform_buffer_subbuffer)],
+                    [],
                 )
                 .unwrap();
 
                 // Aquire image to draw on.
                 let (image_index, suboptimal, acquire_future) =
-                    match acquire_next_image(swapchain.clone(), None) {
+                    match acquire_next_image(swapchain.clone(), None).map_err(Validated::unwrap) {
                         Ok(r) => r,
-                        Err(AcquireError::OutOfDate) => {
+                        Err(VulkanError::OutOfDate) => {
                             recreate_swapchain = true;
                             return;
                         }
@@ -595,29 +678,37 @@ fn main() {
                     .begin_render_pass(
                         // begin the render pass so we can later draw
                         RenderPassBeginInfo {
-                            clear_values: vec![Some([0.0, 0.0, 1.0, 1.0].into()), Some((1.0,0u32).into())], // Sets background colour and something else.
+                            clear_values: vec![
+                                Some([0.0, 0.0, 1.0, 1.0].into()),
+                                Some((1.0, 0u32).into()),
+                            ], // Sets background colour and something else.
                             ..RenderPassBeginInfo::framebuffer(
                                 framebuffers[image_index as usize].clone(),
                             )
                         },
-                        SubpassContents::Inline,
+                        //SubpassContents::Inline,
+                        Default::default(),
                     )
                     .unwrap()
                     //.set_viewport(0, [viewport.clone()])
                     .bind_pipeline_graphics(pipeline_map.clone())
+                    .unwrap()
                     .bind_descriptor_sets(
                         PipelineBindPoint::Graphics,
                         pipeline_map.layout().clone(),
                         0,
                         vec![set_main.clone(), set_sprites_map.clone()],
                     )
+                    .unwrap()
                     .bind_vertex_buffers(
                         0,
                         vertex_buffers_map[render_storage.frame_count as usize % 2].clone(),
                     )
+                    .unwrap()
                     .bind_index_buffer(
                         index_buffers_map[render_storage.frame_count as usize % 2].clone(),
                     )
+                    .unwrap()
                     .draw_indexed(
                         index_counts_map[render_storage.frame_count as usize % 2],
                         1,
@@ -626,20 +717,24 @@ fn main() {
                         0,
                     )
                     .unwrap()
-                    .bind_pipeline_graphics(pipeline_ui.clone()) // start of text pipeline
+                    .bind_pipeline_graphics(pipeline_ui.clone())
+                    .unwrap() // start of text pipeline
                     .bind_descriptor_sets(
                         PipelineBindPoint::Graphics,
                         pipeline_ui.layout().clone(),
                         0,
                         vec![set_main, set_sprites_text.clone()],
                     )
+                    .unwrap()
                     .bind_vertex_buffers(
                         0,
                         vertex_buffers_ui[render_storage.frame_count as usize % 2].clone(),
                     )
+                    .unwrap()
                     .bind_index_buffer(
                         index_buffers_ui[render_storage.frame_count as usize % 2].clone(),
                     )
+                    .unwrap()
                     .draw_indexed(
                         index_counts_ui[render_storage.frame_count as usize % 2],
                         1,
@@ -648,7 +743,7 @@ fn main() {
                         0,
                     )
                     .unwrap()
-                    .end_render_pass()
+                    .end_render_pass(Default::default())
                     .unwrap();
 
                 let command_buffer = builder.build().unwrap(); // Finish building the command buffer.
@@ -665,24 +760,24 @@ fn main() {
                     )
                     .then_signal_fence_and_flush();
 
-                match future {
+                match future.map_err(Validated::unwrap) {
                     Ok(future) => {
                         previous_frame_end = Some(future.boxed());
                     }
 
-                    Err(FlushError::OutOfDate) => {
+                    Err(VulkanError::OutOfDate) => {
                         recreate_swapchain = true;
                         previous_frame_end = Some(sync::now(device.clone()).boxed());
                     }
 
                     Err(e) => {
                         match e {
-                            FlushError::ResourceAccessError { error, use_ref } => {
-                                let use_ref = use_ref.unwrap();
-                                println!("ResourceAccessError: {}, More info: command_index:{}, command_name:{}", error, use_ref.command_index, use_ref.command_name);
-                                recreate_swapchain = true;
-                                previous_frame_end = Some(sync::now(device.clone()).boxed());
-                            }
+                            // VulkanError::ResourceAccessError { error, use_ref } => {
+                            //     let use_ref = use_ref.unwrap();
+                            //     println!("ResourceAccessError: {}, More info: command_index:{}, command_name:{}", error, use_ref.command_index, use_ref.command_name);
+                            //     recreate_swapchain = true;
+                            //     previous_frame_end = Some(sync::now(device.clone()).boxed());
+                            // }
                             _ => {
                                 panic!("failed to flush future: {e}");
                             }
@@ -712,26 +807,44 @@ fn main() {
 }
 
 fn window_size_dependent_setup(
-    memory_allocator: &StandardMemoryAllocator,
-    vertex_shader_map: &ShaderModule,
-    fragment_shader_map: &ShaderModule,
-    vertex_shader_ui: &ShaderModule,
-    fragment_shader_ui: &ShaderModule,
-    images: &[Arc<SwapchainImage>],
+    memory_allocator: Arc<StandardMemoryAllocator>,
+    images: &[Arc<Image>],
     render_pass: Arc<RenderPass>,
+    device: Arc<Device>,
 ) -> (
     Arc<GraphicsPipeline>,
     Arc<GraphicsPipeline>,
     Vec<Arc<Framebuffer>>,
 ) {
-    let dimensions = images[0].dimensions().width_height();
+    //let dimensions = images[0].dimensions().width_height();
+    let extent = images[0].extent();
 
     let framebuffers = images
         .iter()
         .map(|image| {
             let view = ImageView::new_default(image.clone()).unwrap();
             let depth = ImageView::new_default(
-                AttachmentImage::transient(memory_allocator, dimensions, DEPTH_FORMAT).unwrap(),
+                //Image::transient(memory_allocator, extent, DEPTH_FORMAT).unwrap(),
+                // Image::new(
+                //     memory_allocator,
+                //     //ImageCreateInfo { flags: (), image_type: (), format: (), view_formats: (), extent: (), array_layers: (), mip_levels: (), samples: (), tiling: (), usage: (), stencil_usage: (), sharing: (), initial_layout: (), drm_format_modifiers: (), drm_format_modifier_plane_layouts: (), external_memory_handle_types: (), _ne: () }
+                //     pain,
+                //     //AllocationCreateInfo { memory_type_filter: (), memory_type_bits: (), allocate_preference: (), _ne: () }
+                //     pain,
+                // ).unwrap()
+                Image::new(
+                    memory_allocator.clone(),
+                    ImageCreateInfo {
+                        image_type: ImageType::Dim2d,
+                        format: DEPTH_FORMAT,
+                        extent,
+                        usage: ImageUsage::TRANSIENT_ATTACHMENT
+                            | ImageUsage::DEPTH_STENCIL_ATTACHMENT,
+                        ..Default::default()
+                    },
+                    AllocationCreateInfo::default(),
+                )
+                .unwrap(),
             )
             .unwrap();
             Framebuffer::new(
@@ -746,87 +859,247 @@ fn window_size_dependent_setup(
         .collect::<Vec<_>>();
 
     let subpass = Subpass::from(render_pass.clone(), 0).unwrap();
-    let pipeline_map = GraphicsPipeline::start()
-        .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
-        .vertex_input_state(vertex_data::MapVertex::per_vertex())
-        .input_assembly_state(InputAssemblyState::new())
-        .vertex_shader(vertex_shader_map.entry_point("main").unwrap(), ())
-        .viewport_state(ViewportState::viewport_fixed_scissor_irrelevant([
-            Viewport {
-                origin: [0.0, 0.0],
-                dimensions: [dimensions[0] as f32, dimensions[1] as f32],
-                depth_range: 0.0..1.0,
-            },
-        ]))
-        .fragment_shader(fragment_shader_map.entry_point("main").unwrap(), ())
-        //.depth_stencil_simple_depth() // TODO: mess around with
-        //.depth_write(true)
-        .depth_stencil_state(DepthStencilState {
-            depth: Some(DepthState {
-                enable_dynamic: false,
-                write_enable: StateMode::<bool>::Fixed(true),
-                compare_op: StateMode::<CompareOp>::Fixed(CompareOp::Less),
-            }),
-            depth_bounds: None,
-            // depth_bounds: Some(DepthBoundsState {
-            //     enable_dynamic: false,
-            //     bounds: StateMode::<RangeInclusive<f32>>::Fixed(0.0..=1.0),
-            // }),
-            stencil: None,
-        })
-        .color_blend_state(ColorBlendState::new(subpass.num_color_attachments()).blend_alpha())
-        .build(memory_allocator.device().clone())
+
+    let vertex_shader_entrance_map = vertex_shader_map::load(device.clone())
+        .unwrap()
+        .entry_point("main")
+        .unwrap();
+    let fragment_shader_entrance_map = fragment_shader_map::load(device.clone())
+        .unwrap()
+        .entry_point("main")
         .unwrap();
 
-    let pipeline_ui = GraphicsPipeline::start()
-        .render_pass(Subpass::from(render_pass, 0).unwrap())
-        .vertex_input_state(vertex_data::UIVertex::per_vertex())
-        .input_assembly_state(InputAssemblyState::new())
-        .vertex_shader(vertex_shader_ui.entry_point("main").unwrap(), ())
-        .viewport_state(ViewportState::viewport_fixed_scissor_irrelevant([
-            Viewport {
-                origin: [0.0, 0.0],
-                dimensions: [dimensions[0] as f32, dimensions[1] as f32],
-                depth_range: 0.0..1.0,
-            },
-        ]))
-        .fragment_shader(fragment_shader_ui.entry_point("main").unwrap(), ())
-        .color_blend_state(ColorBlendState::new(subpass.num_color_attachments()).blend_alpha())
-        .build(memory_allocator.device().clone())
+    let map_vertex_input_state = vertex_data::MapVertex::per_vertex()
+        .definition(&vertex_shader_entrance_map.info().input_interface)
         .unwrap();
+
+    let stages_map = [
+        PipelineShaderStageCreateInfo::new(vertex_shader_entrance_map),
+        PipelineShaderStageCreateInfo::new(fragment_shader_entrance_map),
+    ];
+
+    let vertex_shader_entrance_ui = vertex_shader_ui::load(device.clone())
+        .unwrap()
+        .entry_point("main")
+        .unwrap();
+    let fragment_shader_entrance_ui = fragment_shader_ui::load(device.clone())
+        .unwrap()
+        .entry_point("main")
+        .unwrap();
+
+    let ui_vertex_input_state = vertex_data::UIVertex::per_vertex()
+        .definition(&vertex_shader_entrance_ui.info().input_interface)
+        .unwrap();
+
+    let stages_ui = [
+        PipelineShaderStageCreateInfo::new(vertex_shader_entrance_ui),
+        PipelineShaderStageCreateInfo::new(fragment_shader_entrance_ui),
+    ];
+
+    let layout_map = PipelineLayout::new(
+        device.clone(),
+        PipelineDescriptorSetLayoutCreateInfo::from_stages(&stages_map)
+            .into_pipeline_layout_create_info(device.clone())
+            .unwrap(),
+    )
+    .unwrap();
+
+    let layout_ui = PipelineLayout::new(
+        device.clone(),
+        PipelineDescriptorSetLayoutCreateInfo::from_stages(&stages_ui)
+            .into_pipeline_layout_create_info(device.clone())
+            .unwrap(),
+    )
+    .unwrap();
+
+    let pipeline_map = GraphicsPipeline::new(
+        device.clone(),
+        None,
+        GraphicsPipelineCreateInfo {
+            stages: stages_map.into_iter().collect(),
+            vertex_input_state: Some(map_vertex_input_state),
+            input_assembly_state: Some(InputAssemblyState {
+                topology: PrimitiveTopology::TriangleList,
+                ..Default::default()
+            }),
+            viewport_state: Some(ViewportState {
+                viewports: [Viewport {
+                    offset: [0.0, 0.0],
+                    extent: [extent[0] as f32, extent[1] as f32],
+                    depth_range: 0.0f32..=1.0,
+                }]
+                .into(),
+                scissors: [Scissor {
+                    offset: [0, 0],
+                    extent: [extent[0], extent[1]],
+                }]
+                .into(),
+                ..Default::default()
+            }),
+            rasterization_state: Some(RasterizationState::default()),
+            multisample_state: Some(MultisampleState::default()),
+            color_blend_state: Some(ColorBlendState::with_attachment_states(
+                subpass.num_color_attachments(),
+                ColorBlendAttachmentState {
+                    blend: Some(AttachmentBlend::alpha()),
+                    ..Default::default()
+                },
+            )),
+            depth_stencil_state: Some(DepthStencilState {
+                depth: Some(DepthState {
+                    write_enable: true,
+                    compare_op: CompareOp::Less,
+                }),
+                depth_bounds: None,
+                stencil: None,
+                ..Default::default()
+            }),
+            //dynamic_state: [DynamicState::Viewport].into_iter().collect(), // TODO: remove DynamicState::Viewport and see what happens lol
+            subpass: Some(subpass.into()),
+            ..GraphicsPipelineCreateInfo::layout(layout_map)
+        },
+    )
+    .unwrap();
+
+    // let pipeline_map = GraphicsPipeline::start()
+    //     .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
+    //     .vertex_input_state(vertex_data::MapVertex::per_vertex())
+    //     .input_assembly_state(InputAssemblyState::new())
+    //     .vertex_shader(vertex_shader_map.entry_point("main").unwrap(), ())
+    //     .viewport_state(ViewportState::viewport_fixed_scissor_irrelevant([
+    //         Viewport {
+    //             origin: [0.0, 0.0],
+    //             dimensions: [dimensions[0] as f32, dimensions[1] as f32],
+    //             depth_range: 0.0..1.0,
+    //         },
+    //     ]))
+    //     .fragment_shader(fragment_shader_map.entry_point("main").unwrap(), ())
+    //     //.depth_stencil_simple_depth() // TODO: mess around with
+    //     //.depth_write(true)
+    //     .depth_stencil_state(DepthStencilState {
+    //         depth: Some(DepthState {
+    //             enable_dynamic: false,
+    //             write_enable: StateMode::<bool>::Fixed(true),
+    //             compare_op: StateMode::<CompareOp>::Fixed(CompareOp::Less),
+    //         }),
+    //         depth_bounds: None,
+    //         // depth_bounds: Some(DepthBoundsState {
+    //         //     enable_dynamic: false,
+    //         //     bounds: StateMode::<RangeInclusive<f32>>::Fixed(0.0..=1.0),
+    //         // }),
+    //         stencil: None,
+    //     })
+    //     .color_blend_state(ColorBlendState::new(subpass.num_color_attachments()).blend_alpha())
+    //     .build(memory_allocator.device().clone())
+    //     .unwrap();
+
+    let subpass = Subpass::from(render_pass.clone(), 0).unwrap();
+
+    let pipeline_ui = GraphicsPipeline::new(
+        device.clone(),
+        None,
+        GraphicsPipelineCreateInfo {
+            stages: stages_ui.into_iter().collect(),
+            vertex_input_state: Some(ui_vertex_input_state),
+            input_assembly_state: Some(InputAssemblyState {
+                topology: PrimitiveTopology::TriangleList,
+                ..Default::default()
+            }),
+            viewport_state: Some(ViewportState {
+                viewports: [Viewport {
+                    offset: [0.0, 0.0],
+                    extent: [extent[0] as f32, extent[1] as f32],
+                    depth_range: 0.0f32..=1.0,
+                }]
+                .into(),
+                scissors: [Scissor {
+                    offset: [0, 0],
+                    extent: [extent[0], extent[1]],
+                }]
+                .into(),
+                ..Default::default()
+            }),
+            rasterization_state: Some(RasterizationState::default()),
+            multisample_state: Some(MultisampleState::default()),
+            color_blend_state: Some(ColorBlendState::with_attachment_states(
+                subpass.num_color_attachments(),
+                ColorBlendAttachmentState {
+                    blend: Some(AttachmentBlend::alpha()),
+                    ..Default::default()
+                },
+            )),
+            // depth_stencil_state: Some(DepthStencilState { depth: Some(DepthState { // TODO: ui does not need depth. Potential performance improvement?
+            //     write_enable: true,
+            //     compare_op: CompareOp::Less,
+            // }), depth_bounds: None, stencil: None, ..Default::default() }),
+            depth_stencil_state: Some(DepthStencilState {
+                depth: None,
+                depth_bounds: None,
+                stencil: None,
+                ..Default::default()
+            }),
+            //dynamic_state: [DynamicState::Viewport].into_iter().collect(),
+            subpass: Some(subpass.into()),
+            ..GraphicsPipelineCreateInfo::layout(layout_ui)
+        },
+    )
+    .unwrap();
+
+    // let pipeline_ui = GraphicsPipeline::start()
+    //     .render_pass(Subpass::from(render_pass, 0).unwrap())
+    //     .vertex_input_state(vertex_data::UIVertex::per_vertex())
+    //     .input_assembly_state(InputAssemblyState::new())
+    //     .vertex_shader(vertex_shader_ui.entry_point("main").unwrap(), ())
+    //     .viewport_state(ViewportState::viewport_fixed_scissor_irrelevant([
+    //         Viewport {
+    //             origin: [0.0, 0.0],
+    //             dimensions: [dimensions[0] as f32, dimensions[1] as f32],
+    //             depth_range: 0.0..1.0,
+    //         },
+    //     ]))
+    //     .fragment_shader(fragment_shader_ui.entry_point("main").unwrap(), ())
+    //     .color_blend_state(ColorBlendState::new(subpass.num_color_attachments()).blend_alpha())
+    //     .build(memory_allocator.device().clone())
+    //     .unwrap();
 
     (pipeline_map, pipeline_ui, framebuffers)
 }
 
-fn get_instance() -> Arc<vulkano::instance::Instance> {
+fn get_instance_and_event_loop() -> (Arc<vulkano::instance::Instance>, EventLoop<()>) {
     let library = VulkanLibrary::new().unwrap();
-    let required_extensions = vulkano_win::required_extensions(&library);
-    Instance::new(
-        library,
-        InstanceCreateInfo {
-            enabled_extensions: required_extensions,
-            enumerate_portability: true,
-            ..Default::default()
-        },
+    let event_loop = EventLoop::new();
+    let required_extensions = Surface::required_extensions(&event_loop);
+    (
+        Instance::new(
+            library,
+            InstanceCreateInfo {
+                enabled_extensions: required_extensions,
+                flags: InstanceCreateFlags::ENUMERATE_PORTABILITY,
+                ..Default::default()
+            },
+        )
+        .unwrap(),
+        event_loop,
     )
-    .unwrap()
 }
 
 fn create_buffers_map(
-    memory_allocator: &StandardMemoryAllocator,
+    memory_allocator: Arc<StandardMemoryAllocator>,
 ) -> (
     [Subbuffer<[vertex_data::MapVertex]>; 2],
     [Subbuffer<[u32]>; 2],
 ) {
     let vertex_buffers_map = [
         Buffer::from_iter(
-            memory_allocator,
+            memory_allocator.clone(),
             BufferCreateInfo {
                 usage: BufferUsage::VERTEX_BUFFER,
                 ..Default::default()
             },
             AllocationCreateInfo {
-                usage: MemoryUsage::Upload,
+                //usage: MemoryUsage::Upload,
+                memory_type_filter: MemoryTypeFilter::PREFER_DEVICE
+                    | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
                 ..Default::default()
             },
             //*events::STARTING_VERTICES,
@@ -840,13 +1113,15 @@ fn create_buffers_map(
         )
         .unwrap(),
         Buffer::from_iter(
-            memory_allocator,
+            memory_allocator.clone(),
             BufferCreateInfo {
                 usage: BufferUsage::VERTEX_BUFFER,
                 ..Default::default()
             },
             AllocationCreateInfo {
-                usage: MemoryUsage::Upload,
+                //usage: MemoryUsage::Upload,
+                memory_type_filter: MemoryTypeFilter::PREFER_DEVICE
+                    | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
                 ..Default::default()
             },
             //*events::STARTING_VERTICES,
@@ -863,13 +1138,15 @@ fn create_buffers_map(
 
     let index_buffers_map = [
         Buffer::from_iter(
-            memory_allocator,
+            memory_allocator.clone(),
             BufferCreateInfo {
                 usage: BufferUsage::INDEX_BUFFER,
                 ..Default::default()
             },
             AllocationCreateInfo {
-                usage: MemoryUsage::Upload,
+                //usage: MemoryUsage::Upload,
+                memory_type_filter: MemoryTypeFilter::PREFER_DEVICE
+                    | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
                 ..Default::default()
             },
             //*events::STARTING_INDICES,
@@ -877,13 +1154,15 @@ fn create_buffers_map(
         )
         .unwrap(),
         Buffer::from_iter(
-            memory_allocator,
+            memory_allocator.clone(),
             BufferCreateInfo {
                 usage: BufferUsage::INDEX_BUFFER,
                 ..Default::default()
             },
             AllocationCreateInfo {
-                usage: MemoryUsage::Upload,
+                //usage: MemoryUsage::Upload,
+                memory_type_filter: MemoryTypeFilter::PREFER_DEVICE
+                    | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
                 ..Default::default()
             },
             //*events::STARTING_INDICES,
@@ -896,20 +1175,22 @@ fn create_buffers_map(
 }
 
 fn create_buffers_ui(
-    memory_allocator: &StandardMemoryAllocator,
+    memory_allocator: Arc<StandardMemoryAllocator>,
 ) -> (
     [Subbuffer<[vertex_data::UIVertex]>; 2],
     [Subbuffer<[u32]>; 2],
 ) {
     let vertex_buffers_ui = [
         Buffer::from_iter(
-            memory_allocator,
+            memory_allocator.clone(),
             BufferCreateInfo {
                 usage: BufferUsage::VERTEX_BUFFER,
                 ..Default::default()
             },
             AllocationCreateInfo {
-                usage: MemoryUsage::Upload,
+                //usage: MemoryUsage::Upload,
+                memory_type_filter: MemoryTypeFilter::PREFER_DEVICE
+                    | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
                 ..Default::default()
             },
             vec![
@@ -923,13 +1204,15 @@ fn create_buffers_ui(
         )
         .unwrap(),
         Buffer::from_iter(
-            memory_allocator,
+            memory_allocator.clone(),
             BufferCreateInfo {
                 usage: BufferUsage::VERTEX_BUFFER,
                 ..Default::default()
             },
             AllocationCreateInfo {
-                usage: MemoryUsage::Upload,
+                //usage: MemoryUsage::Upload,
+                memory_type_filter: MemoryTypeFilter::PREFER_DEVICE
+                    | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
                 ..Default::default()
             },
             vec![
@@ -946,26 +1229,30 @@ fn create_buffers_ui(
 
     let index_buffers_ui = [
         Buffer::from_iter(
-            memory_allocator,
+            memory_allocator.clone(),
             BufferCreateInfo {
                 usage: BufferUsage::INDEX_BUFFER,
                 ..Default::default()
             },
             AllocationCreateInfo {
-                usage: MemoryUsage::Upload,
+                //usage: MemoryUsage::Upload,
+                memory_type_filter: MemoryTypeFilter::PREFER_DEVICE
+                    | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
                 ..Default::default()
             },
             vec![0u32; events::CHUNK_WIDTH_SQUARED as usize * 6 * 30],
         )
         .unwrap(),
         Buffer::from_iter(
-            memory_allocator,
+            memory_allocator.clone(),
             BufferCreateInfo {
                 usage: BufferUsage::INDEX_BUFFER,
                 ..Default::default()
             },
             AllocationCreateInfo {
-                usage: MemoryUsage::Upload,
+                //usage: MemoryUsage::Upload,
+                memory_type_filter: MemoryTypeFilter::PREFER_DEVICE
+                    | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
                 ..Default::default()
             },
             vec![0u32; events::CHUNK_WIDTH_SQUARED as usize * 6 * 30],
@@ -993,10 +1280,13 @@ fn update_buffers_map(
             vertex_counts_map[render_storage.frame_count as usize % 2] =
                 render_storage.vertex_count_map;
         }
-        Err(BufferError::InUseByDevice) => {
-            println!("Failed to update vertex buffer. Vertex buffer is being used by the device.")
-        }
-        Err(e) => panic!("couldn't write to the vertex buffer: {e}"),
+        Err(e) => match e {
+            HostAccessError::AccessConflict(access_conflict) => {
+                println!("Failed to update map vertex buffer. {access_conflict}");
+            }
+
+            _ => panic!("couldn't write to the vertex buffer: {e}"),
+        },
     };
 
     let index_writer = index_buffers_map[render_storage.frame_count as usize % 2].write();
@@ -1009,10 +1299,14 @@ fn update_buffers_map(
             index_counts_map[render_storage.frame_count as usize % 2] =
                 render_storage.index_count_map;
         }
-        Err(BufferError::InUseByDevice) => {
-            println!("Failed to update index buffer. Index buffer is being used by the device.")
-        }
-        Err(e) => panic!("couldn't write to the index buffer: {e}"),
+        Err(e) => {
+            match e {
+                HostAccessError::AccessConflict(access_conflict) => {
+                    println!("Failed to update map index buffer. {access_conflict}");
+                }
+                _ => panic!("couldn't write to the vertex buffer: {e}"),
+            }
+        },
     };
 }
 
@@ -1033,10 +1327,14 @@ fn update_buffers_ui(
             vertex_counts_ui[render_storage.frame_count as usize % 2] =
                 render_storage.vertex_count_ui;
         }
-        Err(BufferError::InUseByDevice) => {
-            println!("Failed to update vertex buffer. Vertex buffer is being used by the device.")
-        }
-        Err(e) => panic!("couldn't write to the vertex buffer: {e}"),
+        Err(e) => {
+            match e {
+                HostAccessError::AccessConflict(access_conflict) => {
+                    println!("Failed to update ui vertex buffer. {access_conflict}");
+                }
+                _ => panic!("couldn't write to the vertex buffer: {e}"),
+            }
+        },
     };
 
     let index_writer = index_buffers_ui[render_storage.frame_count as usize % 2].write();
@@ -1049,10 +1347,14 @@ fn update_buffers_ui(
             index_counts_ui[render_storage.frame_count as usize % 2] =
                 render_storage.index_count_ui;
         }
-        Err(BufferError::InUseByDevice) => {
-            println!("Failed to update index buffer. Index buffer is being used by the device.")
-        }
-        Err(e) => panic!("couldn't write to the index buffer: {e}"),
+        Err(e) => {
+            match e {
+                HostAccessError::AccessConflict(access_conflict) => {
+                    println!("Failed to update ui index buffer. {access_conflict}");
+                }
+                _ => panic!("couldn't write to the vertex buffer: {e}"),
+            }
+        },
     };
 }
 

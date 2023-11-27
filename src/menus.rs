@@ -838,8 +838,7 @@ pub const PERKS_AND_CURSES: MenuData = MenuData {
         }
 
         let curses_duplicates_uniform = Uniform::new(0, curses.len());
-        let curses_no_duplicates_uniform =
-            Uniform::new(0, curses_no_duplicates.len());
+        let curses_no_duplicates_uniform = Uniform::new(0, curses_no_duplicates.len());
 
         for _curse_index in 0..5 {
             if user_storage.perks_and_curses.one_time_curses_owned.len()

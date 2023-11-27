@@ -23,6 +23,6 @@ pub struct ChunkIdea2 {
     generated: bool,
 }
 
-pub fn generate_chunk() {
-    
+pub fn generate_chunk(chunk: &mut ChunkIdea1) {
+    chunk.generated = true;
 }
