@@ -1083,9 +1083,27 @@ fn get_instance_and_event_loop() -> (Arc<vulkano::instance::Instance>, EventLoop
     )
 }
 
-// fn create_buffers(memory_allocator: Arc<StandardMemoryAllocator>) -> (Subbuffer<vertex_data::MapVertex>) {
+fn create_buffers(memory_allocator: Arc<StandardMemoryAllocator>) -> (Subbuffer<[vertex_data::TestInstance]>) {
+    let instance_buffer = Buffer::from_iter(
+        memory_allocator,
+        BufferCreateInfo {
+            usage: BufferUsage::VERTEX_BUFFER,
+            ..Default::default()
+        },
+        AllocationCreateInfo {
+            memory_type_filter: MemoryTypeFilter::PREFER_DEVICE | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
+            ..Default::default()
+        },
+        [vertex_data::TestInstance {
+            position: [0.0,0.0,0.0],
+            scale: [0.0,0.0],
+            uv: [0.0, 0.0],
+        }; 3]
+    )
+    .unwrap();
 
-// }
+    (instance_buffer)
+}
 
 #[deprecated]
 fn create_buffers_map(
