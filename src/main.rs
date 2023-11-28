@@ -1083,6 +1083,11 @@ fn get_instance_and_event_loop() -> (Arc<vulkano::instance::Instance>, EventLoop
     )
 }
 
+// fn create_buffers(memory_allocator: Arc<StandardMemoryAllocator>) -> (Subbuffer<vertex_data::MapVertex>) {
+
+// }
+
+#[deprecated]
 fn create_buffers_map(
     memory_allocator: Arc<StandardMemoryAllocator>,
 ) -> (
