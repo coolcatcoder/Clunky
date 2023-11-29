@@ -75,6 +75,8 @@ mod chunks;
 
 mod perks_and_curses;
 
+mod lost_code;
+
 mod vertex_shader_map {
     vulkano_shaders::shader! {
         ty: "vertex",
@@ -357,45 +359,6 @@ fn main() {
     )
     .unwrap();
 
-    // start creating shaders
-    //let (vertex_shader_map, fragment_shader_map, vertex_shader_text, fragment_shader_text) = create_shaders(device);
-
-    // mod vertex_shader_map {
-    //     vulkano_shaders::shader! {
-    //         ty: "vertex",
-    //         path: "src/map_shaders/vertex_shader.glsl",
-    //     }
-    // }
-
-    // mod fragment_shader_map {
-    //     vulkano_shaders::shader! {
-    //         ty: "fragment",
-    //         path: "src/map_shaders/fragment_shader.glsl",
-    //     }
-    // }
-
-    //let vertex_shader_map = vertex_shader_map::load(device.clone()).unwrap();
-    //let fragment_shader_map = fragment_shader_map::load(device.clone()).unwrap();
-
-    // mod vertex_shader_ui {
-    //     vulkano_shaders::shader! {
-    //         ty: "vertex",
-    //         path: "src/ui_shaders/vertex_shader.glsl",
-    //     }
-    // }
-
-    // mod fragment_shader_ui {
-    //     vulkano_shaders::shader! {
-    //         ty: "fragment",
-    //         path: "src/ui_shaders/fragment_shader.frag",
-    //     }
-    // }
-
-    let vertex_shader_ui = vertex_shader_ui::load(device.clone()).unwrap();
-    let fragment_shader_ui = fragment_shader_ui::load(device.clone()).unwrap();
-
-    // end of creating shaders
-
     // start creating render pass
     let render_pass = vulkano::single_pass_renderpass!(
         device.clone(),
@@ -566,21 +529,21 @@ fn main() {
                 event: WindowEvent::KeyboardInput { input, .. },
                 ..
             } => {
-                events::on_keyboard_input(&mut user_storage, &mut render_storage, input);
+                (user_storage.menu.get_data().on_keyboard_input)(&mut user_storage, &mut render_storage, input);
             }
 
             Event::WindowEvent {
                 event: WindowEvent::CursorMoved { position, .. },
                 ..
             } => {
-                events::on_cursor_moved(&mut user_storage, &mut render_storage, position);
+                (user_storage.menu.get_data().on_cursor_moved)(&mut user_storage, &mut render_storage, position);
             }
 
             Event::WindowEvent {
                 event: WindowEvent::MouseInput { state, button, .. },
                 ..
             } => {
-                events::on_mouse_input(&mut user_storage, &mut render_storage, state, button);
+                (user_storage.menu.get_data().on_mouse_input)(&mut user_storage, &mut render_storage, state, button);
             }
 
             Event::RedrawEventsCleared => {
@@ -604,15 +567,10 @@ fn main() {
                 render_storage.window_size = swapchain.image_extent();
 
                 if previous_window_size != render_storage.window_size {
-                    events::on_window_resize(&mut user_storage, &mut render_storage);
+                    (user_storage.menu.get_data().on_window_resize)(&mut user_storage, &mut render_storage);
                 }
 
-                events::update(
-                    &mut user_storage,
-                    &mut render_storage,
-                    delta_time,
-                    average_fps,
-                ); // call update once per frame
+                (user_storage.menu.get_data().update)(&mut user_storage, &mut render_storage, delta_time, average_fps); // call update once per frame
 
                 update_buffers(
                     &mut render_storage,
@@ -1192,10 +1150,13 @@ fn create_buffers(
                 | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE, // TODO: work out what memorytypefilters we need for this
             ..Default::default()
         },
-        vec![vertex_data::TestVertex {
-            position: [0.0, 0.0, 0.0],
-            uv: [0.0, 0.0],
-        }; events::MAX_VERTICES],
+        vec![
+            vertex_data::TestVertex {
+                position: [0.0, 0.0, 0.0],
+                uv: [0.0, 0.0],
+            };
+            events::MAX_VERTICES
+        ],
     )
     .unwrap();
 
@@ -1225,11 +1186,14 @@ fn create_buffers(
                 | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
             ..Default::default()
         },
-        vec![vertex_data::TestInstance {
-            position: [0.0, 0.0, 0.0],
-            scale: [0.0, 0.0],
-            uv: [0.0, 0.0],
-        }; events::MAX_INSTANCES],
+        vec![
+            vertex_data::TestInstance {
+                position: [0.0, 0.0, 0.0],
+                scale: [0.0, 0.0],
+                uv: [0.0, 0.0],
+            };
+            events::MAX_INSTANCES
+        ],
     )
     .unwrap();
 

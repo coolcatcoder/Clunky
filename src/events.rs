@@ -3,18 +3,13 @@ use noise::OpenSimplex;
 use rand::distributions::{Distribution, Uniform};
 use rand::rngs::ThreadRng;
 use rand::thread_rng;
-//use winit::event::KeyEvent;
 use std::ops::{Add, Div, Mul, Rem};
 use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::Sender;
 use std::thread;
 use std::time::Instant;
-use winit::dpi::PhysicalPosition;
 use winit::event::ElementState;
-use winit::event::KeyboardInput;
-//use winit::event::WindowEvent::KeyboardInput;
-use winit::event::MouseButton;
 
 use crate::biomes;
 use crate::collision;
@@ -104,7 +99,7 @@ pub fn start(render_storage: &mut RenderStorage) -> UserStorage {
         fixed_time_passed: 0.0,
         multithread_rendering: false,
         chunk_generation: 0,
-        menu: menus::Menu::TitleScreen,
+        menu: menus::STARTING_MENU,
         screen_texts: vec![],
         screen_buttons: vec![],
         screen_toggleable_buttons: vec![],
@@ -123,34 +118,9 @@ pub fn start(render_storage: &mut RenderStorage) -> UserStorage {
 
     assert!(check == CHUNK_WIDTH_SQUARED as usize);
 
-    (menus::TITLE_SCREEN.start)(&mut user_storage, render_storage);
+    (menus::STARTING_MENU.get_data().start)(&mut user_storage, render_storage);
 
     user_storage
-}
-
-pub fn update(
-    user_storage: &mut UserStorage,
-    render_storage: &mut RenderStorage,
-    delta_time: f32,
-    average_fps: f32,
-) {
-    match user_storage.menu {
-        menus::Menu::TitleScreen => {
-            (menus::TITLE_SCREEN.update)(user_storage, render_storage, delta_time, average_fps)
-        }
-        menus::Menu::Alive => {
-            (menus::ALIVE.update)(user_storage, render_storage, delta_time, average_fps)
-        }
-        menus::Menu::Paused => {
-            (menus::PAUSED.update)(user_storage, render_storage, delta_time, average_fps)
-        }
-        menus::Menu::Dead => {
-            (menus::DEAD.update)(user_storage, render_storage, delta_time, average_fps)
-        }
-        menus::Menu::PerksAndCurses => {
-            (menus::PERKS_AND_CURSES.update)(user_storage, render_storage, delta_time, average_fps)
-        } //_ => {}
-    }
 }
 
 pub fn fixed_update(user_storage: &mut UserStorage, render_storage: &mut RenderStorage) {
@@ -247,33 +217,6 @@ pub fn fixed_update(user_storage: &mut UserStorage, render_storage: &mut RenderS
     }
 }
 
-pub fn on_keyboard_input(
-    user_storage: &mut UserStorage,
-    render_storage: &mut RenderStorage,
-    input: KeyboardInput,
-) {
-    match user_storage.menu {
-        menus::Menu::TitleScreen => {
-            (menus::TITLE_SCREEN.on_keyboard_input)(user_storage, render_storage, input)
-        }
-        menus::Menu::Alive => (menus::ALIVE.on_keyboard_input)(user_storage, render_storage, input),
-        menus::Menu::Paused => {
-            (menus::PAUSED.on_keyboard_input)(user_storage, render_storage, input)
-        }
-        menus::Menu::Dead => (menus::DEAD.on_keyboard_input)(user_storage, render_storage, input),
-        menus::Menu::PerksAndCurses => {
-            (menus::PERKS_AND_CURSES.on_keyboard_input)(user_storage, render_storage, input)
-        } //_ => {}
-    }
-}
-
-pub fn is_pressed(state: ElementState) -> bool {
-    match state {
-        ElementState::Pressed => true,
-        ElementState::Released => false,
-    }
-}
-
 #[derive(Debug, Copy, Clone)]
 pub struct Detail {
     pub scale: u32, // This is unintuitive. Basically how many of these blocks become 1 block.
@@ -281,7 +224,7 @@ pub struct Detail {
 }
 
 pub struct UserStorage {
-    // This is for the user's stuff. The event loop should not touch this.
+    // This is for the user's stuff. The event loop should not touch this. Actually it will, but only for the menu. Should the menu be part of the render system then?
     pub wasd_held: (bool, bool, bool, bool),
     pub zoom_held: (bool, bool),
     pub show_debug: bool,
@@ -1280,10 +1223,6 @@ pub fn get_safe_position(user_storage: &mut UserStorage) -> (u32, u32) {
     safe_position
 }
 
-fn wrap(value: f32, start: f32, limit: f32) -> f32 {
-    start + (value - start) % (limit - start)
-}
-
 pub fn rerange_from_neg_1_pos_1_range(desired_range: (f32, f32), value: f32) -> f32 {
     let slope = (desired_range.1 - desired_range.0) / (1.0 - -1.0);
     desired_range.0 + slope * (value - -1.0)
@@ -1292,55 +1231,4 @@ pub fn rerange_from_neg_1_pos_1_range(desired_range: (f32, f32), value: f32) -> 
 pub fn rerange(old_range: (f32, f32), desired_range: (f32, f32), value: f32) -> f32 {
     (((value - old_range.0) * (desired_range.1 - desired_range.0)) / (old_range.1 - old_range.0))
         + desired_range.0
-}
-
-pub fn on_window_resize(user_storage: &mut UserStorage, render_storage: &mut RenderStorage) {
-    match user_storage.menu {
-        menus::Menu::TitleScreen => {
-            (menus::TITLE_SCREEN.on_window_resize)(user_storage, render_storage)
-        }
-        menus::Menu::Alive => (menus::ALIVE.on_window_resize)(user_storage, render_storage),
-        menus::Menu::Paused => (menus::PAUSED.on_window_resize)(user_storage, render_storage),
-        menus::Menu::Dead => (menus::DEAD.on_window_resize)(user_storage, render_storage),
-        menus::Menu::PerksAndCurses => {
-            (menus::PERKS_AND_CURSES.on_window_resize)(user_storage, render_storage)
-        } //_ => {}
-    }
-}
-
-pub fn on_cursor_moved(
-    user_storage: &mut UserStorage,
-    render_storage: &mut RenderStorage,
-    position: PhysicalPosition<f64>,
-) {
-    match user_storage.menu {
-        menus::Menu::TitleScreen => {
-            (menus::TITLE_SCREEN.on_cursor_moved)(user_storage, render_storage, position)
-        }
-        menus::Menu::Dead => (menus::DEAD.on_cursor_moved)(user_storage, render_storage, position),
-        menus::Menu::PerksAndCurses => {
-            (menus::PERKS_AND_CURSES.on_cursor_moved)(user_storage, render_storage, position)
-        }
-        _ => {}
-    }
-}
-
-pub fn on_mouse_input(
-    user_storage: &mut UserStorage,
-    render_storage: &mut RenderStorage,
-    state: ElementState,
-    button: MouseButton,
-) {
-    match user_storage.menu {
-        menus::Menu::TitleScreen => {
-            (menus::TITLE_SCREEN.on_mouse_input)(user_storage, render_storage, state, button)
-        }
-        menus::Menu::Dead => {
-            (menus::DEAD.on_mouse_input)(user_storage, render_storage, state, button)
-        }
-        menus::Menu::PerksAndCurses => {
-            (menus::PERKS_AND_CURSES.on_mouse_input)(user_storage, render_storage, state, button)
-        }
-        _ => {}
-    }
 }

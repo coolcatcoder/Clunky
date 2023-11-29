@@ -14,6 +14,9 @@ use crate::perks_and_curses;
 use crate::ui;
 use crate::vertex_data;
 use crate::{biomes, collision};
+use crate::lost_code;
+
+pub const STARTING_MENU: Menu = Menu::TitleScreen;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum Menu {
@@ -23,6 +26,20 @@ pub enum Menu {
     Paused,
     Dead,
     PerksAndCurses,
+    Test,
+}
+
+impl Menu {
+    pub const fn get_data(&self) -> MenuData {
+        match *self {
+            Menu::TitleScreen => TITLE_SCREEN,
+            Menu::Alive => ALIVE,
+            Menu::Paused => PAUSED,
+            Menu::Dead => DEAD,
+            Menu::PerksAndCurses => PERKS_AND_CURSES,
+            Menu::Test => TEST,
+        }
+    }
 }
 
 pub struct MenuData {
@@ -58,7 +75,7 @@ pub const TITLE_SCREEN: MenuData = MenuData {
         if let Some(key_code) = input.virtual_keycode {
             match key_code {
                 VirtualKeyCode::Return => {
-                    if events::is_pressed(input.state) {
+                    if lost_code::is_pressed(input.state) {
                         user_storage.menu = Menu::Alive;
                         (ALIVE.start)(user_storage, render_storage);
                     }
@@ -426,17 +443,17 @@ pub const ALIVE: MenuData = MenuData {
                         input: KeyboardInput| {
         if let Some(key_code) = input.virtual_keycode {
             match key_code {
-                VirtualKeyCode::W => user_storage.wasd_held.0 = events::is_pressed(input.state),
-                VirtualKeyCode::A => user_storage.wasd_held.1 = events::is_pressed(input.state),
-                VirtualKeyCode::S => user_storage.wasd_held.2 = events::is_pressed(input.state),
-                VirtualKeyCode::D => user_storage.wasd_held.3 = events::is_pressed(input.state),
+                VirtualKeyCode::W => user_storage.wasd_held.0 = lost_code::is_pressed(input.state),
+                VirtualKeyCode::A => user_storage.wasd_held.1 = lost_code::is_pressed(input.state),
+                VirtualKeyCode::S => user_storage.wasd_held.2 = lost_code::is_pressed(input.state),
+                VirtualKeyCode::D => user_storage.wasd_held.3 = lost_code::is_pressed(input.state),
                 VirtualKeyCode::F => {
-                    if events::is_pressed(input.state) {
+                    if lost_code::is_pressed(input.state) {
                         user_storage.player.sprinting = !user_storage.player.sprinting;
                     }
                 }
                 VirtualKeyCode::R => {
-                    if events::is_pressed(input.state) {
+                    if lost_code::is_pressed(input.state) {
                         match user_storage.chunk_generation {
                             0 => {
                                 events::generate_chunk_old(
@@ -471,38 +488,38 @@ pub const ALIVE: MenuData = MenuData {
                     }
                 }
                 VirtualKeyCode::E => {
-                    if events::is_pressed(input.state) {
+                    if lost_code::is_pressed(input.state) {
                         user_storage.player.collision_debug = !user_storage.player.collision_debug;
                     }
                 }
-                VirtualKeyCode::Up => user_storage.zoom_held.0 = events::is_pressed(input.state),
-                VirtualKeyCode::Down => user_storage.zoom_held.1 = events::is_pressed(input.state),
+                VirtualKeyCode::Up => user_storage.zoom_held.0 = lost_code::is_pressed(input.state),
+                VirtualKeyCode::Down => user_storage.zoom_held.1 = lost_code::is_pressed(input.state),
 
                 VirtualKeyCode::V => {
-                    if events::is_pressed(input.state) {
+                    if lost_code::is_pressed(input.state) {
                         user_storage.show_debug = !user_storage.show_debug;
                         (ALIVE.on_window_resize)(user_storage, render_storage);
                     }
                 }
 
                 VirtualKeyCode::G => {
-                    if events::is_pressed(input.state) {
+                    if lost_code::is_pressed(input.state) {
                         user_storage.multithread_rendering = !user_storage.multithread_rendering;
                     }
                 }
 
                 VirtualKeyCode::Minus => {
-                    if events::is_pressed(input.state) {
+                    if lost_code::is_pressed(input.state) {
                         user_storage.chunk_generation -= 1;
                     }
                 }
                 VirtualKeyCode::Equals => {
-                    if events::is_pressed(input.state) {
+                    if lost_code::is_pressed(input.state) {
                         user_storage.chunk_generation += 1;
                     }
                 }
                 VirtualKeyCode::Escape => {
-                    if events::is_pressed(input.state) {
+                    if lost_code::is_pressed(input.state) {
                         user_storage.menu = Menu::Paused;
                         (PAUSED.on_window_resize)(user_storage, render_storage);
                     }
@@ -612,7 +629,7 @@ pub const PAUSED: MenuData = MenuData {
         if let Some(key_code) = input.virtual_keycode {
             match key_code {
                 VirtualKeyCode::Escape => {
-                    if events::is_pressed(input.state) {
+                    if lost_code::is_pressed(input.state) {
                         user_storage.menu = Menu::Alive;
                         user_storage.fixed_time_passed =
                             render_storage.starting_time.elapsed().as_secs_f32();
@@ -664,7 +681,7 @@ pub const DEAD: MenuData = MenuData {
         if let Some(key_code) = input.virtual_keycode {
             match key_code {
                 VirtualKeyCode::Return => {
-                    if events::is_pressed(input.state) {
+                    if lost_code::is_pressed(input.state) {
                         user_storage.menu = Menu::Alive;
                         (PERKS_AND_CURSES.start)(user_storage, render_storage);
                     }
@@ -899,13 +916,13 @@ pub const PERKS_AND_CURSES: MenuData = MenuData {
         if let Some(key_code) = input.virtual_keycode {
             match key_code {
                 VirtualKeyCode::Return => {
-                    if events::is_pressed(input.state) {
+                    if lost_code::is_pressed(input.state) {
                         user_storage.menu = Menu::Alive;
                         (ALIVE.start)(user_storage, render_storage);
                     }
                 }
                 VirtualKeyCode::Slash => {
-                    if events::is_pressed(input.state) {
+                    if lost_code::is_pressed(input.state) {
                         println!("{:?}", user_storage.perks_and_curses);
                     }
                 }
@@ -1326,4 +1343,14 @@ pub const PERKS_AND_CURSES: MenuData = MenuData {
             ui::process_hovered_screen_toggleable_buttons(user_storage, render_storage);
         }
     },
+};
+
+pub const TEST: MenuData = MenuData {
+    start: |_user_storage, _render_storage| {},
+    update: |_user_storage, _render_storage, _delta_time, _average_fps| {},
+    end: |_user_storage, _render_storage| {},
+    on_keyboard_input: |_user_storage, _render_storage, _input| {},
+    on_window_resize: |_user_storage, _render_storage| {},
+    on_cursor_moved: |_user_storage, _render_storage, _position| {},
+    on_mouse_input: |_user_storage, _render_storage, _state, _button| {},
 };
