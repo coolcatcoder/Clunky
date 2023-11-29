@@ -1,4 +1,4 @@
-use std::{io::Cursor, sync::Arc, time::Instant};
+use std::{sync::Arc, time::Instant};
 use vulkano::{
     buffer::{
         allocator::{SubbufferAllocator, SubbufferAllocatorCreateInfo},
@@ -6,15 +6,14 @@ use vulkano::{
     },
     command_buffer::{
         allocator::StandardCommandBufferAllocator, AutoCommandBufferBuilder, CommandBufferUsage,
-        CopyBufferToImageInfo, RenderPassBeginInfo, SubpassContents,
+        CopyBufferToImageInfo, RenderPassBeginInfo,
     },
     descriptor_set::{
-        allocator::{StandardDescriptorSetAllocator, StandardDescriptorSetAllocatorCreateInfo},
-        PersistentDescriptorSet, WriteDescriptorSet,
+        allocator::StandardDescriptorSetAllocator, PersistentDescriptorSet, WriteDescriptorSet,
     },
     device::{
-        physical::PhysicalDeviceType, Device, DeviceCreateInfo, DeviceExtensions, DeviceOwned,
-        QueueCreateInfo, QueueFlags,
+        physical::PhysicalDeviceType, Device, DeviceCreateInfo, DeviceExtensions, QueueCreateInfo,
+        QueueFlags,
     },
     image::sampler::{Filter, SamplerAddressMode},
     image::{view::ImageView, ImageCreateInfo, ImageType, ImageUsage},
@@ -32,15 +31,14 @@ use vulkano::{
             GraphicsPipelineCreateInfo,
         },
         layout::PipelineDescriptorSetLayoutCreateInfo,
-        DynamicState, GraphicsPipeline, Pipeline, PipelineBindPoint, PipelineLayout,
+        GraphicsPipeline, Pipeline, PipelineBindPoint, PipelineLayout,
         PipelineShaderStageCreateInfo,
     },
     render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass, Subpass},
-    shader::ShaderModule,
     swapchain::{
         acquire_next_image, Surface, Swapchain, SwapchainCreateInfo, SwapchainPresentInfo,
     },
-    sync::{self, AccessConflict, GpuFuture, HostAccessError},
+    sync::{self, GpuFuture, HostAccessError},
     DeviceSize, Validated, VulkanError, VulkanLibrary,
 };
 use winit::{
@@ -102,6 +100,20 @@ mod fragment_shader_ui {
     vulkano_shaders::shader! {
         ty: "fragment",
         path: "src/ui_shaders/fragment_shader.frag",
+    }
+}
+
+mod vertex_shader_test {
+    vulkano_shaders::shader! {
+        ty: "vertex",
+        path: "src/test_shaders/vertex_shader.glsl",
+    }
+}
+
+mod fragment_shader_test {
+    vulkano_shaders::shader! {
+        ty: "fragment",
+        path: "src/test_shaders/fragment_shader.glsl",
     }
 }
 
@@ -209,6 +221,9 @@ fn main() {
     let (vertex_buffers_map, index_buffers_map) = create_buffers_map(memory_allocator.clone());
 
     let (vertex_buffers_ui, index_buffers_ui) = create_buffers_ui(memory_allocator.clone());
+
+    let (vertex_buffer_test, index_buffer_test, instance_buffer_test) =
+        create_buffers(memory_allocator.clone());
 
     let uniform_buffer_main = SubbufferAllocator::new(
         memory_allocator.clone(),
@@ -406,16 +421,13 @@ fn main() {
     .unwrap();
     // end of creating render pass
 
-    let (mut pipeline_map, mut pipeline_ui, mut framebuffers) = window_size_dependent_setup(
-        memory_allocator.clone(),
-        //&vertex_shader_map,
-        //&fragment_shader_map,
-        //&vertex_shader_ui,
-        //&fragment_shader_ui,
-        &images,
-        render_pass.clone(),
-        device.clone(),
-    );
+    let (mut pipeline_map, mut pipeline_ui, mut pipeline_test, mut framebuffers) =
+        window_size_dependent_setup(
+            memory_allocator.clone(),
+            &images,
+            render_pass.clone(),
+            device.clone(),
+        );
 
     let descriptor_set_allocator =
         StandardDescriptorSetAllocator::new(device.clone(), Default::default());
@@ -472,6 +484,10 @@ fn main() {
     let mut vertex_counts_ui = [0u32, 0u32];
     let mut index_counts_ui = [0u32, 0u32];
 
+    let mut vertex_count_test = 0u32;
+    let mut index_count_test = 0u32;
+    let mut instance_count_test = 0u32;
+
     let mut render_storage = events::RenderStorage {
         vertices_map: vec![
             vertex_data::MapVertex {
@@ -481,7 +497,7 @@ fn main() {
             vertex_buffers_map[0].len() as usize
         ],
         vertex_count_map: 0,
-        indices_map: vec![0u32; index_buffers_map[0].len() as usize],
+        indices_map: vec![0; index_buffers_map[0].len() as usize],
         index_count_map: 0,
         vertices_ui: vec![
             vertex_data::UIVertex {
@@ -492,8 +508,30 @@ fn main() {
             vertex_buffers_ui[0].len() as usize
         ],
         vertex_count_ui: 0,
-        indices_ui: vec![0u32; index_buffers_ui[0].len() as usize],
+        indices_ui: vec![0; index_buffers_ui[0].len() as usize],
         index_count_ui: 0,
+        vertices_test: vec![
+            vertex_data::TestVertex {
+                position: [0.0, 0.0, 0.0],
+                uv: [0.0, 0.0],
+            };
+            vertex_buffer_test.len() as usize
+        ],
+        vertex_count_test: 0,
+        update_vertices_test: false,
+        indices_test: vec![0; index_buffer_test.len() as usize],
+        index_count_test: 0,
+        update_indices_test: false,
+        instances_test: vec![
+            vertex_data::TestInstance {
+                position: [0.0, 0.0, 0.0],
+                scale: [0.0, 0.0],
+                uv: [0.0, 0.0],
+            };
+            instance_buffer_test.len() as usize
+        ],
+        instance_count_test: 0,
+        update_instances_test: false,
         aspect_ratio: 0.0,
         camera: events::Camera {
             scale: 1.0,
@@ -576,6 +614,16 @@ fn main() {
                     average_fps,
                 ); // call update once per frame
 
+                update_buffers(
+                    &mut render_storage,
+                    &vertex_buffer_test,
+                    &mut vertex_count_test,
+                    &index_buffer_test,
+                    &mut index_count_test,
+                    &instance_buffer_test,
+                    &mut instance_count_test,
+                );
+
                 update_buffers_map(
                     &mut render_storage,
                     &vertex_buffers_map,
@@ -603,13 +651,9 @@ fn main() {
 
                     swapchain = new_swapchain;
 
-                    let (new_pipeline_map, new_pipeline_ui, new_framebuffers) =
+                    let (new_pipeline_map, new_pipeline_ui, new_pipeline_test, new_framebuffers) =
                         window_size_dependent_setup(
                             memory_allocator.clone(),
-                            //&vertex_shader_map,
-                            //&fragment_shader_map,
-                            //&vertex_shader_ui,
-                            //&fragment_shader_ui,
                             &new_images,
                             render_pass.clone(),
                             device.clone(),
@@ -617,6 +661,7 @@ fn main() {
 
                     pipeline_map = new_pipeline_map;
                     pipeline_ui = new_pipeline_ui;
+                    pipeline_test = new_pipeline_test;
                     framebuffers = new_framebuffers;
 
                     recreate_swapchain = false;
@@ -717,13 +762,13 @@ fn main() {
                         0,
                     )
                     .unwrap()
-                    .bind_pipeline_graphics(pipeline_ui.clone())
-                    .unwrap() // start of text pipeline
+                    .bind_pipeline_graphics(pipeline_ui.clone()) // start of ui pipeline
+                    .unwrap()
                     .bind_descriptor_sets(
                         PipelineBindPoint::Graphics,
                         pipeline_ui.layout().clone(),
                         0,
-                        vec![set_main, set_sprites_text.clone()],
+                        vec![set_main.clone(), set_sprites_text.clone()],
                     )
                     .unwrap()
                     .bind_vertex_buffers(
@@ -742,6 +787,24 @@ fn main() {
                         0,
                         0,
                     )
+                    .unwrap()
+                    .bind_pipeline_graphics(pipeline_test.clone()) // start of test pipeline
+                    .unwrap()
+                    .bind_descriptor_sets(
+                        PipelineBindPoint::Graphics,
+                        pipeline_test.layout().clone(),
+                        0,
+                        vec![set_main, set_sprites_map.clone()], // TODO: set these correctly
+                    )
+                    .unwrap()
+                    .bind_vertex_buffers(
+                        0,
+                        (vertex_buffer_test.clone(), instance_buffer_test.clone()),
+                    )
+                    .unwrap()
+                    .bind_index_buffer(index_buffer_test.clone())
+                    .unwrap()
+                    .draw_indexed(index_count_test, instance_count_test, 0, 0, 0)
                     .unwrap()
                     .end_render_pass(Default::default())
                     .unwrap();
@@ -812,6 +875,7 @@ fn window_size_dependent_setup(
     render_pass: Arc<RenderPass>,
     device: Arc<Device>,
 ) -> (
+    Arc<GraphicsPipeline>,
     Arc<GraphicsPipeline>,
     Arc<GraphicsPipeline>,
     Vec<Arc<Framebuffer>>,
@@ -896,6 +960,24 @@ fn window_size_dependent_setup(
         PipelineShaderStageCreateInfo::new(fragment_shader_entrance_ui),
     ];
 
+    let vertex_shader_entrance_test = vertex_shader_test::load(device.clone())
+        .unwrap()
+        .entry_point("main")
+        .unwrap();
+    let fragment_shader_entrance_test = fragment_shader_test::load(device.clone())
+        .unwrap()
+        .entry_point("main")
+        .unwrap();
+
+    let test_vertex_input_state = vertex_data::TestVertex::per_vertex()
+        .definition(&vertex_shader_entrance_test.info().input_interface)
+        .unwrap();
+
+    let stages_test = [
+        PipelineShaderStageCreateInfo::new(vertex_shader_entrance_test),
+        PipelineShaderStageCreateInfo::new(fragment_shader_entrance_test),
+    ];
+
     let layout_map = PipelineLayout::new(
         device.clone(),
         PipelineDescriptorSetLayoutCreateInfo::from_stages(&stages_map)
@@ -907,6 +989,14 @@ fn window_size_dependent_setup(
     let layout_ui = PipelineLayout::new(
         device.clone(),
         PipelineDescriptorSetLayoutCreateInfo::from_stages(&stages_ui)
+            .into_pipeline_layout_create_info(device.clone())
+            .unwrap(),
+    )
+    .unwrap();
+
+    let layout_test = PipelineLayout::new(
+        device.clone(),
+        PipelineDescriptorSetLayoutCreateInfo::from_stages(&stages_test)
             .into_pipeline_layout_create_info(device.clone())
             .unwrap(),
     )
@@ -961,38 +1051,6 @@ fn window_size_dependent_setup(
     )
     .unwrap();
 
-    // let pipeline_map = GraphicsPipeline::start()
-    //     .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
-    //     .vertex_input_state(vertex_data::MapVertex::per_vertex())
-    //     .input_assembly_state(InputAssemblyState::new())
-    //     .vertex_shader(vertex_shader_map.entry_point("main").unwrap(), ())
-    //     .viewport_state(ViewportState::viewport_fixed_scissor_irrelevant([
-    //         Viewport {
-    //             origin: [0.0, 0.0],
-    //             dimensions: [dimensions[0] as f32, dimensions[1] as f32],
-    //             depth_range: 0.0..1.0,
-    //         },
-    //     ]))
-    //     .fragment_shader(fragment_shader_map.entry_point("main").unwrap(), ())
-    //     //.depth_stencil_simple_depth() // TODO: mess around with
-    //     //.depth_write(true)
-    //     .depth_stencil_state(DepthStencilState {
-    //         depth: Some(DepthState {
-    //             enable_dynamic: false,
-    //             write_enable: StateMode::<bool>::Fixed(true),
-    //             compare_op: StateMode::<CompareOp>::Fixed(CompareOp::Less),
-    //         }),
-    //         depth_bounds: None,
-    //         // depth_bounds: Some(DepthBoundsState {
-    //         //     enable_dynamic: false,
-    //         //     bounds: StateMode::<RangeInclusive<f32>>::Fixed(0.0..=1.0),
-    //         // }),
-    //         stencil: None,
-    //     })
-    //     .color_blend_state(ColorBlendState::new(subpass.num_color_attachments()).blend_alpha())
-    //     .build(memory_allocator.device().clone())
-    //     .unwrap();
-
     let subpass = Subpass::from(render_pass.clone(), 0).unwrap();
 
     let pipeline_ui = GraphicsPipeline::new(
@@ -1045,24 +1103,57 @@ fn window_size_dependent_setup(
     )
     .unwrap();
 
-    // let pipeline_ui = GraphicsPipeline::start()
-    //     .render_pass(Subpass::from(render_pass, 0).unwrap())
-    //     .vertex_input_state(vertex_data::UIVertex::per_vertex())
-    //     .input_assembly_state(InputAssemblyState::new())
-    //     .vertex_shader(vertex_shader_ui.entry_point("main").unwrap(), ())
-    //     .viewport_state(ViewportState::viewport_fixed_scissor_irrelevant([
-    //         Viewport {
-    //             origin: [0.0, 0.0],
-    //             dimensions: [dimensions[0] as f32, dimensions[1] as f32],
-    //             depth_range: 0.0..1.0,
-    //         },
-    //     ]))
-    //     .fragment_shader(fragment_shader_ui.entry_point("main").unwrap(), ())
-    //     .color_blend_state(ColorBlendState::new(subpass.num_color_attachments()).blend_alpha())
-    //     .build(memory_allocator.device().clone())
-    //     .unwrap();
+    let subpass = Subpass::from(render_pass.clone(), 0).unwrap();
 
-    (pipeline_map, pipeline_ui, framebuffers)
+    let pipeline_test = GraphicsPipeline::new(
+        device,
+        None,
+        GraphicsPipelineCreateInfo {
+            stages: stages_test.into_iter().collect(),
+            vertex_input_state: Some(test_vertex_input_state),
+            input_assembly_state: Some(InputAssemblyState {
+                topology: PrimitiveTopology::TriangleStrip, // TODO: work out how this will affect intances
+                ..Default::default()
+            }),
+            viewport_state: Some(ViewportState {
+                viewports: [Viewport {
+                    offset: [0.0, 0.0],
+                    extent: [extent[0] as f32, extent[1] as f32],
+                    depth_range: 0.0f32..=1.0,
+                }]
+                .into(),
+                scissors: [Scissor {
+                    offset: [0, 0],
+                    extent: [extent[0], extent[1]],
+                }]
+                .into(),
+                ..Default::default()
+            }),
+            rasterization_state: Some(RasterizationState::default()),
+            multisample_state: Some(MultisampleState::default()),
+            color_blend_state: Some(ColorBlendState::with_attachment_states(
+                subpass.num_color_attachments(),
+                ColorBlendAttachmentState {
+                    blend: Some(AttachmentBlend::alpha()),
+                    ..Default::default()
+                },
+            )),
+            depth_stencil_state: Some(DepthStencilState {
+                depth: Some(DepthState {
+                    write_enable: true,
+                    compare_op: CompareOp::Less,
+                }),
+                depth_bounds: None,
+                stencil: None,
+                ..Default::default()
+            }),
+            subpass: Some(subpass.into()),
+            ..GraphicsPipelineCreateInfo::layout(layout_test)
+        },
+    )
+    .unwrap();
+
+    (pipeline_map, pipeline_ui, pipeline_test, framebuffers)
 }
 
 fn get_instance_and_event_loop() -> (Arc<vulkano::instance::Instance>, EventLoop<()>) {
@@ -1083,7 +1174,46 @@ fn get_instance_and_event_loop() -> (Arc<vulkano::instance::Instance>, EventLoop
     )
 }
 
-fn create_buffers(memory_allocator: Arc<StandardMemoryAllocator>) -> (Subbuffer<[vertex_data::TestInstance]>) {
+fn create_buffers(
+    memory_allocator: Arc<StandardMemoryAllocator>,
+) -> (
+    Subbuffer<[vertex_data::TestVertex]>,
+    Subbuffer<[u32]>,
+    Subbuffer<[vertex_data::TestInstance]>,
+) {
+    let vertex_buffer = Buffer::from_iter(
+        memory_allocator.clone(),
+        BufferCreateInfo {
+            usage: BufferUsage::VERTEX_BUFFER,
+            ..Default::default()
+        },
+        AllocationCreateInfo {
+            memory_type_filter: MemoryTypeFilter::PREFER_DEVICE
+                | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE, // TODO: work out what memorytypefilters we need for this
+            ..Default::default()
+        },
+        vec![vertex_data::TestVertex {
+            position: [0.0, 0.0, 0.0],
+            uv: [0.0, 0.0],
+        }; events::MAX_VERTICES],
+    )
+    .unwrap();
+
+    let index_buffer = Buffer::from_iter(
+        memory_allocator.clone(),
+        BufferCreateInfo {
+            usage: BufferUsage::INDEX_BUFFER,
+            ..Default::default()
+        },
+        AllocationCreateInfo {
+            memory_type_filter: MemoryTypeFilter::PREFER_DEVICE
+                | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE, // TODO: work out what memorytypefilters we need for this
+            ..Default::default()
+        },
+        vec![0u32; events::MAX_INDICES],
+    )
+    .unwrap();
+
     let instance_buffer = Buffer::from_iter(
         memory_allocator,
         BufferCreateInfo {
@@ -1091,18 +1221,19 @@ fn create_buffers(memory_allocator: Arc<StandardMemoryAllocator>) -> (Subbuffer<
             ..Default::default()
         },
         AllocationCreateInfo {
-            memory_type_filter: MemoryTypeFilter::PREFER_DEVICE | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
+            memory_type_filter: MemoryTypeFilter::PREFER_DEVICE
+                | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
             ..Default::default()
         },
-        [vertex_data::TestInstance {
-            position: [0.0,0.0,0.0],
-            scale: [0.0,0.0],
+        vec![vertex_data::TestInstance {
+            position: [0.0, 0.0, 0.0],
+            scale: [0.0, 0.0],
             uv: [0.0, 0.0],
-        }; 3]
+        }; events::MAX_INSTANCES],
     )
     .unwrap();
 
-    (instance_buffer)
+    (vertex_buffer, index_buffer, instance_buffer)
 }
 
 #[deprecated]
@@ -1286,6 +1417,75 @@ fn create_buffers_ui(
     (vertex_buffers_ui, index_buffers_ui)
 }
 
+fn update_buffers(
+    render_storage: &mut events::RenderStorage,
+    vertex_buffer_test: &Subbuffer<[vertex_data::TestVertex]>,
+    vertex_count_test: &mut u32,
+    index_buffer_test: &Subbuffer<[u32]>,
+    index_count_test: &mut u32,
+    instance_buffer_test: &Subbuffer<[vertex_data::TestInstance]>,
+    instance_count_test: &mut u32,
+) {
+    if render_storage.update_vertices_test {
+        let vertex_writer_test = vertex_buffer_test.write();
+
+        match vertex_writer_test {
+            Ok(mut writer) => {
+                writer[0..render_storage.vertex_count_test as usize].copy_from_slice(
+                    &render_storage.vertices_test[0..render_storage.vertex_count_test as usize],
+                );
+                *vertex_count_test = render_storage.vertex_count_test;
+            }
+            Err(e) => match e {
+                HostAccessError::AccessConflict(access_conflict) => {
+                    println!("Failed to update test vertex buffer. {access_conflict}");
+                }
+
+                _ => panic!("couldn't write to the test vertex buffer: {e}"),
+            },
+        };
+    }
+
+    if render_storage.update_indices_test {
+        let index_writer = index_buffer_test.write();
+
+        match index_writer {
+            Ok(mut writer) => {
+                writer[0..render_storage.index_count_test as usize].copy_from_slice(
+                    &render_storage.indices_test[0..render_storage.index_count_test as usize],
+                );
+                *index_count_test = render_storage.index_count_test;
+            }
+            Err(e) => match e {
+                HostAccessError::AccessConflict(access_conflict) => {
+                    println!("Failed to update test index buffer. {access_conflict}");
+                }
+                _ => panic!("couldn't write to the test index buffer: {e}"),
+            },
+        };
+    }
+
+    if render_storage.update_instances_test {
+        let instance_writer = instance_buffer_test.write();
+
+        match instance_writer {
+            Ok(mut writer) => {
+                writer[0..render_storage.instance_count_test as usize].copy_from_slice(
+                    &render_storage.instances_test[0..render_storage.instance_count_test as usize],
+                );
+                *instance_count_test = render_storage.instance_count_test;
+            }
+            Err(e) => match e {
+                HostAccessError::AccessConflict(access_conflict) => {
+                    println!("Failed to update test instance buffer. {access_conflict}");
+                }
+                _ => panic!("couldn't write to the test instance buffer: {e}"),
+            },
+        };
+    }
+}
+
+#[deprecated]
 fn update_buffers_map(
     render_storage: &mut events::RenderStorage,
     vertex_buffers_map: &[Subbuffer<[vertex_data::MapVertex]>; 2],
@@ -1322,13 +1522,11 @@ fn update_buffers_map(
             index_counts_map[render_storage.frame_count as usize % 2] =
                 render_storage.index_count_map;
         }
-        Err(e) => {
-            match e {
-                HostAccessError::AccessConflict(access_conflict) => {
-                    println!("Failed to update map index buffer. {access_conflict}");
-                }
-                _ => panic!("couldn't write to the vertex buffer: {e}"),
+        Err(e) => match e {
+            HostAccessError::AccessConflict(access_conflict) => {
+                println!("Failed to update map index buffer. {access_conflict}");
             }
+            _ => panic!("couldn't write to the vertex buffer: {e}"),
         },
     };
 }
@@ -1350,13 +1548,11 @@ fn update_buffers_ui(
             vertex_counts_ui[render_storage.frame_count as usize % 2] =
                 render_storage.vertex_count_ui;
         }
-        Err(e) => {
-            match e {
-                HostAccessError::AccessConflict(access_conflict) => {
-                    println!("Failed to update ui vertex buffer. {access_conflict}");
-                }
-                _ => panic!("couldn't write to the vertex buffer: {e}"),
+        Err(e) => match e {
+            HostAccessError::AccessConflict(access_conflict) => {
+                println!("Failed to update ui vertex buffer. {access_conflict}");
             }
+            _ => panic!("couldn't write to the vertex buffer: {e}"),
         },
     };
 
@@ -1370,13 +1566,11 @@ fn update_buffers_ui(
             index_counts_ui[render_storage.frame_count as usize % 2] =
                 render_storage.index_count_ui;
         }
-        Err(e) => {
-            match e {
-                HostAccessError::AccessConflict(access_conflict) => {
-                    println!("Failed to update ui index buffer. {access_conflict}");
-                }
-                _ => panic!("couldn't write to the vertex buffer: {e}"),
+        Err(e) => match e {
+            HostAccessError::AccessConflict(access_conflict) => {
+                println!("Failed to update ui index buffer. {access_conflict}");
             }
+            _ => panic!("couldn't write to the vertex buffer: {e}"),
         },
     };
 }

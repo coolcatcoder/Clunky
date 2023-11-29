@@ -39,6 +39,7 @@ pub const MAX_SUBSTEPS: u32 = 150;
 
 pub const MAX_VERTICES: usize = CHUNK_WIDTH_SQUARED as usize * 4 * 100;
 pub const MAX_INDICES: usize = CHUNK_WIDTH_SQUARED as usize * 6 * 100;
+pub const MAX_INSTANCES: usize = CHUNK_WIDTH_SQUARED as usize * 100;
 
 pub fn start(render_storage: &mut RenderStorage) -> UserStorage {
     render_storage.camera.scale = 0.12;
@@ -317,6 +318,16 @@ pub struct RenderStorage {
     pub vertex_count_ui: u32,
     pub indices_ui: Vec<u32>,
     pub index_count_ui: u32,
+
+    pub vertices_test: Vec<vertex_data::TestVertex>,
+    pub vertex_count_test: u32,
+    pub update_vertices_test: bool,
+    pub indices_test: Vec<u32>,
+    pub index_count_test: u32,
+    pub update_indices_test: bool,
+    pub instances_test: Vec<vertex_data::TestInstance>,
+    pub instance_count_test: u32,
+    pub update_instances_test: bool,
 
     pub aspect_ratio: f32,
     pub camera: Camera,
