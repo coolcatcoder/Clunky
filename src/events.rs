@@ -9,7 +9,6 @@ use std::sync::mpsc::Receiver;
 use std::sync::mpsc::Sender;
 use std::thread;
 use std::time::Instant;
-use winit::event::ElementState;
 
 use crate::biomes;
 use crate::collision;
@@ -18,6 +17,7 @@ use crate::menus;
 use crate::perks_and_curses;
 use crate::ui;
 use crate::vertex_data;
+use crate::chunks;
 
 pub const FULL_GRID_WIDTH: u32 = CHUNK_WIDTH as u32 * 50; //100;
 pub const FULL_GRID_WIDTH_SQUARED: u32 = FULL_GRID_WIDTH * FULL_GRID_WIDTH;
@@ -72,6 +72,7 @@ pub fn start(render_storage: &mut RenderStorage) -> UserStorage {
             vec![biomes::MapObject::None; 0],
             vec![biomes::MapObject::None; 0],
         ],
+        chunks: vec![],
         generation_sender,
         generation_receiver,
         available_parallelism,
@@ -231,9 +232,12 @@ pub struct UserStorage {
     pub main_seed: u32,
     pub percent_range: Uniform<u8>,
     pub biome_noise: (OpenSimplex, OpenSimplex),
+    #[deprecated]
     pub chunks_generated: Vec<bool>,
     pub details: [Detail; 3],
-    pub map_objects: [Vec<biomes::MapObject>; 3],
+    #[deprecated]
+    pub map_objects: [Vec<biomes::MapObject>; 3], // TODO: remove, along with chunks_generated
+    pub chunks: Vec<chunks::Chunk>,
     pub generation_sender: Sender<(Vec<biomes::MapObject>, usize, u8)>,
     pub generation_receiver: Receiver<(Vec<biomes::MapObject>, usize, u8)>,
     pub available_parallelism: usize,
@@ -441,7 +445,7 @@ pub fn generate_chunk_old(user_storage: &UserStorage, chunk_position: (u32, u32)
     }
 }
 
-fn generate_position(
+pub fn generate_position(
     position: (u32, u32),
     detail: u8,
     scale: u32,
@@ -632,7 +636,7 @@ where
     position.1 * width + position.0
 }
 
-fn position_from_index<T>(index: T, width: T) -> (T, T)
+pub fn position_from_index<T>(index: T, width: T) -> (T, T)
 where
     T: Rem<T, Output = T> + Div<T, Output = T> + Copy,
 {

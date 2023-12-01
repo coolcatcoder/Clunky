@@ -9,19 +9,22 @@ use std::sync::mpsc::TryRecvError;
 use winit::dpi::PhysicalPosition;
 use winit::event::{ElementState, KeyboardInput, MouseButton, VirtualKeyCode};
 
-use crate::events;
+use crate::events::{self, CHUNK_GRID_WIDTH};
 use crate::perks_and_curses;
 use crate::ui;
 use crate::vertex_data;
 use crate::{biomes, collision};
 use crate::lost_code;
+use crate::chunks;
 
-pub const STARTING_MENU: Menu = Menu::TitleScreen;
+pub const STARTING_MENU: Menu = Menu::Test;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum Menu {
     // add a pause screen that doesn't call ALIVE.end() and when it changes back to Alive, then it doesn't run ALIVE.start(). This will work.
     TitleScreen, // horrible name
+    #[deprecated]
+    AliveOld,
     Alive,
     Paused,
     Dead,
@@ -33,6 +36,7 @@ impl Menu {
     pub const fn get_data(&self) -> MenuData {
         match *self {
             Menu::TitleScreen => TITLE_SCREEN,
+            Menu::AliveOld => ALIVE_OLD,
             Menu::Alive => ALIVE,
             Menu::Paused => PAUSED,
             Menu::Dead => DEAD,
@@ -76,8 +80,8 @@ pub const TITLE_SCREEN: MenuData = MenuData {
             match key_code {
                 VirtualKeyCode::Return => {
                     if lost_code::is_pressed(input.state) {
-                        user_storage.menu = Menu::Alive;
-                        (ALIVE.start)(user_storage, render_storage);
+                        user_storage.menu = Menu::AliveOld;
+                        (ALIVE_OLD.start)(user_storage, render_storage);
                     }
                 }
                 _ => (),
@@ -128,8 +132,8 @@ pub const TITLE_SCREEN: MenuData = MenuData {
             [0.0, 1.0, 1.0, 1.0],
             Some((1, [0.0, 1.0, 0.25, 1.0], [0.0, 0.0, 0.0, 1.0])),
             |user_storage: &mut events::UserStorage, render_storage: &mut events::RenderStorage| {
-                user_storage.menu = Menu::Alive;
-                (ALIVE.start)(user_storage, render_storage);
+                user_storage.menu = Menu::AliveOld;
+                (ALIVE_OLD.start)(user_storage, render_storage);
             },
         )];
     },
@@ -166,7 +170,7 @@ pub const TITLE_SCREEN: MenuData = MenuData {
     },
 };
 
-pub const ALIVE: MenuData = MenuData {
+pub const ALIVE_OLD: MenuData = MenuData {
     start: |user_storage: &mut events::UserStorage, render_storage: &mut events::RenderStorage| {
         let mut rng = thread_rng();
 
@@ -231,7 +235,7 @@ pub const ALIVE: MenuData = MenuData {
         user_storage.map_objects[0][events::full_index_from_full_position((5, 8), 1)] =
             biomes::MapObject::RandomPattern(2);
 
-        (ALIVE.on_window_resize)(user_storage, render_storage);
+        (ALIVE_OLD.on_window_resize)(user_storage, render_storage);
 
         // all lines below this one, and before the end of the function, should be removed, they are debug
         user_storage.player.aabb.position.0 = 15.0;
@@ -337,7 +341,7 @@ pub const ALIVE: MenuData = MenuData {
             return;
         }
 
-        (ALIVE.on_window_resize)(user_storage, render_storage); // TODO: make it so I don't call this every frame...
+        (ALIVE_OLD.on_window_resize)(user_storage, render_storage); // TODO: make it so I don't call this every frame...
         if user_storage.show_debug {
             let screen_width = 2.0 / render_storage.aspect_ratio;
 
@@ -498,7 +502,7 @@ pub const ALIVE: MenuData = MenuData {
                 VirtualKeyCode::V => {
                     if lost_code::is_pressed(input.state) {
                         user_storage.show_debug = !user_storage.show_debug;
-                        (ALIVE.on_window_resize)(user_storage, render_storage);
+                        (ALIVE_OLD.on_window_resize)(user_storage, render_storage);
                     }
                 }
 
@@ -630,7 +634,7 @@ pub const PAUSED: MenuData = MenuData {
             match key_code {
                 VirtualKeyCode::Escape => {
                     if lost_code::is_pressed(input.state) {
-                        user_storage.menu = Menu::Alive;
+                        user_storage.menu = Menu::AliveOld;
                         user_storage.fixed_time_passed =
                             render_storage.starting_time.elapsed().as_secs_f32();
                         user_storage.wasd_held = (false, false, false, false);
@@ -682,7 +686,7 @@ pub const DEAD: MenuData = MenuData {
             match key_code {
                 VirtualKeyCode::Return => {
                     if lost_code::is_pressed(input.state) {
-                        user_storage.menu = Menu::Alive;
+                        user_storage.menu = Menu::AliveOld;
                         (PERKS_AND_CURSES.start)(user_storage, render_storage);
                     }
                 }
@@ -917,8 +921,8 @@ pub const PERKS_AND_CURSES: MenuData = MenuData {
             match key_code {
                 VirtualKeyCode::Return => {
                     if lost_code::is_pressed(input.state) {
-                        user_storage.menu = Menu::Alive;
-                        (ALIVE.start)(user_storage, render_storage);
+                        user_storage.menu = Menu::AliveOld;
+                        (ALIVE_OLD.start)(user_storage, render_storage);
                     }
                 }
                 VirtualKeyCode::Slash => {
@@ -1045,8 +1049,8 @@ pub const PERKS_AND_CURSES: MenuData = MenuData {
                             }
                         }
 
-                        user_storage.menu = Menu::Alive;
-                        (ALIVE.start)(user_storage, render_storage);
+                        user_storage.menu = Menu::AliveOld;
+                        (ALIVE_OLD.start)(user_storage, render_storage);
                     }
                 },
             ),
@@ -1062,8 +1066,8 @@ pub const PERKS_AND_CURSES: MenuData = MenuData {
                 None,
                 |user_storage: &mut events::UserStorage,
                  render_storage: &mut events::RenderStorage| {
-                    user_storage.menu = Menu::Alive;
-                    (ALIVE.start)(user_storage, render_storage);
+                    user_storage.menu = Menu::AliveOld;
+                    (ALIVE_OLD.start)(user_storage, render_storage);
                 },
             ),
         ];
@@ -1346,7 +1350,138 @@ pub const PERKS_AND_CURSES: MenuData = MenuData {
 };
 
 pub const TEST: MenuData = MenuData {
-    start: |_user_storage, _render_storage| {},
+    start: |_user_storage, render_storage| {
+        println!("Test Menu Start");
+
+        render_storage.vertices_test[0] = vertex_data::TestVertex { // top left
+            position: [-0.5, 0.5],
+            uv: [0.0, biomes::SPRITE_SIZE.1]
+        };
+        render_storage.vertices_test[1] = vertex_data::TestVertex { // top right
+            position: [0.5, 0.5],
+            uv: [biomes::SPRITE_SIZE.0, biomes::SPRITE_SIZE.1]
+        };
+        render_storage.vertices_test[2] = vertex_data::TestVertex { // bottom left
+            position: [-0.5, -0.5],
+            uv: [0.0, 0.0]
+        };
+        render_storage.vertices_test[3] = vertex_data::TestVertex { // bottom right
+            position: [0.5, -0.5],
+            uv: [biomes::SPRITE_SIZE.0, 0.0]
+        };
+
+        render_storage.indices_test[0] = 0;
+        render_storage.indices_test[1] = 2;
+        render_storage.indices_test[2] = 3;
+
+        render_storage.indices_test[3] = 0;
+        render_storage.indices_test[4] = 3;
+        render_storage.indices_test[5] = 1;
+
+        render_storage.instances_test[0] = vertex_data::TestInstance {
+            position_offset: [0.0,0.0,0.8],
+            scale: [1.0, 1.0],
+            uv_centre: [0.0,0.0],
+        };
+
+        render_storage.instances_test[1] = vertex_data::TestInstance {
+            position_offset: [0.0,1.0,0.5],
+            scale: [3.0, 3.0],
+            uv_centre: [6.0*biomes::SPRITE_SIZE.0,0.0],
+        };
+
+        render_storage.vertex_count_test = 4;
+        render_storage.index_count_test = 6;
+        render_storage.instance_count_test = 2;
+
+        render_storage.update_vertices_test = true;
+        render_storage.update_indices_test = true;
+        render_storage.update_instances_test = true;
+    },
+    update: |_user_storage, _render_storage, _delta_time, _average_fps| {},
+    end: |_user_storage, _render_storage| {},
+    on_keyboard_input: |_user_storage, _render_storage, _input| {},
+    on_window_resize: |_user_storage, _render_storage| {},
+    on_cursor_moved: |_user_storage, _render_storage, _position| {},
+    on_mouse_input: |_user_storage, _render_storage, _state, _button| {},
+};
+
+pub const ALIVE: MenuData = MenuData {
+    start: |user_storage, render_storage| {
+        let mut rng = thread_rng();
+
+        let seed_range = Uniform::new(0u32, 1000);
+        let player_size_range = Uniform::new(0.25, 10.0);
+
+        if Bernoulli::new(0.1).unwrap().sample(&mut rng) {
+            user_storage.player.aabb.size = (
+                player_size_range.sample(&mut rng),
+                player_size_range.sample(&mut rng),
+            )
+        } else {
+            user_storage.player.aabb.size = (0.7, 0.7);
+        }
+
+        user_storage.main_seed = seed_range.sample(&mut rng);
+
+        user_storage.biome_noise = (
+            OpenSimplex::new(seed_range.sample(&mut rng)),
+            OpenSimplex::new(seed_range.sample(&mut rng)),
+        );
+
+        user_storage.chunks = vec![chunks::Chunk {
+            map_objects: vec![],
+            generated: false,
+            starting_position: (0,0), // TODO: this could be useful if only I could work out how to set it up.
+        }; events::CHUNK_GRID_WIDTH_SQUARED as usize];
+
+        for chunk_id in 0..user_storage.chunks.len() {
+            let chunk = &mut user_storage.chunks[chunk_id];
+            chunk.starting_position = events::position_from_index(chunk_id as u32, CHUNK_GRID_WIDTH);
+            chunk.starting_position.0 *= events::CHUNK_WIDTH as u32;
+            chunk.starting_position.1 *= events::CHUNK_WIDTH as u32;
+        }
+
+        let safe_position = events::get_safe_position(user_storage);
+
+        user_storage.player.aabb.position = (safe_position.0 as f32, safe_position.1 as f32);
+        user_storage.player.previous_position = user_storage.player.aabb.position;
+
+        let starting_chunk = (
+            safe_position.0 / events::CHUNK_WIDTH as u32,
+            safe_position.1 / events::CHUNK_WIDTH as u32,
+        );
+
+        events::generate_chunk(&user_storage, starting_chunk);
+
+        user_storage.chunks_generated
+            [events::index_from_position(starting_chunk, events::CHUNK_GRID_WIDTH) as usize] = true;
+
+        user_storage.player.sprinting = false;
+
+        user_storage.player.statistics = user_storage.player.starting_statistics;
+
+        render_storage.camera.position = user_storage.player.aabb.position;
+
+        user_storage.fixed_time_passed = render_storage.starting_time.elapsed().as_secs_f32();
+        user_storage.wasd_held = (false, false, false, false);
+
+        user_storage.map_objects[0][events::full_index_from_full_position((10, 10), 1)] =
+            biomes::MapObject::RandomPattern(0);
+
+        user_storage.map_objects[0][events::full_index_from_full_position((7, 8), 1)] =
+            biomes::MapObject::RandomPattern(1);
+
+        user_storage.map_objects[0][events::full_index_from_full_position((5, 8), 1)] =
+            biomes::MapObject::RandomPattern(2);
+
+        (ALIVE_OLD.on_window_resize)(user_storage, render_storage);
+
+        // all lines below this one, and before the end of the function, should be removed, they are debug
+        user_storage.player.aabb.position.0 = 15.0;
+        user_storage.player.aabb.position.1 = 15.0;
+        user_storage.player.previous_position = user_storage.player.aabb.position;
+    },
     update: |_user_storage, _render_storage, _delta_time, _average_fps| {},
     end: |_user_storage, _render_storage| {},
     on_keyboard_input: |_user_storage, _render_storage, _input| {},

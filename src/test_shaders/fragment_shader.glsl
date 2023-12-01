@@ -15,4 +15,5 @@ layout(set = 1, binding = 1) uniform sampler2D textures;
 
 void main() {
     f_color = texture(textures,uv) * vec4(uniforms.brightness, uniforms.brightness, uniforms.brightness, 1.0);
+    //f_color = vec4(1.0, 0.0, 0.0, 1.0);
 }

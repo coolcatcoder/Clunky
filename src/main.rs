@@ -475,7 +475,7 @@ fn main() {
         index_count_ui: 0,
         vertices_test: vec![
             vertex_data::TestVertex {
-                position: [0.0, 0.0, 0.0],
+                position: [0.0, 0.0],
                 uv: [0.0, 0.0],
             };
             vertex_buffer_test.len() as usize
@@ -487,9 +487,9 @@ fn main() {
         update_indices_test: false,
         instances_test: vec![
             vertex_data::TestInstance {
-                position: [0.0, 0.0, 0.0],
+                position_offset: [0.0, 0.0, 0.0],
                 scale: [0.0, 0.0],
-                uv: [0.0, 0.0],
+                uv_centre: [0.0, 0.0],
             };
             instance_buffer_test.len() as usize
         ],
@@ -648,6 +648,15 @@ fn main() {
                 let set_main = PersistentDescriptorSet::new(
                     &descriptor_set_allocator,
                     layout_main.clone(),
+                    [WriteDescriptorSet::buffer(0, uniform_buffer_subbuffer.clone())],
+                    [],
+                )
+                .unwrap();
+
+                let layout_test = pipeline_test.layout().set_layouts().get(0).unwrap();
+                let set_test = PersistentDescriptorSet::new(
+                    &descriptor_set_allocator,
+                    layout_test.clone(),
                     [WriteDescriptorSet::buffer(0, uniform_buffer_subbuffer)],
                     [],
                 )
@@ -752,7 +761,7 @@ fn main() {
                         PipelineBindPoint::Graphics,
                         pipeline_test.layout().clone(),
                         0,
-                        vec![set_main, set_sprites_map.clone()], // TODO: set these correctly
+                        vec![set_test, set_sprites_map.clone()], // TODO: set these correctly
                     )
                     .unwrap()
                     .bind_vertex_buffers(
@@ -841,38 +850,31 @@ fn window_size_dependent_setup(
     //let dimensions = images[0].dimensions().width_height();
     let extent = images[0].extent();
 
+    let depth_buffer = ImageView::new_default(
+        Image::new(
+            memory_allocator.clone(),
+            ImageCreateInfo {
+                image_type: ImageType::Dim2d,
+                format: DEPTH_FORMAT,
+                extent,
+                usage: ImageUsage::TRANSIENT_ATTACHMENT
+                    | ImageUsage::DEPTH_STENCIL_ATTACHMENT,
+                ..Default::default()
+            },
+            AllocationCreateInfo::default(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
     let framebuffers = images
         .iter()
         .map(|image| {
             let view = ImageView::new_default(image.clone()).unwrap();
-            let depth = ImageView::new_default(
-                //Image::transient(memory_allocator, extent, DEPTH_FORMAT).unwrap(),
-                // Image::new(
-                //     memory_allocator,
-                //     //ImageCreateInfo { flags: (), image_type: (), format: (), view_formats: (), extent: (), array_layers: (), mip_levels: (), samples: (), tiling: (), usage: (), stencil_usage: (), sharing: (), initial_layout: (), drm_format_modifiers: (), drm_format_modifier_plane_layouts: (), external_memory_handle_types: (), _ne: () }
-                //     pain,
-                //     //AllocationCreateInfo { memory_type_filter: (), memory_type_bits: (), allocate_preference: (), _ne: () }
-                //     pain,
-                // ).unwrap()
-                Image::new(
-                    memory_allocator.clone(),
-                    ImageCreateInfo {
-                        image_type: ImageType::Dim2d,
-                        format: DEPTH_FORMAT,
-                        extent,
-                        usage: ImageUsage::TRANSIENT_ATTACHMENT
-                            | ImageUsage::DEPTH_STENCIL_ATTACHMENT,
-                        ..Default::default()
-                    },
-                    AllocationCreateInfo::default(),
-                )
-                .unwrap(),
-            )
-            .unwrap();
             Framebuffer::new(
                 render_pass.clone(),
                 FramebufferCreateInfo {
-                    attachments: vec![view, depth],
+                    attachments: vec![view, depth_buffer.clone()],
                     ..Default::default()
                 },
             )
@@ -927,7 +929,7 @@ fn window_size_dependent_setup(
         .entry_point("main")
         .unwrap();
 
-    let test_vertex_input_state = vertex_data::TestVertex::per_vertex()
+    let test_vertex_input_state = [vertex_data::TestVertex::per_vertex(), vertex_data::TestInstance::per_instance()]
         .definition(&vertex_shader_entrance_test.info().input_interface)
         .unwrap();
 
@@ -1152,7 +1154,7 @@ fn create_buffers(
         },
         vec![
             vertex_data::TestVertex {
-                position: [0.0, 0.0, 0.0],
+                position: [0.0, 0.0],
                 uv: [0.0, 0.0],
             };
             events::MAX_VERTICES
@@ -1188,9 +1190,9 @@ fn create_buffers(
         },
         vec![
             vertex_data::TestInstance {
-                position: [0.0, 0.0, 0.0],
+                position_offset: [0.0, 0.0, 0.0],
                 scale: [0.0, 0.0],
-                uv: [0.0, 0.0],
+                uv_centre: [0.0, 0.0],
             };
             events::MAX_INSTANCES
         ],
@@ -1391,6 +1393,7 @@ fn update_buffers(
     instance_count_test: &mut u32,
 ) {
     if render_storage.update_vertices_test {
+        println!("updated vertices test");
         let vertex_writer_test = vertex_buffer_test.write();
 
         match vertex_writer_test {
@@ -1399,6 +1402,7 @@ fn update_buffers(
                     &render_storage.vertices_test[0..render_storage.vertex_count_test as usize],
                 );
                 *vertex_count_test = render_storage.vertex_count_test;
+                render_storage.update_vertices_test = false;
             }
             Err(e) => match e {
                 HostAccessError::AccessConflict(access_conflict) => {
@@ -1411,6 +1415,7 @@ fn update_buffers(
     }
 
     if render_storage.update_indices_test {
+        println!("updated indices test");
         let index_writer = index_buffer_test.write();
 
         match index_writer {
@@ -1419,6 +1424,7 @@ fn update_buffers(
                     &render_storage.indices_test[0..render_storage.index_count_test as usize],
                 );
                 *index_count_test = render_storage.index_count_test;
+                render_storage.update_indices_test = false;
             }
             Err(e) => match e {
                 HostAccessError::AccessConflict(access_conflict) => {
@@ -1430,6 +1436,7 @@ fn update_buffers(
     }
 
     if render_storage.update_instances_test {
+        println!("updated instances test");
         let instance_writer = instance_buffer_test.write();
 
         match instance_writer {
@@ -1438,6 +1445,7 @@ fn update_buffers(
                     &render_storage.instances_test[0..render_storage.instance_count_test as usize],
                 );
                 *instance_count_test = render_storage.instance_count_test;
+                render_storage.update_instances_test = false;
             }
             Err(e) => match e {
                 HostAccessError::AccessConflict(access_conflict) => {
@@ -1457,6 +1465,10 @@ fn update_buffers_map(
     index_buffers_map: &[Subbuffer<[u32]>; 2],
     index_counts_map: &mut [u32; 2],
 ) {
+    if menus::STARTING_MENU == menus::Menu::Test {
+        return;
+    }
+
     let vertex_writer_map = vertex_buffers_map[render_storage.frame_count as usize % 2].write();
 
     match vertex_writer_map {
@@ -1502,6 +1514,10 @@ fn update_buffers_ui(
     index_buffers_ui: &[Subbuffer<[u32]>; 2],
     index_counts_ui: &mut [u32; 2],
 ) {
+    if menus::STARTING_MENU == menus::Menu::Test {
+        return;
+    }
+
     let vertex_writer_ui = vertex_buffers_ui[render_storage.frame_count as usize % 2].write();
 
     match vertex_writer_ui {
