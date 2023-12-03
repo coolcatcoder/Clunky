@@ -11,13 +11,13 @@ use std::thread;
 use std::time::Instant;
 
 use crate::biomes;
+use crate::chunks;
 use crate::collision;
 use crate::marching_squares;
 use crate::menus;
 use crate::perks_and_curses;
 use crate::ui;
 use crate::vertex_data;
-use crate::chunks;
 
 pub const FULL_GRID_WIDTH: u32 = CHUNK_WIDTH as u32 * 50; //100;
 pub const FULL_GRID_WIDTH_SQUARED: u32 = FULL_GRID_WIDTH * FULL_GRID_WIDTH;
@@ -100,7 +100,6 @@ pub fn start(render_storage: &mut RenderStorage) -> UserStorage {
         fixed_time_passed: 0.0,
         multithread_rendering: false,
         chunk_generation: 0,
-        menu: menus::STARTING_MENU,
         screen_texts: vec![],
         screen_buttons: vec![],
         screen_toggleable_buttons: vec![],
@@ -201,7 +200,7 @@ pub fn fixed_update(user_storage: &mut UserStorage, render_storage: &mut RenderS
     }
 
     if user_storage.player.statistics.health <= 0 {
-        user_storage.menu = menus::Menu::Dead;
+        render_storage.menu = menus::Menu::Dead;
         (menus::DEAD.on_window_resize)(user_storage, render_storage);
         return;
     }
@@ -247,7 +246,6 @@ pub struct UserStorage {
     pub fixed_time_passed: f32,
     pub multithread_rendering: bool,
     pub chunk_generation: u8,
-    pub menu: menus::Menu,
     pub screen_texts: Vec<ui::ScreenText>, // The plural of text is texts in this situation.
     pub screen_buttons: Vec<ui::ScreenButton>,
     pub screen_toggleable_buttons: Vec<ui::ScreenToggleableButton>,
@@ -282,6 +280,9 @@ pub struct RenderStorage {
     pub frame_count: u32, // This will crash the game after 2 years, assuming 60 fps.
     pub starting_time: Instant,
     pub window_size: [u32; 2],
+
+    pub pipelines: crate::PipelinesEnabled,
+    pub menu: menus::Menu,
 }
 
 pub fn generate_chunk(user_storage: &UserStorage, chunk_position: (u32, u32)) {

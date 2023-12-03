@@ -6,18 +6,20 @@ use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::Sender;
 use std::sync::mpsc::TryRecvError;
+use vulkano::pipeline::graphics::input_assembly::PrimitiveTopology;
 use winit::dpi::PhysicalPosition;
 use winit::event::{ElementState, KeyboardInput, MouseButton, VirtualKeyCode};
 
+use crate::chunks;
 use crate::events::{self, CHUNK_GRID_WIDTH};
+use crate::lost_code;
+use crate::menu_rendering;
 use crate::perks_and_curses;
 use crate::ui;
 use crate::vertex_data;
 use crate::{biomes, collision};
-use crate::lost_code;
-use crate::chunks;
 
-pub const STARTING_MENU: Menu = Menu::Test;
+pub const STARTING_MENU: Menu = Menu::Test3D;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum Menu {
@@ -30,6 +32,7 @@ pub enum Menu {
     Dead,
     PerksAndCurses,
     Test,
+    Test3D,
 }
 
 impl Menu {
@@ -42,11 +45,13 @@ impl Menu {
             Menu::Dead => DEAD,
             Menu::PerksAndCurses => PERKS_AND_CURSES,
             Menu::Test => TEST,
+            Menu::Test3D => TEST3D,
         }
     }
 }
 
 pub struct MenuData {
+    pub render_settings: menu_rendering::RenderSettings,
     pub start: fn(&mut events::UserStorage, &mut events::RenderStorage),
     pub update: fn(&mut events::UserStorage, &mut events::RenderStorage, f32, f32),
     pub end: fn(&mut events::UserStorage, &mut events::RenderStorage),
@@ -59,6 +64,10 @@ pub struct MenuData {
 }
 
 pub const TITLE_SCREEN: MenuData = MenuData {
+    render_settings: menu_rendering::RenderSettings {
+        uv_vertex_and_index_buffer_settings: None,
+        colour_vertex_and_index_buffer_settings: None,
+    },
     start: |user_storage: &mut events::UserStorage, render_storage: &mut events::RenderStorage| {
         (TITLE_SCREEN.on_window_resize)(user_storage, render_storage);
     },
@@ -80,7 +89,7 @@ pub const TITLE_SCREEN: MenuData = MenuData {
             match key_code {
                 VirtualKeyCode::Return => {
                     if lost_code::is_pressed(input.state) {
-                        user_storage.menu = Menu::AliveOld;
+                        render_storage.menu = Menu::AliveOld;
                         (ALIVE_OLD.start)(user_storage, render_storage);
                     }
                 }
@@ -132,7 +141,7 @@ pub const TITLE_SCREEN: MenuData = MenuData {
             [0.0, 1.0, 1.0, 1.0],
             Some((1, [0.0, 1.0, 0.25, 1.0], [0.0, 0.0, 0.0, 1.0])),
             |user_storage: &mut events::UserStorage, render_storage: &mut events::RenderStorage| {
-                user_storage.menu = Menu::AliveOld;
+                render_storage.menu = Menu::AliveOld;
                 (ALIVE_OLD.start)(user_storage, render_storage);
             },
         )];
@@ -171,6 +180,10 @@ pub const TITLE_SCREEN: MenuData = MenuData {
 };
 
 pub const ALIVE_OLD: MenuData = MenuData {
+    render_settings: menu_rendering::RenderSettings {
+        uv_vertex_and_index_buffer_settings: None,
+        colour_vertex_and_index_buffer_settings: None,
+    },
     start: |user_storage: &mut events::UserStorage, render_storage: &mut events::RenderStorage| {
         let mut rng = thread_rng();
 
@@ -336,7 +349,7 @@ pub const ALIVE_OLD: MenuData = MenuData {
         render_storage.vertex_count_ui = 0;
         render_storage.index_count_ui = 0;
 
-        if user_storage.menu == Menu::Dead {
+        if render_storage.menu == Menu::Dead {
             (DEAD.on_window_resize)(user_storage, render_storage);
             return;
         }
@@ -497,7 +510,9 @@ pub const ALIVE_OLD: MenuData = MenuData {
                     }
                 }
                 VirtualKeyCode::Up => user_storage.zoom_held.0 = lost_code::is_pressed(input.state),
-                VirtualKeyCode::Down => user_storage.zoom_held.1 = lost_code::is_pressed(input.state),
+                VirtualKeyCode::Down => {
+                    user_storage.zoom_held.1 = lost_code::is_pressed(input.state)
+                }
 
                 VirtualKeyCode::V => {
                     if lost_code::is_pressed(input.state) {
@@ -524,7 +539,7 @@ pub const ALIVE_OLD: MenuData = MenuData {
                 }
                 VirtualKeyCode::Escape => {
                     if lost_code::is_pressed(input.state) {
-                        user_storage.menu = Menu::Paused;
+                        render_storage.menu = Menu::Paused;
                         (PAUSED.on_window_resize)(user_storage, render_storage);
                     }
                 }
@@ -615,6 +630,10 @@ pub const ALIVE_OLD: MenuData = MenuData {
 };
 
 pub const PAUSED: MenuData = MenuData {
+    render_settings: menu_rendering::RenderSettings {
+        uv_vertex_and_index_buffer_settings: None,
+        colour_vertex_and_index_buffer_settings: None,
+    },
     start: |_user_storage: &mut events::UserStorage,
             _render_storage: &mut events::RenderStorage| {},
     update: |user_storage: &mut events::UserStorage,
@@ -634,7 +653,7 @@ pub const PAUSED: MenuData = MenuData {
             match key_code {
                 VirtualKeyCode::Escape => {
                     if lost_code::is_pressed(input.state) {
-                        user_storage.menu = Menu::AliveOld;
+                        render_storage.menu = Menu::AliveOld;
                         user_storage.fixed_time_passed =
                             render_storage.starting_time.elapsed().as_secs_f32();
                         user_storage.wasd_held = (false, false, false, false);
@@ -666,6 +685,10 @@ pub const PAUSED: MenuData = MenuData {
 };
 
 pub const DEAD: MenuData = MenuData {
+    render_settings: menu_rendering::RenderSettings {
+        uv_vertex_and_index_buffer_settings: None,
+        colour_vertex_and_index_buffer_settings: None,
+    },
     start: |_user_storage: &mut events::UserStorage,
             _render_storage: &mut events::RenderStorage| {},
     update: |user_storage: &mut events::UserStorage,
@@ -686,7 +709,7 @@ pub const DEAD: MenuData = MenuData {
             match key_code {
                 VirtualKeyCode::Return => {
                     if lost_code::is_pressed(input.state) {
-                        user_storage.menu = Menu::AliveOld;
+                        render_storage.menu = Menu::AliveOld;
                         (PERKS_AND_CURSES.start)(user_storage, render_storage);
                     }
                 }
@@ -728,7 +751,7 @@ pub const DEAD: MenuData = MenuData {
             [0.0, 1.0, 1.0, 1.0],
             None,
             |user_storage: &mut events::UserStorage, render_storage: &mut events::RenderStorage| {
-                user_storage.menu = Menu::PerksAndCurses;
+                render_storage.menu = Menu::PerksAndCurses;
                 (PERKS_AND_CURSES.start)(user_storage, render_storage);
             },
         )];
@@ -768,6 +791,10 @@ pub const DEAD: MenuData = MenuData {
 };
 
 pub const PERKS_AND_CURSES: MenuData = MenuData {
+    render_settings: menu_rendering::RenderSettings {
+        uv_vertex_and_index_buffer_settings: None,
+        colour_vertex_and_index_buffer_settings: None,
+    },
     start: |user_storage: &mut events::UserStorage, render_storage: &mut events::RenderStorage| {
         user_storage.perks_and_curses.offered_perks = vec![];
         user_storage.perks_and_curses.offered_curses = vec![];
@@ -921,7 +948,7 @@ pub const PERKS_AND_CURSES: MenuData = MenuData {
             match key_code {
                 VirtualKeyCode::Return => {
                     if lost_code::is_pressed(input.state) {
-                        user_storage.menu = Menu::AliveOld;
+                        render_storage.menu = Menu::AliveOld;
                         (ALIVE_OLD.start)(user_storage, render_storage);
                     }
                 }
@@ -1049,7 +1076,7 @@ pub const PERKS_AND_CURSES: MenuData = MenuData {
                             }
                         }
 
-                        user_storage.menu = Menu::AliveOld;
+                        render_storage.menu = Menu::AliveOld;
                         (ALIVE_OLD.start)(user_storage, render_storage);
                     }
                 },
@@ -1066,7 +1093,7 @@ pub const PERKS_AND_CURSES: MenuData = MenuData {
                 None,
                 |user_storage: &mut events::UserStorage,
                  render_storage: &mut events::RenderStorage| {
-                    user_storage.menu = Menu::AliveOld;
+                    render_storage.menu = Menu::AliveOld;
                     (ALIVE_OLD.start)(user_storage, render_storage);
                 },
             ),
@@ -1350,24 +1377,32 @@ pub const PERKS_AND_CURSES: MenuData = MenuData {
 };
 
 pub const TEST: MenuData = MenuData {
+    render_settings: menu_rendering::RenderSettings {
+        uv_vertex_and_index_buffer_settings: None,
+        colour_vertex_and_index_buffer_settings: None,
+    },
     start: |_user_storage, render_storage| {
         println!("Test Menu Start");
 
-        render_storage.vertices_test[0] = vertex_data::TestVertex { // top left
+        render_storage.vertices_test[0] = vertex_data::TestVertex {
+            // top left
             position: [-0.5, 0.5],
-            uv: [0.0, biomes::SPRITE_SIZE.1]
+            uv: [0.0, biomes::SPRITE_SIZE.1],
         };
-        render_storage.vertices_test[1] = vertex_data::TestVertex { // top right
+        render_storage.vertices_test[1] = vertex_data::TestVertex {
+            // top right
             position: [0.5, 0.5],
-            uv: [biomes::SPRITE_SIZE.0, biomes::SPRITE_SIZE.1]
+            uv: [biomes::SPRITE_SIZE.0, biomes::SPRITE_SIZE.1],
         };
-        render_storage.vertices_test[2] = vertex_data::TestVertex { // bottom left
+        render_storage.vertices_test[2] = vertex_data::TestVertex {
+            // bottom left
             position: [-0.5, -0.5],
-            uv: [0.0, 0.0]
+            uv: [0.0, 0.0],
         };
-        render_storage.vertices_test[3] = vertex_data::TestVertex { // bottom right
+        render_storage.vertices_test[3] = vertex_data::TestVertex {
+            // bottom right
             position: [0.5, -0.5],
-            uv: [biomes::SPRITE_SIZE.0, 0.0]
+            uv: [biomes::SPRITE_SIZE.0, 0.0],
         };
 
         render_storage.indices_test[0] = 0;
@@ -1379,15 +1414,15 @@ pub const TEST: MenuData = MenuData {
         render_storage.indices_test[5] = 1;
 
         render_storage.instances_test[0] = vertex_data::TestInstance {
-            position_offset: [0.0,0.0,0.8],
+            position_offset: [0.0, 0.0, 0.8],
             scale: [1.0, 1.0],
-            uv_centre: [0.0,0.0],
+            uv_centre: [0.0, 0.0],
         };
 
         render_storage.instances_test[1] = vertex_data::TestInstance {
-            position_offset: [0.0,1.0,0.5],
+            position_offset: [0.0, 1.0, 0.5],
             scale: [3.0, 3.0],
-            uv_centre: [6.0*biomes::SPRITE_SIZE.0,0.0],
+            uv_centre: [6.0 * biomes::SPRITE_SIZE.0, 0.0],
         };
 
         render_storage.vertex_count_test = 4;
@@ -1407,6 +1442,10 @@ pub const TEST: MenuData = MenuData {
 };
 
 pub const ALIVE: MenuData = MenuData {
+    render_settings: menu_rendering::RenderSettings {
+        uv_vertex_and_index_buffer_settings: None,
+        colour_vertex_and_index_buffer_settings: None,
+    },
     start: |user_storage, render_storage| {
         let mut rng = thread_rng();
 
@@ -1429,17 +1468,20 @@ pub const ALIVE: MenuData = MenuData {
             OpenSimplex::new(seed_range.sample(&mut rng)),
         );
 
-        user_storage.chunks = vec![chunks::Chunk {
-            map_objects: vec![],
-            generated: false,
-            starting_position: (0,0), // TODO: this could be useful if only I could work out how to set it up.
-        }; events::CHUNK_GRID_WIDTH_SQUARED as usize];
+        user_storage.chunks = vec![
+            chunks::Chunk {
+                map_objects: vec![],
+                generated: false,
+                starting_position: chunks::Position2D(0, 0), // TODO: this could be useful if only I could work out how to set it up.
+            };
+            events::CHUNK_GRID_WIDTH_SQUARED as usize
+        ];
 
         for chunk_id in 0..user_storage.chunks.len() {
             let chunk = &mut user_storage.chunks[chunk_id];
-            chunk.starting_position = events::position_from_index(chunk_id as u32, CHUNK_GRID_WIDTH);
-            chunk.starting_position.0 *= events::CHUNK_WIDTH as u32;
-            chunk.starting_position.1 *= events::CHUNK_WIDTH as u32;
+            chunk.starting_position =
+                chunks::position_from_index(chunk_id as u32, CHUNK_GRID_WIDTH)
+                    * events::CHUNK_WIDTH as u32;
         }
 
         let safe_position = events::get_safe_position(user_storage);
@@ -1482,6 +1524,29 @@ pub const ALIVE: MenuData = MenuData {
         user_storage.player.aabb.position.1 = 15.0;
         user_storage.player.previous_position = user_storage.player.aabb.position;
     },
+    update: |_user_storage, _render_storage, _delta_time, _average_fps| {},
+    end: |_user_storage, _render_storage| {},
+    on_keyboard_input: |_user_storage, _render_storage, _input| {},
+    on_window_resize: |_user_storage, _render_storage| {},
+    on_cursor_moved: |_user_storage, _render_storage, _position| {},
+    on_mouse_input: |_user_storage, _render_storage, _state, _button| {},
+};
+
+pub const TEST3D: MenuData = MenuData {
+    render_settings: menu_rendering::RenderSettings {
+        uv_vertex_and_index_buffer_settings: None,
+        colour_vertex_and_index_buffer_settings: Some(
+            menu_rendering::VertexAndIndexBufferSettings {
+                edit_frequency: menu_rendering::EditFrequency::Rarely,
+                instance_edit_frequency: Some(menu_rendering::EditFrequency::Rarely),
+                vertex_shader: menu_rendering::VertexShader::Instanced2D,
+                fragment_shader: menu_rendering::FragmentShader::Instanced2D,
+                topology: PrimitiveTopology::TriangleStrip,
+                depth: true,
+            },
+        ),
+    },
+    start: |_user_storage, _render_storage| {},
     update: |_user_storage, _render_storage, _delta_time, _average_fps| {},
     end: |_user_storage, _render_storage| {},
     on_keyboard_input: |_user_storage, _render_storage, _input| {},

@@ -48,3 +48,33 @@ pub struct TestVertex {
     #[format(R32G32_SFLOAT)]
     pub uv: [f32; 2],
 }
+
+#[derive(BufferContents, Vertex, Copy, Clone, Debug)]
+#[repr(C)]
+pub struct FnafMapVertex {
+    #[format(R32G32B32_SFLOAT)]
+    pub position: [f32; 3],
+
+    #[format(R32G32B32A32_SFLOAT)]
+    pub colour: [f32; 4],
+}
+
+#[derive(BufferContents, Vertex, Copy, Clone, Debug)]
+#[repr(C)]
+pub struct UvVertex {
+    #[format(R32G32B32_SFLOAT)]
+    pub position: [f32; 3],
+
+    #[format(R32G32_SFLOAT)]
+    pub uv: [f32; 2],
+}
+
+#[derive(BufferContents, Vertex, Copy, Clone, Debug)]
+#[repr(C)]
+pub struct ColourVertex {
+    #[format(R32G32B32_SFLOAT)]
+    pub position: [f32; 3],
+
+    #[format(R32G32B32A32_SFLOAT)]
+    pub colour: [f32; 4],
+}

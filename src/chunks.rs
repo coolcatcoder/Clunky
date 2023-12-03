@@ -1,5 +1,5 @@
-use crate::{biomes, events, vertex_data};
-use std::ops::Mul;
+use crate::{biomes, events};
+use std::{ops::Add, ops::Div, ops::Mul, ops::Rem};
 // This will probably have more comments than code, as everything here is confusing, and not easy to think about.
 
 fn render_chunk(
@@ -14,65 +14,42 @@ fn render_chunk(
 // Potential revolution:
 // each chunk stores a Vec containing their map objects. This will save a lot of memory. Might be slow though.
 
-pub struct ChunkIdea1 {
-    map_objects: Vec<biomes::MapObject>,
-    generated: bool,
-}
+#[derive(Clone, Copy, Debug)]
+pub struct Position2D<T>(pub T, pub T);
 
-pub struct ChunkIdea2 {
-    map_objects: Vec<(biomes::MapObject, Vec<vertex_data::MapVertex>, Vec<u32>)>, // map object, vertices, indices. Then do memcpy every frame
-    generated: bool,
-}
-
-pub struct TestingHorriblePosition {
-    x: u32,
-    y: u32,
-}
-
-impl Mul for TestingHorriblePosition {
+impl<T: Mul<T, Output = T>> Mul for Position2D<T> {
     type Output = Self;
     fn mul(self, other: Self) -> Self {
-        TestingHorriblePosition { x: self.x * other.x, y: self.y * other.y }
+        Position2D(self.0 * other.0, self.1 * other.1)
     }
 }
 
-impl Mul for TestingHorriblePosition {
+impl<T: Mul<T, Output = T> + Copy> Mul<T> for Position2D<T> {
     type Output = Self;
-    fn mul(self, other: u32) -> Self {
-        TestingHorriblePosition { x: self.x * other, y: self.y * other }
+    fn mul(self, other: T) -> Self {
+        Position2D(self.0 * other, self.1 * other)
     }
 }
-
-// pub struct Position<T> where T : Mul {
-//     x: T,
-//     y: T,
-// }
-
-// impl<T: Mul<Output = T>> Mul for Position<T> {
-//     type Output = Self;
-//     fn mul(self, other: Self) -> Self {
-//         Position {
-//             x: self.x * other.x,
-//             y: self.y * other.y,
-//         }
-//     }
-// }
-
-// impl<T: Mul> Mul for Position<T> {
-//     type Output = T;
-//     fn mul(self, other: T) -> Self {
-//         Position {
-//             x: self.x * other,
-//             y: self.y * other,
-//         }
-//     }
-// }
 
 #[derive(Clone)]
 pub struct Chunk {
     pub map_objects: Vec<Vec<biomes::MapObject>>,
     pub generated: bool,
-    pub starting_position: (u32,u32),
+    pub starting_position: Position2D<u32>,
+}
+
+pub fn index_from_position<T>(position: Position2D<T>, width: T) -> T
+where
+    T: Mul<T, Output = T> + Add<T, Output = T>,
+{
+    position.1 * width + position.0
+}
+
+pub fn position_from_index<T>(index: T, width: T) -> Position2D<T>
+where
+    T: Rem<T, Output = T> + Div<T, Output = T> + Copy,
+{
+    Position2D(index % width, index / width)
 }
 
 pub fn generate_chunk(chunk: &mut Chunk) {
