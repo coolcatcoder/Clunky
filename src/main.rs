@@ -520,6 +520,7 @@ fn main() {
             fnaf_map: false,
         },
         menu: menus::STARTING_MENU,
+        render_call_buffer_containers: vec![],
     };
 
     let mut user_storage = events::start(&mut render_storage);
@@ -609,7 +610,7 @@ fn main() {
                     average_fps,
                 ); // call update once per frame
 
-                update_buffers(
+                update_buffers_old(
                     &mut render_storage,
                     &vertex_buffer_test,
                     &mut vertex_count_test,
@@ -627,13 +628,13 @@ fn main() {
                     &mut index_counts_map,
                 );
 
-                update_buffers_ui(
-                    &mut render_storage,
-                    &vertex_buffers_ui,
-                    &mut vertex_counts_ui,
-                    &index_buffers_ui,
-                    &mut index_counts_ui,
-                );
+                // update_buffers_ui(
+                //     &mut render_storage,
+                //     &vertex_buffers_ui,
+                //     &mut vertex_counts_ui,
+                //     &index_buffers_ui,
+                //     &mut index_counts_ui,
+                // );
 
                 if recreate_swapchain {
                     // When the window resizes we need to recreate everything dependent on the window size.
@@ -1668,6 +1669,41 @@ fn create_buffers_ui(
 }
 
 fn update_buffers(
+    render_storage: &mut events::RenderStorage,
+    real_render_buffer_containers: &mut Vec<menu_rendering::RealRenderBufferContainer>, // Really hate the name. It is more a list of real buffers
+) {
+    assert!(render_storage.render_call_buffer_containers.len() != real_render_buffer_containers.len());
+
+    for i in 0..real_render_buffer_containers.len() {
+        let real_render_buffer_container = real_render_buffer_containers[i];
+        let render_buffer_container = render_storage.render_buffer_containers[i];
+        
+        // TODO: make it not be % 2
+        let index_writer = real_render_buffer_container.index_buffer[render_storage.frame_count as usize % 2].write();
+
+        match index_writer {
+            Ok(mut writer) => {
+                writer[0..render_storage.index_counts[i] as usize].copy_from_slice(
+                    &render_storage.indices_map[0..render_storage.index_count_map as usize],
+                );
+                index_counts_map[render_storage.frame_count as usize % 2] =
+                    render_storage.index_count_map;
+            }
+            Err(e) => match e {
+                HostAccessError::AccessConflict(access_conflict) => {
+                    println!("Failed to update map index buffer. {access_conflict}");
+                }
+                _ => panic!("couldn't write to the vertex buffer: {e}"),
+            },
+        };
+
+        match real_render_buffer_container.vertex_buffer {
+            menu_rendering::RealVertexBuffer::UvVertexBuffer(_) => {}
+        }
+    }
+}
+
+fn update_buffers_old(
     render_storage: &mut events::RenderStorage,
     vertex_buffer_test: &Subbuffer<[vertex_data::TestVertex]>,
     vertex_count_test: &mut u32,

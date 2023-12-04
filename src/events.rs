@@ -14,6 +14,7 @@ use crate::biomes;
 use crate::chunks;
 use crate::collision;
 use crate::marching_squares;
+use crate::menu_rendering;
 use crate::menus;
 use crate::perks_and_curses;
 use crate::ui;
@@ -283,6 +284,8 @@ pub struct RenderStorage {
 
     pub pipelines: crate::PipelinesEnabled,
     pub menu: menus::Menu,
+
+    pub render_call_buffer_containers: Vec<menu_rendering::RenderBufferContainer>, // Bad name?
 }
 
 pub fn generate_chunk(user_storage: &UserStorage, chunk_position: (u32, u32)) {
