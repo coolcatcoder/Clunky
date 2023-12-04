@@ -1,4 +1,5 @@
 use std::{sync::Arc, time::Instant};
+use vulkano::buffer::BufferContents;
 use vulkano::{
     buffer::{
         allocator::{SubbufferAllocator, SubbufferAllocatorCreateInfo},
@@ -119,13 +120,6 @@ mod fragment_shader_test {
         ty: "fragment",
         path: "src/test_shaders/fragment_shader.glsl",
     }
-}
-
-pub struct PipelinesEnabled {
-    map: bool,
-    ui: bool,
-    test: bool,
-    fnaf_map: bool,
 }
 
 const DEPTH_FORMAT: Format = Format::D16_UNORM; // TODO: work out what this should be
@@ -513,14 +507,8 @@ fn main() {
         frame_count: 0,
         starting_time: Instant::now(),
         window_size: [0, 0],
-        pipelines: PipelinesEnabled {
-            map: false,
-            ui: false,
-            test: false,
-            fnaf_map: false,
-        },
         menu: menus::STARTING_MENU,
-        render_call_buffer_containers: vec![],
+        render_buffer_containers: vec![],
     };
 
     let mut user_storage = events::start(&mut render_storage);
@@ -744,87 +732,81 @@ fn main() {
                     )
                     .unwrap();
 
-                if render_storage.pipelines.map {
-                    builder
-                        .bind_pipeline_graphics(pipeline_map.clone())
-                        .unwrap()
-                        .bind_descriptor_sets(
-                            PipelineBindPoint::Graphics,
-                            pipeline_map.layout().clone(),
-                            0,
-                            vec![set_main.clone(), set_sprites_map.clone()],
-                        )
-                        .unwrap()
-                        .bind_vertex_buffers(
-                            0,
-                            vertex_buffers_map[render_storage.frame_count as usize % 2].clone(),
-                        )
-                        .unwrap()
-                        .bind_index_buffer(
-                            index_buffers_map[render_storage.frame_count as usize % 2].clone(),
-                        )
-                        .unwrap()
-                        .draw_indexed(
-                            index_counts_map[render_storage.frame_count as usize % 2],
-                            1,
-                            0,
-                            0,
-                            0,
-                        )
-                        .unwrap();
-                }
+                builder
+                    .bind_pipeline_graphics(pipeline_map.clone())
+                    .unwrap()
+                    .bind_descriptor_sets(
+                        PipelineBindPoint::Graphics,
+                        pipeline_map.layout().clone(),
+                        0,
+                        vec![set_main.clone(), set_sprites_map.clone()],
+                    )
+                    .unwrap()
+                    .bind_vertex_buffers(
+                        0,
+                        vertex_buffers_map[render_storage.frame_count as usize % 2].clone(),
+                    )
+                    .unwrap()
+                    .bind_index_buffer(
+                        index_buffers_map[render_storage.frame_count as usize % 2].clone(),
+                    )
+                    .unwrap()
+                    .draw_indexed(
+                        index_counts_map[render_storage.frame_count as usize % 2],
+                        1,
+                        0,
+                        0,
+                        0,
+                    )
+                    .unwrap();
 
-                if render_storage.pipelines.ui {
-                    builder
-                        .bind_pipeline_graphics(pipeline_ui.clone()) // start of ui pipeline
-                        .unwrap()
-                        .bind_descriptor_sets(
-                            PipelineBindPoint::Graphics,
-                            pipeline_ui.layout().clone(),
-                            0,
-                            vec![set_main.clone(), set_sprites_text.clone()],
-                        )
-                        .unwrap()
-                        .bind_vertex_buffers(
-                            0,
-                            vertex_buffers_ui[render_storage.frame_count as usize % 2].clone(),
-                        )
-                        .unwrap()
-                        .bind_index_buffer(
-                            index_buffers_ui[render_storage.frame_count as usize % 2].clone(),
-                        )
-                        .unwrap()
-                        .draw_indexed(
-                            index_counts_ui[render_storage.frame_count as usize % 2],
-                            1,
-                            0,
-                            0,
-                            0,
-                        )
-                        .unwrap();
-                }
+                builder
+                    .bind_pipeline_graphics(pipeline_ui.clone()) // start of ui pipeline
+                    .unwrap()
+                    .bind_descriptor_sets(
+                        PipelineBindPoint::Graphics,
+                        pipeline_ui.layout().clone(),
+                        0,
+                        vec![set_main.clone(), set_sprites_text.clone()],
+                    )
+                    .unwrap()
+                    .bind_vertex_buffers(
+                        0,
+                        vertex_buffers_ui[render_storage.frame_count as usize % 2].clone(),
+                    )
+                    .unwrap()
+                    .bind_index_buffer(
+                        index_buffers_ui[render_storage.frame_count as usize % 2].clone(),
+                    )
+                    .unwrap()
+                    .draw_indexed(
+                        index_counts_ui[render_storage.frame_count as usize % 2],
+                        1,
+                        0,
+                        0,
+                        0,
+                    )
+                    .unwrap();
 
-                if render_storage.pipelines.test {
-                    builder
-                        .bind_pipeline_graphics(pipeline_test.clone()) // start of test pipeline
-                        .unwrap()
-                        .bind_descriptor_sets(
-                            PipelineBindPoint::Graphics,
-                            pipeline_test.layout().clone(),
-                            0,
-                            vec![set_test, set_sprites_map.clone()], // TODO: set these correctly
-                        )
-                        .unwrap()
-                        .bind_vertex_buffers(
-                            0,
-                            (vertex_buffer_test.clone(), instance_buffer_test.clone()),
-                        )
-                        .unwrap()
-                        .bind_index_buffer(index_buffer_test.clone())
-                        .unwrap()
-                        .draw_indexed(index_count_test, instance_count_test, 0, 0, 0)
-                        .unwrap();
-                }
+                builder
+                    .bind_pipeline_graphics(pipeline_test.clone()) // start of test pipeline
+                    .unwrap()
+                    .bind_descriptor_sets(
+                        PipelineBindPoint::Graphics,
+                        pipeline_test.layout().clone(),
+                        0,
+                        vec![set_test, set_sprites_map.clone()], // TODO: set these correctly
+                    )
+                    .unwrap()
+                    .bind_vertex_buffers(
+                        0,
+                        (vertex_buffer_test.clone(), instance_buffer_test.clone()),
+                    )
+                    .unwrap()
+                    .bind_index_buffer(index_buffer_test.clone())
+                    .unwrap()
+                    .draw_indexed(index_count_test, instance_count_test, 0, 0, 0)
+                    .unwrap();
 
                 builder.end_render_pass(Default::default()).unwrap();
 
@@ -1268,45 +1250,47 @@ fn window_size_dependent_setup(
         }
 
         let subpass = Subpass::from(render_pass.clone(), 0).unwrap();
-        uv_pipeline = Some(GraphicsPipeline::new(
-            device.clone(),
-            None,
-            GraphicsPipelineCreateInfo {
-                stages: uv_stages.into_iter().collect(),
-                vertex_input_state: Some(uv_vertex_input_state),
-                input_assembly_state: Some(InputAssemblyState {
-                    topology: uv_vertex_and_index_buffer_settings.topology,
-                    ..Default::default()
-                }),
-                viewport_state: Some(ViewportState {
-                    viewports: [Viewport {
-                        offset: [0.0, 0.0],
-                        extent: [extent[0] as f32, extent[1] as f32],
-                        depth_range: 0.0f32..=1.0,
-                    }]
-                    .into(),
-                    scissors: [Scissor {
-                        offset: [0, 0],
-                        extent: [extent[0], extent[1]],
-                    }]
-                    .into(),
-                    ..Default::default()
-                }),
-                rasterization_state: Some(RasterizationState::default()),
-                multisample_state: Some(MultisampleState::default()),
-                color_blend_state: Some(ColorBlendState::with_attachment_states(
-                    subpass.num_color_attachments(),
-                    ColorBlendAttachmentState {
-                        blend: Some(AttachmentBlend::alpha()),
+        uv_pipeline = Some(
+            GraphicsPipeline::new(
+                device.clone(),
+                None,
+                GraphicsPipelineCreateInfo {
+                    stages: uv_stages.into_iter().collect(),
+                    vertex_input_state: Some(uv_vertex_input_state),
+                    input_assembly_state: Some(InputAssemblyState {
+                        topology: uv_vertex_and_index_buffer_settings.topology,
                         ..Default::default()
-                    },
-                )),
-                depth_stencil_state: uv_depth_stencil_state,
-                subpass: Some(subpass.into()),
-                ..GraphicsPipelineCreateInfo::layout(uv_layout)
-            },
-        )
-        .unwrap());
+                    }),
+                    viewport_state: Some(ViewportState {
+                        viewports: [Viewport {
+                            offset: [0.0, 0.0],
+                            extent: [extent[0] as f32, extent[1] as f32],
+                            depth_range: 0.0f32..=1.0,
+                        }]
+                        .into(),
+                        scissors: [Scissor {
+                            offset: [0, 0],
+                            extent: [extent[0], extent[1]],
+                        }]
+                        .into(),
+                        ..Default::default()
+                    }),
+                    rasterization_state: Some(RasterizationState::default()),
+                    multisample_state: Some(MultisampleState::default()),
+                    color_blend_state: Some(ColorBlendState::with_attachment_states(
+                        subpass.num_color_attachments(),
+                        ColorBlendAttachmentState {
+                            blend: Some(AttachmentBlend::alpha()),
+                            ..Default::default()
+                        },
+                    )),
+                    depth_stencil_state: uv_depth_stencil_state,
+                    subpass: Some(subpass.into()),
+                    ..GraphicsPipelineCreateInfo::layout(uv_layout)
+                },
+            )
+            .unwrap(),
+        );
     }
 
     if let Some(colour_vertex_and_index_buffer_settings) =
@@ -1357,45 +1341,47 @@ fn window_size_dependent_setup(
         }
 
         let subpass = Subpass::from(render_pass.clone(), 0).unwrap();
-        colour_pipeline = Some(GraphicsPipeline::new(
-            device.clone(),
-            None,
-            GraphicsPipelineCreateInfo {
-                stages: colour_stages.into_iter().collect(),
-                vertex_input_state: Some(colour_vertex_input_state),
-                input_assembly_state: Some(InputAssemblyState {
-                    topology: colour_vertex_and_index_buffer_settings.topology,
-                    ..Default::default()
-                }),
-                viewport_state: Some(ViewportState {
-                    viewports: [Viewport {
-                        offset: [0.0, 0.0],
-                        extent: [extent[0] as f32, extent[1] as f32],
-                        depth_range: 0.0f32..=1.0,
-                    }]
-                    .into(),
-                    scissors: [Scissor {
-                        offset: [0, 0],
-                        extent: [extent[0], extent[1]],
-                    }]
-                    .into(),
-                    ..Default::default()
-                }),
-                rasterization_state: Some(RasterizationState::default()),
-                multisample_state: Some(MultisampleState::default()),
-                color_blend_state: Some(ColorBlendState::with_attachment_states(
-                    subpass.num_color_attachments(),
-                    ColorBlendAttachmentState {
-                        blend: Some(AttachmentBlend::alpha()),
+        colour_pipeline = Some(
+            GraphicsPipeline::new(
+                device.clone(),
+                None,
+                GraphicsPipelineCreateInfo {
+                    stages: colour_stages.into_iter().collect(),
+                    vertex_input_state: Some(colour_vertex_input_state),
+                    input_assembly_state: Some(InputAssemblyState {
+                        topology: colour_vertex_and_index_buffer_settings.topology,
                         ..Default::default()
-                    },
-                )),
-                depth_stencil_state: colour_depth_stencil_state,
-                subpass: Some(subpass.into()),
-                ..GraphicsPipelineCreateInfo::layout(colour_layout)
-            },
-        )
-        .unwrap());
+                    }),
+                    viewport_state: Some(ViewportState {
+                        viewports: [Viewport {
+                            offset: [0.0, 0.0],
+                            extent: [extent[0] as f32, extent[1] as f32],
+                            depth_range: 0.0f32..=1.0,
+                        }]
+                        .into(),
+                        scissors: [Scissor {
+                            offset: [0, 0],
+                            extent: [extent[0], extent[1]],
+                        }]
+                        .into(),
+                        ..Default::default()
+                    }),
+                    rasterization_state: Some(RasterizationState::default()),
+                    multisample_state: Some(MultisampleState::default()),
+                    color_blend_state: Some(ColorBlendState::with_attachment_states(
+                        subpass.num_color_attachments(),
+                        ColorBlendAttachmentState {
+                            blend: Some(AttachmentBlend::alpha()),
+                            ..Default::default()
+                        },
+                    )),
+                    depth_stencil_state: colour_depth_stencil_state,
+                    subpass: Some(subpass.into()),
+                    ..GraphicsPipelineCreateInfo::layout(colour_layout)
+                },
+            )
+            .unwrap(),
+        );
     }
 
     (uv_pipeline, colour_pipeline, framebuffers)
@@ -1672,35 +1658,45 @@ fn update_buffers(
     render_storage: &mut events::RenderStorage,
     real_render_buffer_containers: &mut Vec<menu_rendering::RealRenderBufferContainer>, // Really hate the name. It is more a list of real buffers
 ) {
-    assert!(render_storage.render_call_buffer_containers.len() != real_render_buffer_containers.len());
+    assert!(render_storage.render_buffer_containers.len() != real_render_buffer_containers.len());
 
     for i in 0..real_render_buffer_containers.len() {
-        let real_render_buffer_container = real_render_buffer_containers[i];
-        let render_buffer_container = render_storage.render_buffer_containers[i];
-        
-        // TODO: make it not be % 2
-        let index_writer = real_render_buffer_container.index_buffer[render_storage.frame_count as usize % 2].write();
+        let real_render_buffer_container = &mut real_render_buffer_containers[i];
+        let render_buffer_container = &render_storage.render_buffer_containers[i];
 
-        match index_writer {
-            Ok(mut writer) => {
-                writer[0..render_storage.index_counts[i] as usize].copy_from_slice(
-                    &render_storage.indices_map[0..render_storage.index_count_map as usize],
-                );
-                index_counts_map[render_storage.frame_count as usize % 2] =
-                    render_storage.index_count_map;
-            }
-            Err(e) => match e {
-                HostAccessError::AccessConflict(access_conflict) => {
-                    println!("Failed to update map index buffer. {access_conflict}");
-                }
-                _ => panic!("couldn't write to the vertex buffer: {e}"),
-            },
-        };
+        // TODO: make it not be % 2
+
+        update_buffer(
+            &real_render_buffer_container.index_buffer[render_storage.frame_count as usize % 2],
+            &render_buffer_container.index_buffer,
+            render_buffer_container.index_count,
+            &mut real_render_buffer_container.index_count[render_storage.frame_count as usize % 2],
+        );
 
         match real_render_buffer_container.vertex_buffer {
             menu_rendering::RealVertexBuffer::UvVertexBuffer(_) => {}
         }
     }
+}
+
+fn update_buffer<T>(subbuffer: &Subbuffer<[T]>, vec: &Vec<T>, count: usize, real_count: &mut usize)
+where
+    T: BufferContents + Copy,
+{
+    let writer = subbuffer.write();
+
+    match writer {
+        Ok(mut writer) => {
+            writer[0..count].copy_from_slice(&vec[0..count]);
+            *real_count = count;
+        }
+        Err(e) => match e {
+            HostAccessError::AccessConflict(access_conflict) => {
+                println!("Failed to update buffer. {access_conflict}");
+            }
+            _ => panic!("couldn't write to the buffer: {e}"),
+        },
+    };
 }
 
 fn update_buffers_old(
@@ -1826,4 +1822,3 @@ fn update_buffers_map(
         },
     };
 }
-

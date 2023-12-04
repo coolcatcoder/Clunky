@@ -282,10 +282,9 @@ pub struct RenderStorage {
     pub starting_time: Instant,
     pub window_size: [u32; 2],
 
-    pub pipelines: crate::PipelinesEnabled,
-    pub menu: menus::Menu,
+    pub menu: menus::Menu, // TODO: Why does main need access to the menu? It really shouldn't.
 
-    pub render_call_buffer_containers: Vec<menu_rendering::RenderBufferContainer>, // Bad name?
+    pub render_buffer_containers: Vec<menu_rendering::RenderBufferContainer>, // Bad name?
 }
 
 pub fn generate_chunk(user_storage: &UserStorage, chunk_position: (u32, u32)) {

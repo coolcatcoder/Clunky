@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use vulkano::{
-    device::Device, pipeline::graphics::input_assembly::PrimitiveTopology, shader::ShaderModule,
-    Validated, VulkanError, buffer::Subbuffer,
+    buffer::Subbuffer, device::Device, pipeline::graphics::input_assembly::PrimitiveTopology,
+    shader::ShaderModule, Validated, VulkanError,
 };
 
 use crate::vertex_data;
@@ -139,12 +139,16 @@ check out https://users.rust-lang.org/t/vector-with-generic-types-heterogeneous-
 I really like the idea of using enums containing types. Not exactly certain how yet. But I'll work it out!
 */
 
-
 // We can store a Vec of this in render storage, and manipulated via functions run by the menus, should we want to update the buffers.
 pub struct RenderBufferContainer {
     pub vertex_buffer: VertexBuffer,
+    pub vertex_count: usize,
+
     pub index_buffer: Vec<u32>,
+    pub index_count: usize,
+
     pub instance_buffer: Option<InstanceBuffer>,
+    pub instance_count: usize,
 }
 
 pub enum VertexBuffer {
@@ -159,14 +163,19 @@ pub enum InstanceBuffer {
 
 pub struct RealRenderBufferContainer {
     pub vertex_buffer: RealVertexBuffer,
-    pub index_buffer: Vec<Subbuffer<u32>>,
+    pub vertex_count: Vec<usize>,
+
+    pub index_buffer: Vec<Subbuffer<[u32]>>,
+    pub index_count: Vec<usize>,
+
     pub instance_buffer: Option<RealInstanceBuffer>,
+    pub instance_count: Vec<usize>,
 }
 
 pub enum RealVertexBuffer {
-    UvVertexBuffer(Vec<Subbuffer<vertex_data::UvVertex>>),
+    UvVertexBuffer(Vec<Subbuffer<[vertex_data::UvVertex]>>),
 }
 
 pub enum RealInstanceBuffer {
-    TestInstanceBuffer(Vec<Subbuffer<vertex_data::TestInstance>>),
+    TestInstanceBuffer(Vec<Subbuffer<[vertex_data::TestInstance]>>),
 }
