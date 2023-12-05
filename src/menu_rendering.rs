@@ -60,22 +60,6 @@ Perhaps instead of having arrays of 2, we should instead have an option<> of an 
 
 Ui handling??
 */
-pub struct RenderSettings {
-    pub uv_vertex_and_index_buffer_settings: Option<VertexAndIndexBufferSettings>,
-    pub colour_vertex_and_index_buffer_settings: Option<VertexAndIndexBufferSettings>,
-}
-
-pub struct VertexAndIndexBufferSettings {
-    pub edit_frequency: EditFrequency,
-    pub instance_edit_frequency: Option<EditFrequency>,
-
-    pub vertex_shader: VertexShader,
-    pub fragment_shader: FragmentShader,
-
-    pub topology: PrimitiveTopology,
-
-    pub depth: bool,
-}
 
 /* Goals are ill defined. Better goals:
 S 1. Main should not have to be altered in order to add or remove draw calls. Only menus should have to be altered.
@@ -94,22 +78,22 @@ EW = Experimental implementation that is working.
 A = Goal achieved.
 */
 
-pub struct ExperimentalRenderCall {
+pub struct RenderSettings {
     pub vertex_shader: VertexShader,
     pub fragment_shader: FragmentShader,
-    pub vertex_and_index_buffer_settings: ExperimentalVertexAndIndexBufferSettings,
-    pub instance_buffer_settings: Option<ExperimentalInstanceBufferSettings>,
+    pub vertex_and_index_buffer_settings: VertexAndIndexBufferSettings,
+    pub instance_buffer_settings: Option<InstanceBufferSettings>,
     pub depth: bool,
 }
 
-pub struct ExperimentalVertexAndIndexBufferSettings {
+pub struct VertexAndIndexBufferSettings {
     pub vertex_buffer_type: VertexBufferType,
     pub vertex_buffer_edit_frequency: EditFrequency,
     pub topology: PrimitiveTopology,
     pub index_buffer_edit_frequency: EditFrequency,
 }
 
-pub struct ExperimentalInstanceBufferSettings {
+pub struct InstanceBufferSettings {
     pub instance_buffer_type: InstanceBufferType,
     pub instance_buffer_edit_frequency: EditFrequency,
 }
@@ -140,7 +124,7 @@ I really like the idea of using enums containing types. Not exactly certain how 
 */
 
 // We can store a Vec of this in render storage, and manipulated via functions run by the menus, should we want to update the buffers.
-pub struct RenderBufferContainer {
+pub struct RenderBuffers {
     pub vertex_buffer: VertexBuffer,
     pub vertex_count: usize,
     pub update_vertex_buffer: bool,
@@ -165,15 +149,18 @@ pub enum InstanceBuffer {
 
 // Real buffers below should contain actual sub buffers. Used only by main, not by menus.
 
-pub struct RealRenderBufferContainer {
+pub struct RealRenderBuffers {
     pub vertex_buffer: RealVertexBuffer,
     pub vertex_count: Vec<usize>,
+    pub update_vertex_buffer: Vec<bool>, // Essentially when we get the signal to update the buffer from the menu, we then set that to false, and set this entire vec to true. Whenever we can write to the buffer we set one of them to false, for that specific buffer.
 
     pub index_buffer: Vec<Subbuffer<[u32]>>,
     pub index_count: Vec<usize>,
+    pub update_index_buffer: Vec<bool>,
 
     pub instance_buffer: Option<RealInstanceBuffer>,
     pub instance_count: Vec<usize>,
+    pub update_instance_buffer: Vec<bool>,
 }
 
 pub enum RealVertexBuffer {

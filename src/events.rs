@@ -37,7 +37,7 @@ pub const MAX_VERTICES: usize = CHUNK_WIDTH_SQUARED as usize * 4 * 100;
 pub const MAX_INDICES: usize = CHUNK_WIDTH_SQUARED as usize * 6 * 100;
 pub const MAX_INSTANCES: usize = CHUNK_WIDTH_SQUARED as usize * 100;
 
-pub fn start(render_storage: &mut RenderStorage) -> UserStorage {
+pub fn start(render_storage: &mut crate::RenderStorage) -> UserStorage {
     render_storage.camera.scale = 0.12;
 
     render_storage.brightness = 2.5;
@@ -124,7 +124,7 @@ pub fn start(render_storage: &mut RenderStorage) -> UserStorage {
     user_storage
 }
 
-pub fn fixed_update(user_storage: &mut UserStorage, render_storage: &mut RenderStorage) {
+pub fn fixed_update(user_storage: &mut UserStorage, render_storage: &mut crate::RenderStorage) {
     let motion = match user_storage.wasd_held {
         (true, false, false, false) => (0.0, -1.0),
         (false, false, true, false) => (0.0, 1.0),
@@ -251,21 +251,6 @@ pub struct UserStorage {
     //pub screen_buttons: Vec<ui::ScreenButton>,
     //pub screen_toggleable_buttons: Vec<ui::ScreenToggleableButton>,
     pub perks_and_curses: perks_and_curses::PerksAndCurses,
-}
-
-pub struct RenderStorage {
-    // TODO: Perhaps removing or refining what belongs in this struct.
-    pub aspect_ratio: f32,
-    pub camera: Camera,
-    pub brightness: f32,
-    pub frame_count: u32, // This will overflow after 2 years, assuming 60 fps.
-    pub starting_time: Instant,
-    pub window_size: [u32; 2],
-
-    pub menu: menus::Menu, // TODO: Why does main need access to the menu? It really shouldn't.
-
-    pub real_render_buffer_containers: Vec<menu_rendering::RealRenderBufferContainer>, // Bad name?
-    pub render_buffer_containers: Vec<menu_rendering::RenderBufferContainer>, // Bad name?
 }
 
 pub fn generate_chunk(user_storage: &UserStorage, chunk_position: (u32, u32)) {
@@ -627,15 +612,10 @@ where
     (index % width, index / width)
 }
 
-pub struct Camera {
-    pub scale: f32,
-    pub position: (f32, f32),
-}
-
 #[deprecated]
 pub fn render_map(
     user_storage: &mut UserStorage,
-    render_storage: &mut RenderStorage,
+    render_storage: &mut crate::RenderStorage,
     detail: u8,
     render_sender: &Sender<(Vec<vertex_data::MapVertex>, u32, Vec<u32>, u32)>,
 ) {
@@ -795,7 +775,7 @@ pub fn render_map(
 #[deprecated]
 pub fn render_map_single_threaded(
     user_storage: &mut UserStorage,
-    render_storage: &mut RenderStorage,
+    render_storage: &mut crate::RenderStorage,
     detail: u8,
 ) {
     let detail_scale = user_storage.details[detail as usize].scale;
@@ -985,7 +965,7 @@ pub fn render_map_single_threaded(
 */
 
 /*
-pub fn render_player(user_storage: &mut UserStorage, render_storage: &mut RenderStorage) {
+pub fn render_player(user_storage: &mut UserStorage, render_storage: &mut crate::RenderStorage) {
     let vertex_start = render_storage.vertex_count_map as usize;
     let index_start = render_storage.index_count_map as usize;
 
@@ -1045,7 +1025,7 @@ pub fn render_player(user_storage: &mut UserStorage, render_storage: &mut Render
 
 fn collide(
     user_storage: &mut UserStorage,
-    render_storage: &mut RenderStorage,
+    render_storage: &mut crate::RenderStorage,
     full_position: (u32, u32),
     detail_index: u8,
 ) {
@@ -1102,7 +1082,7 @@ pub struct Player {
 
 fn deal_with_collision(
     user_storage: &mut UserStorage,
-    render_storage: &mut RenderStorage,
+    render_storage: &mut crate::RenderStorage,
     fallback_position: (f32, f32),
     full_position: (u32, u32),
     detail_index: u8,

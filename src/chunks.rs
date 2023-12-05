@@ -4,7 +4,7 @@ use std::{ops::Add, ops::Div, ops::Mul, ops::Rem};
 
 fn render_chunk(
     user_storage: &mut events::UserStorage,
-    render_storage: &mut events::RenderStorage,
+    render_storage: &mut crate::RenderStorage,
     chunk_position: (u32, u32),
 ) {
     let starting_index = events::index_from_position(chunk_position, events::CHUNK_GRID_WIDTH)

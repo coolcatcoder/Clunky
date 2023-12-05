@@ -5,8 +5,8 @@ pub struct PerkOrCurse<'a> {
     pub name: &'a str,
     pub description: &'a str,
     pub cost: u8,
-    pub condition: fn(&mut events::UserStorage, &mut events::RenderStorage) -> bool,
-    pub effect: fn(&mut events::UserStorage, &mut events::RenderStorage),
+    pub condition: fn(&mut events::UserStorage, &mut crate::RenderStorage) -> bool,
+    pub effect: fn(&mut events::UserStorage, &mut crate::RenderStorage),
 }
 
 #[derive(Debug)]
@@ -33,20 +33,20 @@ pub const PERKS: [PerkOrCurse; 3] = [
         description: "this is a test perk",
         cost: 5,
         condition: |_user_storage: &mut events::UserStorage,
-                    _render_storage: &mut events::RenderStorage|
+                    _render_storage: &mut crate::RenderStorage|
          -> bool { true },
         effect: |_user_storage: &mut events::UserStorage,
-                 _render_storage: &mut events::RenderStorage| { println!("p0") },
+                 _render_storage: &mut crate::RenderStorage| { println!("p0") },
     },
     PerkOrCurse {
         name: "Bug",
         description: "this should not happen",
         cost: 5,
         condition: |_user_storage: &mut events::UserStorage,
-                    _render_storage: &mut events::RenderStorage|
+                    _render_storage: &mut crate::RenderStorage|
          -> bool { false },
         effect: |_user_storage: &mut events::UserStorage,
-                 _render_storage: &mut events::RenderStorage| { println!("p1") },
+                 _render_storage: &mut crate::RenderStorage| { println!("p1") },
     },
     PerkOrCurse {
         name: "Extra Health",
@@ -64,10 +64,10 @@ pub const PERKS_NO_DUPLICATES: [PerkOrCurse; 1] = [PerkOrCurse {
     description: "this is a test perk without duplicates",
     cost: 3,
     condition: |_user_storage: &mut events::UserStorage,
-                _render_storage: &mut events::RenderStorage|
+                _render_storage: &mut crate::RenderStorage|
      -> bool { true },
     effect: |_user_storage: &mut events::UserStorage,
-             _render_storage: &mut events::RenderStorage| { println!("pnd0") },
+             _render_storage: &mut crate::RenderStorage| { println!("pnd0") },
 }];
 
 pub const CURSES: [PerkOrCurse; 2] = [
@@ -76,10 +76,10 @@ pub const CURSES: [PerkOrCurse; 2] = [
         description: "this is a test curse",
         cost: 5,
         condition: |_user_storage: &mut events::UserStorage,
-                    _render_storage: &mut events::RenderStorage|
+                    _render_storage: &mut crate::RenderStorage|
          -> bool { true },
         effect: |_user_storage: &mut events::UserStorage,
-                 _render_storage: &mut events::RenderStorage| { println!("c0") },
+                 _render_storage: &mut crate::RenderStorage| { println!("c0") },
     },
     PerkOrCurse {
         name: "Less Health",
@@ -99,8 +99,8 @@ pub const CURSES_NO_DUPLICATES: [PerkOrCurse; 1] = [PerkOrCurse {
     description: "this is a test curse without duplicates",
     cost: 3,
     condition: |_user_storage: &mut events::UserStorage,
-                _render_storage: &mut events::RenderStorage|
+                _render_storage: &mut crate::RenderStorage|
      -> bool { true },
     effect: |_user_storage: &mut events::UserStorage,
-             _render_storage: &mut events::RenderStorage| { println!("cnd0") },
+             _render_storage: &mut crate::RenderStorage| { println!("cnd0") },
 }];

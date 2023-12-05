@@ -225,8 +225,6 @@ fn main() {
 
     let (vertex_buffers_map, index_buffers_map) = create_buffers_map(memory_allocator.clone());
 
-    let (vertex_buffers_ui, index_buffers_ui) = create_buffers_ui(memory_allocator.clone());
-
     let (vertex_buffer_test, index_buffer_test, instance_buffer_test) =
         create_buffers(memory_allocator.clone());
 
@@ -454,9 +452,9 @@ fn main() {
     let mut index_count_test = 0u32;
     let mut instance_count_test = 0u32;
 
-    let mut render_storage = events::RenderStorage {
+    let mut render_storage = RenderStorage {
         aspect_ratio: 0.0,
-        camera: events::Camera {
+        camera: Camera {
             scale: 1.0,
             position: (0.0, 0.0),
         },
@@ -465,8 +463,9 @@ fn main() {
         starting_time: Instant::now(),
         window_size: [0, 0],
         menu: menus::STARTING_MENU,
-        real_render_buffer_containers: vec![],
-        render_buffer_containers: vec![],
+        render_settings_list: vec![],
+        real_render_buffers_list: vec![],
+        render_buffers_list: vec![],
     };
 
     let mut user_storage = events::start(&mut render_storage);
@@ -707,15 +706,15 @@ fn main() {
                         vec![set_main.clone(), set_sprites_text.clone()],
                     )
                     .unwrap()
-                    .bind_vertex_buffers(
-                        0,
-                        vertex_buffers_ui[render_storage.frame_count as usize % 2].clone(),
-                    )
-                    .unwrap()
-                    .bind_index_buffer(
-                        index_buffers_ui[render_storage.frame_count as usize % 2].clone(),
-                    )
-                    .unwrap()
+                    // .bind_vertex_buffers(
+                    //     0,
+                    //     vertex_buffers_ui[render_storage.frame_count as usize % 2].clone(),
+                    // )
+                    // .unwrap()
+                    // .bind_index_buffer(
+                    //     index_buffers_ui[render_storage.frame_count as usize % 2].clone(),
+                    // )
+                    // .unwrap()
                     .draw_indexed(
                         index_counts_ui[render_storage.frame_count as usize % 2],
                         1,
@@ -1090,12 +1089,13 @@ fn window_size_dependent_setup_old(
     (pipeline_map, pipeline_ui, pipeline_test, framebuffers)
 }
 
-fn window_size_dependent_setup(
+/*
+fn window_size_dependent_setup_bad(
     memory_allocator: Arc<StandardMemoryAllocator>,
     images: &[Arc<Image>],
     render_pass: Arc<RenderPass>,
     device: Arc<Device>,
-    render_storage: &mut events::RenderStorage,
+    render_storage: &mut RenderStorage,
 ) -> (
     Option<Arc<GraphicsPipeline>>,
     Option<Arc<GraphicsPipeline>>,
@@ -1323,6 +1323,7 @@ fn window_size_dependent_setup(
 
     (uv_pipeline, colour_pipeline, framebuffers)
 }
+*/
 
 fn get_instance_and_event_loop() -> (Arc<vulkano::instance::Instance>, EventLoop<()>) {
     let library = VulkanLibrary::new().unwrap();
@@ -1340,11 +1341,6 @@ fn get_instance_and_event_loop() -> (Arc<vulkano::instance::Instance>, EventLoop
         .unwrap(),
         event_loop,
     )
-}
-
-// TODO: put this in events? It will be called from user code, not main. I think.
-fn setup_buffers_and_draw_calls(render_storage: &mut events::RenderStorage) {
-
 }
 
 fn create_buffers(
@@ -1508,22 +1504,26 @@ fn create_buffers_map(
 }
 
 fn update_buffers(
-    render_storage: &mut events::RenderStorage,
+    render_storage: &mut RenderStorage,
 ) {
-    assert!(render_storage.render_buffer_containers.len() != render_storage.real_render_buffer_containers.len());
+    assert!(render_storage.render_buffers_list.len() == render_storage.real_render_buffers_list.len());
+    assert!(render_storage.real_render_buffers_list.len() == render_storage.render_settings_list.len());
 
-    for i in 0..render_storage.real_render_buffer_containers.len() {
-        let real_render_buffer_container = &mut render_storage.real_render_buffer_containers[i];
-        let render_buffer_container = &mut render_storage.render_buffer_containers[i];
+    for i in 0..render_storage.real_render_buffers_list.len() {
+        let real_render_buffers = &mut render_storage.real_render_buffers_list[i];
+        let render_buffers = &mut render_storage.render_buffers_list[i];
+        let render_settings = &render_storage.render_settings_list[i];
 
-        // TODO: make it not be % 2
+        let real_index_buffer_index = render_storage.frame_count as usize % render_settings.vertex_and_index_buffer_settings.index_buffer_edit_frequency.to_buffer_amount();
+        let real_vertex_buffer_index = render_storage.frame_count as usize % render_settings.vertex_and_index_buffer_settings.vertex_buffer_edit_frequency.to_buffer_amount();
 
         update_buffer(
-            &real_render_buffer_container.index_buffer[render_storage.frame_count as usize % 2],
-            &render_buffer_container.index_buffer,
-            render_buffer_container.index_count,
-            &mut real_render_buffer_container.index_count[render_storage.frame_count as usize % 2],
-            &mut render_buffer_container.update_index_buffer,
+            &real_render_buffers.index_buffer[real_index_buffer_index],
+            &render_buffers.index_buffer,
+            render_buffers.index_count,
+            &mut real_render_buffers.index_count[real_index_buffer_index],
+            // &mut render_buffers.update_index_buffer, This is the old, for reference.
+            &mut real_render_buffers.update_index_buffer[real_index_buffer_index]
         );
 
 
@@ -1605,4 +1605,36 @@ where
             _ => panic!("couldn't write to the buffer: {e}"),
         },
     };
+}
+
+pub struct Camera {
+    pub scale: f32,
+    pub position: (f32, f32),
+}
+
+pub struct RenderStorage {
+    // TODO: Perhaps removing or refining what belongs in this struct.
+    pub aspect_ratio: f32,
+    pub camera: Camera,
+    pub brightness: f32,
+    pub frame_count: u32, // This will overflow after 2 years, assuming 60 fps.
+    pub starting_time: Instant,
+    pub window_size: [u32; 2],
+
+    pub menu: menus::Menu, // TODO: Why does main need access to the menu? It really shouldn't.
+
+    render_settings_list: Vec<menu_rendering::RenderSettings>,
+    real_render_buffers_list: Vec<menu_rendering::RealRenderBuffers>, // Bad name?
+    pub render_buffers_list: Vec<menu_rendering::RenderBuffers>, // Bad name?
+}
+
+impl RenderStorage {
+    // TODO: put this in events? It will be called from user code, not main. I think.
+    fn setup_buffers_and_draw_calls(&mut self, render_settings_list: Vec<menu_rendering::RenderSettings>) {
+        self.render_settings_list = render_settings_list;
+
+        for render_settings in &self.render_settings_list {
+
+        }
+    }
 }

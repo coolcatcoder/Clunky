@@ -132,12 +132,12 @@ pub enum CollisionBehaviour {
 
 pub const MAP_OBJECT_COLLISION_FUNCTIONS: [fn(
     &mut events::UserStorage,
-    &mut events::RenderStorage,
+    &mut crate::RenderStorage,
     (u32, u32),
     u8,
 ); 3] = [
     |user_storage: &mut events::UserStorage,
-     _render_storage: &mut events::RenderStorage,
+     _render_storage: &mut crate::RenderStorage,
      full_position: (u32, u32),
      detail_index: u8| {
         let position_range = Uniform::new(1, 50);
@@ -175,13 +175,13 @@ pub const MAP_OBJECT_COLLISION_FUNCTIONS: [fn(
         );
     },
     |_user_storage: &mut events::UserStorage,
-     render_storage: &mut events::RenderStorage,
+     render_storage: &mut crate::RenderStorage,
      _full_position: (u32, u32),
      _detail_index: u8| {
         render_storage.brightness -= 1.0 * events::FIXED_UPDATE_TIME_STEP;
     },
     |_user_storage: &mut events::UserStorage,
-     render_storage: &mut events::RenderStorage,
+     render_storage: &mut crate::RenderStorage,
      _full_position: (u32, u32),
      _detail_index: u8| {
         render_storage.brightness += 1.0 * events::FIXED_UPDATE_TIME_STEP;

@@ -51,28 +51,23 @@ impl Menu {
 }
 
 pub struct MenuData {
-    pub render_settings: menu_rendering::RenderSettings,
-    pub start: fn(&mut events::UserStorage, &mut events::RenderStorage),
-    pub update: fn(&mut events::UserStorage, &mut events::RenderStorage, f32, f32),
-    pub end: fn(&mut events::UserStorage, &mut events::RenderStorage),
-    pub on_keyboard_input: fn(&mut events::UserStorage, &mut events::RenderStorage, KeyboardInput),
-    pub on_window_resize: fn(&mut events::UserStorage, &mut events::RenderStorage),
+    pub start: fn(&mut events::UserStorage, &mut crate::RenderStorage),
+    pub update: fn(&mut events::UserStorage, &mut crate::RenderStorage, f32, f32),
+    pub end: fn(&mut events::UserStorage, &mut crate::RenderStorage),
+    pub on_keyboard_input: fn(&mut events::UserStorage, &mut crate::RenderStorage, KeyboardInput),
+    pub on_window_resize: fn(&mut events::UserStorage, &mut crate::RenderStorage),
     pub on_cursor_moved:
-        fn(&mut events::UserStorage, &mut events::RenderStorage, PhysicalPosition<f64>),
+        fn(&mut events::UserStorage, &mut crate::RenderStorage, PhysicalPosition<f64>),
     pub on_mouse_input:
-        fn(&mut events::UserStorage, &mut events::RenderStorage, ElementState, MouseButton),
+        fn(&mut events::UserStorage, &mut crate::RenderStorage, ElementState, MouseButton),
 }
 
 pub const TITLE_SCREEN: MenuData = MenuData {
-    render_settings: menu_rendering::RenderSettings {
-        uv_vertex_and_index_buffer_settings: None,
-        colour_vertex_and_index_buffer_settings: None,
-    },
-    start: |user_storage: &mut events::UserStorage, render_storage: &mut events::RenderStorage| {
+    start: |user_storage: &mut events::UserStorage, render_storage: &mut crate::RenderStorage| {
         (TITLE_SCREEN.on_window_resize)(user_storage, render_storage);
     },
     update: |_user_storage: &mut events::UserStorage,
-             _render_storage: &mut events::RenderStorage,
+             _render_storage: &mut crate::RenderStorage,
              _delta_time: f32,
              _average_fps: f32| {
         //render_storage.vertex_count_ui = 0;
@@ -81,9 +76,9 @@ pub const TITLE_SCREEN: MenuData = MenuData {
         //ui::render_screen_buttons(render_storage, &user_storage.screen_buttons);
         //ui::render_screen_texts(render_storage, &user_storage.screen_texts);
     },
-    end: |_user_storage: &mut events::UserStorage, _render_storage: &mut events::RenderStorage| {},
+    end: |_user_storage: &mut events::UserStorage, _render_storage: &mut crate::RenderStorage| {},
     on_keyboard_input: |user_storage: &mut events::UserStorage,
-                        render_storage: &mut events::RenderStorage,
+                        render_storage: &mut crate::RenderStorage,
                         input: KeyboardInput| {
         if let Some(key_code) = input.virtual_keycode {
             match key_code {
@@ -98,7 +93,7 @@ pub const TITLE_SCREEN: MenuData = MenuData {
         }
     },
     on_window_resize: |user_storage: &mut events::UserStorage,
-                       render_storage: &mut events::RenderStorage| {
+                       render_storage: &mut crate::RenderStorage| {
                         /*
         let screen_width = 2.0 / render_storage.aspect_ratio;
 
@@ -141,7 +136,7 @@ pub const TITLE_SCREEN: MenuData = MenuData {
             [1.0, 0.0, 1.0, 1.0],
             [0.0, 1.0, 1.0, 1.0],
             Some((1, [0.0, 1.0, 0.25, 1.0], [0.0, 0.0, 0.0, 1.0])),
-            |user_storage: &mut events::UserStorage, render_storage: &mut events::RenderStorage| {
+            |user_storage: &mut events::UserStorage, render_storage: &mut crate::RenderStorage| {
                 render_storage.menu = Menu::AliveOld;
                 (ALIVE_OLD.start)(user_storage, render_storage);
             },
@@ -149,7 +144,7 @@ pub const TITLE_SCREEN: MenuData = MenuData {
         */
     },
     on_cursor_moved: |user_storage: &mut events::UserStorage,
-                      render_storage: &mut events::RenderStorage,
+                      render_storage: &mut crate::RenderStorage,
                       position: PhysicalPosition<f64>| {
                         /*
         let mouse_position = (
@@ -174,7 +169,7 @@ pub const TITLE_SCREEN: MenuData = MenuData {
         */
     },
     on_mouse_input: |user_storage: &mut events::UserStorage,
-                     render_storage: &mut events::RenderStorage,
+                     render_storage: &mut crate::RenderStorage,
                      state: ElementState,
                      button: MouseButton| {
                         /*
@@ -186,11 +181,7 @@ pub const TITLE_SCREEN: MenuData = MenuData {
 };
 
 pub const ALIVE_OLD: MenuData = MenuData {
-    render_settings: menu_rendering::RenderSettings {
-        uv_vertex_and_index_buffer_settings: None,
-        colour_vertex_and_index_buffer_settings: None,
-    },
-    start: |user_storage: &mut events::UserStorage, render_storage: &mut events::RenderStorage| {
+    start: |user_storage: &mut events::UserStorage, render_storage: &mut crate::RenderStorage| {
         let mut rng = thread_rng();
 
         let seed_range = Uniform::new(0u32, 1000);
@@ -262,7 +253,7 @@ pub const ALIVE_OLD: MenuData = MenuData {
         user_storage.player.previous_position = user_storage.player.aabb.position;
     },
     update: |user_storage: &mut events::UserStorage,
-             render_storage: &mut events::RenderStorage,
+             render_storage: &mut crate::RenderStorage,
              delta_time: f32,
              average_fps: f32| {
         /*
@@ -462,9 +453,9 @@ pub const ALIVE_OLD: MenuData = MenuData {
         }
         */
     },
-    end: |_user_storage: &mut events::UserStorage, _render_storage: &mut events::RenderStorage| {},
+    end: |_user_storage: &mut events::UserStorage, _render_storage: &mut crate::RenderStorage| {},
     on_keyboard_input: |user_storage: &mut events::UserStorage,
-                        render_storage: &mut events::RenderStorage,
+                        render_storage: &mut crate::RenderStorage,
                         input: KeyboardInput| {
         if let Some(key_code) = input.virtual_keycode {
             match key_code {
@@ -556,7 +547,7 @@ pub const ALIVE_OLD: MenuData = MenuData {
         }
     },
     on_window_resize: |user_storage: &mut events::UserStorage,
-                       render_storage: &mut events::RenderStorage| {
+                       render_storage: &mut crate::RenderStorage| {
                         /*
         let screen_width = 2.0 / render_storage.aspect_ratio;
 
@@ -631,23 +622,19 @@ pub const ALIVE_OLD: MenuData = MenuData {
         */
     },
     on_cursor_moved: |_user_storage: &mut events::UserStorage,
-                      _render_storage: &mut events::RenderStorage,
+                      _render_storage: &mut crate::RenderStorage,
                       _position: PhysicalPosition<f64>| {},
     on_mouse_input: |_user_storage: &mut events::UserStorage,
-                     _render_storage: &mut events::RenderStorage,
+                     _render_storage: &mut crate::RenderStorage,
                      _state: ElementState,
                      _button: MouseButton| {},
 };
 
 pub const PAUSED: MenuData = MenuData {
-    render_settings: menu_rendering::RenderSettings {
-        uv_vertex_and_index_buffer_settings: None,
-        colour_vertex_and_index_buffer_settings: None,
-    },
     start: |_user_storage: &mut events::UserStorage,
-            _render_storage: &mut events::RenderStorage| {},
+            _render_storage: &mut crate::RenderStorage| {},
     update: |user_storage: &mut events::UserStorage,
-             render_storage: &mut events::RenderStorage,
+             render_storage: &mut crate::RenderStorage,
              _delta_time: f32,
              _average_fps: f32| {
         //render_storage.vertex_count_ui = 0;
@@ -655,9 +642,9 @@ pub const PAUSED: MenuData = MenuData {
 
         //ui::render_screen_texts(render_storage, &user_storage.screen_texts);
     },
-    end: |_user_storage: &mut events::UserStorage, _render_storage: &mut events::RenderStorage| {},
+    end: |_user_storage: &mut events::UserStorage, _render_storage: &mut crate::RenderStorage| {},
     on_keyboard_input: |user_storage: &mut events::UserStorage,
-                        render_storage: &mut events::RenderStorage,
+                        render_storage: &mut crate::RenderStorage,
                         input: KeyboardInput| {
         if let Some(key_code) = input.virtual_keycode {
             match key_code {
@@ -674,7 +661,7 @@ pub const PAUSED: MenuData = MenuData {
         }
     },
     on_window_resize: |user_storage: &mut events::UserStorage,
-                       render_storage: &mut events::RenderStorage| {
+                       render_storage: &mut crate::RenderStorage| {
                         /*
         let screen_width = 2.0 / render_storage.aspect_ratio;
 
@@ -688,23 +675,19 @@ pub const PAUSED: MenuData = MenuData {
         */
     },
     on_cursor_moved: |_user_storage: &mut events::UserStorage,
-                      _render_storage: &mut events::RenderStorage,
+                      _render_storage: &mut crate::RenderStorage,
                       _position: PhysicalPosition<f64>| {},
     on_mouse_input: |_user_storage: &mut events::UserStorage,
-                     _render_storage: &mut events::RenderStorage,
+                     _render_storage: &mut crate::RenderStorage,
                      _state: ElementState,
                      _button: MouseButton| {},
 };
 
 pub const DEAD: MenuData = MenuData {
-    render_settings: menu_rendering::RenderSettings {
-        uv_vertex_and_index_buffer_settings: None,
-        colour_vertex_and_index_buffer_settings: None,
-    },
     start: |_user_storage: &mut events::UserStorage,
-            _render_storage: &mut events::RenderStorage| {},
+            _render_storage: &mut crate::RenderStorage| {},
     update: |user_storage: &mut events::UserStorage,
-             render_storage: &mut events::RenderStorage,
+             render_storage: &mut crate::RenderStorage,
              _delta_time: f32,
              _average_fps: f32| {
         //render_storage.vertex_count_ui = 0;
@@ -713,9 +696,9 @@ pub const DEAD: MenuData = MenuData {
         //ui::render_screen_buttons(render_storage, &user_storage.screen_buttons);
         //ui::render_screen_texts(render_storage, &user_storage.screen_texts)
     },
-    end: |_user_storage: &mut events::UserStorage, _render_storage: &mut events::RenderStorage| {},
+    end: |_user_storage: &mut events::UserStorage, _render_storage: &mut crate::RenderStorage| {},
     on_keyboard_input: |user_storage: &mut events::UserStorage,
-                        render_storage: &mut events::RenderStorage,
+                        render_storage: &mut crate::RenderStorage,
                         input: KeyboardInput| {
         if let Some(key_code) = input.virtual_keycode {
             match key_code {
@@ -730,7 +713,7 @@ pub const DEAD: MenuData = MenuData {
         }
     },
     on_window_resize: |user_storage: &mut events::UserStorage,
-                       render_storage: &mut events::RenderStorage| {
+                       render_storage: &mut crate::RenderStorage| {
                         /*
         let screen_width = 2.0 / render_storage.aspect_ratio;
 
@@ -763,7 +746,7 @@ pub const DEAD: MenuData = MenuData {
             [1.0, 0.0, 1.0, 1.0],
             [0.0, 1.0, 1.0, 1.0],
             None,
-            |user_storage: &mut events::UserStorage, render_storage: &mut events::RenderStorage| {
+            |user_storage: &mut events::UserStorage, render_storage: &mut crate::RenderStorage| {
                 render_storage.menu = Menu::PerksAndCurses;
                 (PERKS_AND_CURSES.start)(user_storage, render_storage);
             },
@@ -772,7 +755,7 @@ pub const DEAD: MenuData = MenuData {
     },
 
     on_cursor_moved: |user_storage: &mut events::UserStorage,
-                      render_storage: &mut events::RenderStorage,
+                      render_storage: &mut crate::RenderStorage,
                       position: PhysicalPosition<f64>| {
                         /*
         let mouse_position = (
@@ -797,7 +780,7 @@ pub const DEAD: MenuData = MenuData {
         */
     },
     on_mouse_input: |user_storage: &mut events::UserStorage,
-                     render_storage: &mut events::RenderStorage,
+                     render_storage: &mut crate::RenderStorage,
                      state: ElementState,
                      button: MouseButton| {
                         /*
@@ -809,11 +792,7 @@ pub const DEAD: MenuData = MenuData {
 };
 
 pub const PERKS_AND_CURSES: MenuData = MenuData {
-    render_settings: menu_rendering::RenderSettings {
-        uv_vertex_and_index_buffer_settings: None,
-        colour_vertex_and_index_buffer_settings: None,
-    },
-    start: |user_storage: &mut events::UserStorage, render_storage: &mut events::RenderStorage| {
+    start: |user_storage: &mut events::UserStorage, render_storage: &mut crate::RenderStorage| {
         /*
         user_storage.perks_and_curses.offered_perks = vec![];
         user_storage.perks_and_curses.offered_curses = vec![];
@@ -947,7 +926,7 @@ pub const PERKS_AND_CURSES: MenuData = MenuData {
         */
     },
     update: |user_storage: &mut events::UserStorage,
-             render_storage: &mut events::RenderStorage,
+             render_storage: &mut crate::RenderStorage,
              _delta_time: f32,
              _average_fps: f32| {
                 /*
@@ -962,9 +941,9 @@ pub const PERKS_AND_CURSES: MenuData = MenuData {
         ui::render_screen_texts(render_storage, &user_storage.screen_texts);
         */
     },
-    end: |_user_storage: &mut events::UserStorage, _render_storage: &mut events::RenderStorage| {},
+    end: |_user_storage: &mut events::UserStorage, _render_storage: &mut crate::RenderStorage| {},
     on_keyboard_input: |user_storage: &mut events::UserStorage,
-                        render_storage: &mut events::RenderStorage,
+                        render_storage: &mut crate::RenderStorage,
                         input: KeyboardInput| {
         if let Some(key_code) = input.virtual_keycode {
             match key_code {
@@ -984,7 +963,7 @@ pub const PERKS_AND_CURSES: MenuData = MenuData {
         }
     },
     on_window_resize: |user_storage: &mut events::UserStorage,
-                       render_storage: &mut events::RenderStorage| {
+                       render_storage: &mut crate::RenderStorage| {
                         /*
         let screen_width = 2.0 / render_storage.aspect_ratio;
 
@@ -1042,7 +1021,7 @@ pub const PERKS_AND_CURSES: MenuData = MenuData {
                 [0.0, 1.0, 1.0, 1.0],
                 None,
                 |user_storage: &mut events::UserStorage,
-                 render_storage: &mut events::RenderStorage| {
+                 render_storage: &mut crate::RenderStorage| {
                     if user_storage.perks_and_curses.cost <= 0 {
                         for perk_pointer_index in
                             0..user_storage.perks_and_curses.offered_perks.len()
@@ -1115,7 +1094,7 @@ pub const PERKS_AND_CURSES: MenuData = MenuData {
                 [0.0, 1.0, 1.0, 1.0],
                 None,
                 |user_storage: &mut events::UserStorage,
-                 render_storage: &mut events::RenderStorage| {
+                 render_storage: &mut crate::RenderStorage| {
                     render_storage.menu = Menu::AliveOld;
                     (ALIVE_OLD.start)(user_storage, render_storage);
                 },
@@ -1169,7 +1148,7 @@ pub const PERKS_AND_CURSES: MenuData = MenuData {
                     None,
                     [
                         |user_storage: &mut events::UserStorage,
-                         render_storage: &mut events::RenderStorage,
+                         render_storage: &mut crate::RenderStorage,
                          screen_toggleable_button_index| {
                             let cost = match user_storage.perks_and_curses.offered_perks
                                 [screen_toggleable_button_index]
@@ -1198,7 +1177,7 @@ pub const PERKS_AND_CURSES: MenuData = MenuData {
                             ui::render_screen_texts(render_storage, &user_storage.screen_texts);
                         },
                         |user_storage: &mut events::UserStorage,
-                         render_storage: &mut events::RenderStorage,
+                         render_storage: &mut crate::RenderStorage,
                          screen_toggleable_button_index| {
                             let cost = match user_storage.perks_and_curses.offered_perks
                                 [screen_toggleable_button_index]
@@ -1276,7 +1255,7 @@ pub const PERKS_AND_CURSES: MenuData = MenuData {
                     None,
                     [
                         |user_storage: &mut events::UserStorage,
-                         render_storage: &mut events::RenderStorage,
+                         render_storage: &mut crate::RenderStorage,
                          screen_toggleable_button_index| {
                             let cost = match user_storage.perks_and_curses.offered_curses
                                 [screen_toggleable_button_index - 5]
@@ -1306,7 +1285,7 @@ pub const PERKS_AND_CURSES: MenuData = MenuData {
                             ui::render_screen_texts(render_storage, &user_storage.screen_texts);
                         },
                         |user_storage: &mut events::UserStorage,
-                         render_storage: &mut events::RenderStorage,
+                         render_storage: &mut crate::RenderStorage,
                          screen_toggleable_button_index| {
                             let cost = match user_storage.perks_and_curses.offered_curses
                                 [screen_toggleable_button_index - 5]
@@ -1365,7 +1344,7 @@ pub const PERKS_AND_CURSES: MenuData = MenuData {
         */
     },
     on_cursor_moved: |user_storage: &mut events::UserStorage,
-                      render_storage: &mut events::RenderStorage,
+                      render_storage: &mut crate::RenderStorage,
                       position: PhysicalPosition<f64>| {
                         /*
         let mouse_position = (
@@ -1392,7 +1371,7 @@ pub const PERKS_AND_CURSES: MenuData = MenuData {
         */
     },
     on_mouse_input: |user_storage: &mut events::UserStorage,
-                     render_storage: &mut events::RenderStorage,
+                     render_storage: &mut crate::RenderStorage,
                      state: ElementState,
                      button: MouseButton| {
                         /*
@@ -1405,10 +1384,6 @@ pub const PERKS_AND_CURSES: MenuData = MenuData {
 };
 
 pub const TEST: MenuData = MenuData {
-    render_settings: menu_rendering::RenderSettings {
-        uv_vertex_and_index_buffer_settings: None,
-        colour_vertex_and_index_buffer_settings: None,
-    },
     start: |_user_storage, _render_storage| {
         /*
         println!("Test Menu Start");
@@ -1472,10 +1447,6 @@ pub const TEST: MenuData = MenuData {
 };
 
 pub const ALIVE: MenuData = MenuData {
-    render_settings: menu_rendering::RenderSettings {
-        uv_vertex_and_index_buffer_settings: None,
-        colour_vertex_and_index_buffer_settings: None,
-    },
     start: |user_storage, render_storage| {
         let mut rng = thread_rng();
 
@@ -1563,19 +1534,6 @@ pub const ALIVE: MenuData = MenuData {
 };
 
 pub const TEST3D: MenuData = MenuData {
-    render_settings: menu_rendering::RenderSettings {
-        uv_vertex_and_index_buffer_settings: None,
-        colour_vertex_and_index_buffer_settings: Some(
-            menu_rendering::VertexAndIndexBufferSettings {
-                edit_frequency: menu_rendering::EditFrequency::Rarely,
-                instance_edit_frequency: Some(menu_rendering::EditFrequency::Rarely),
-                vertex_shader: menu_rendering::VertexShader::Instanced2D,
-                fragment_shader: menu_rendering::FragmentShader::Instanced2D,
-                topology: PrimitiveTopology::TriangleStrip,
-                depth: true,
-            },
-        ),
-    },
     start: |_user_storage, _render_storage| {},
     update: |_user_storage, _render_storage, _delta_time, _average_fps| {},
     end: |_user_storage, _render_storage| {},
