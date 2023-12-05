@@ -101,9 +101,9 @@ pub fn start(render_storage: &mut RenderStorage) -> UserStorage {
         fixed_time_passed: 0.0,
         multithread_rendering: false,
         chunk_generation: 0,
-        screen_texts: vec![],
-        screen_buttons: vec![],
-        screen_toggleable_buttons: vec![],
+        //screen_texts: vec![],
+        //screen_buttons: vec![],
+        //screen_toggleable_buttons: vec![],
         perks_and_curses: perks_and_curses::PerksAndCurses {
             cost: 0,
             one_time_perks_owned: vec![],
@@ -247,43 +247,24 @@ pub struct UserStorage {
     pub fixed_time_passed: f32,
     pub multithread_rendering: bool,
     pub chunk_generation: u8,
-    pub screen_texts: Vec<ui::ScreenText>, // The plural of text is texts in this situation.
-    pub screen_buttons: Vec<ui::ScreenButton>,
-    pub screen_toggleable_buttons: Vec<ui::ScreenToggleableButton>,
+    //pub screen_texts: Vec<ui::ScreenText>, // The plural of text is texts in this situation.
+    //pub screen_buttons: Vec<ui::ScreenButton>,
+    //pub screen_toggleable_buttons: Vec<ui::ScreenToggleableButton>,
     pub perks_and_curses: perks_and_curses::PerksAndCurses,
 }
 
 pub struct RenderStorage {
     // TODO: Perhaps removing or refining what belongs in this struct.
-    pub vertices_map: Vec<vertex_data::MapVertex>,
-    pub vertex_count_map: u32,
-    pub indices_map: Vec<u32>,
-    pub index_count_map: u32,
-
-    pub vertices_ui: Vec<vertex_data::UIVertex>,
-    pub vertex_count_ui: u32,
-    pub indices_ui: Vec<u32>,
-    pub index_count_ui: u32,
-
-    pub vertices_test: Vec<vertex_data::TestVertex>,
-    pub vertex_count_test: u32,
-    pub update_vertices_test: bool,
-    pub indices_test: Vec<u32>,
-    pub index_count_test: u32,
-    pub update_indices_test: bool,
-    pub instances_test: Vec<vertex_data::TestInstance>,
-    pub instance_count_test: u32,
-    pub update_instances_test: bool,
-
     pub aspect_ratio: f32,
     pub camera: Camera,
     pub brightness: f32,
-    pub frame_count: u32, // This will crash the game after 2 years, assuming 60 fps.
+    pub frame_count: u32, // This will overflow after 2 years, assuming 60 fps.
     pub starting_time: Instant,
     pub window_size: [u32; 2],
 
     pub menu: menus::Menu, // TODO: Why does main need access to the menu? It really shouldn't.
 
+    pub real_render_buffer_containers: Vec<menu_rendering::RealRenderBufferContainer>, // Bad name?
     pub render_buffer_containers: Vec<menu_rendering::RenderBufferContainer>, // Bad name?
 }
 
@@ -810,6 +791,7 @@ pub fn render_map(
     });
 }
 
+/*
 #[deprecated]
 pub fn render_map_single_threaded(
     user_storage: &mut UserStorage,
@@ -1000,6 +982,9 @@ pub fn render_map_single_threaded(
     }
 }
 
+*/
+
+/*
 pub fn render_player(user_storage: &mut UserStorage, render_storage: &mut RenderStorage) {
     let vertex_start = render_storage.vertex_count_map as usize;
     let index_start = render_storage.index_count_map as usize;
@@ -1055,6 +1040,8 @@ pub fn render_player(user_storage: &mut UserStorage, render_storage: &mut Render
     render_storage.vertex_count_map += 4;
     render_storage.index_count_map += 6;
 }
+
+*/
 
 fn collide(
     user_storage: &mut UserStorage,

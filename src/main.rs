@@ -455,49 +455,6 @@ fn main() {
     let mut instance_count_test = 0u32;
 
     let mut render_storage = events::RenderStorage {
-        vertices_map: vec![
-            vertex_data::MapVertex {
-                position: [0.0, 0.0, 0.0],
-                uv: [0.0, 0.0],
-            };
-            vertex_buffers_map[0].len() as usize
-        ],
-        vertex_count_map: 0,
-        indices_map: vec![0; index_buffers_map[0].len() as usize],
-        index_count_map: 0,
-        vertices_ui: vec![
-            vertex_data::UIVertex {
-                position: [0.0, 0.0],
-                uv: [0.0, 0.0],
-                colour: [0.0, 0.0, 0.0, 0.0],
-            };
-            vertex_buffers_ui[0].len() as usize
-        ],
-        vertex_count_ui: 0,
-        indices_ui: vec![0; index_buffers_ui[0].len() as usize],
-        index_count_ui: 0,
-        vertices_test: vec![
-            vertex_data::TestVertex {
-                position: [0.0, 0.0],
-                uv: [0.0, 0.0],
-            };
-            vertex_buffer_test.len() as usize
-        ],
-        vertex_count_test: 0,
-        update_vertices_test: false,
-        indices_test: vec![0; index_buffer_test.len() as usize],
-        index_count_test: 0,
-        update_indices_test: false,
-        instances_test: vec![
-            vertex_data::TestInstance {
-                position_offset: [0.0, 0.0, 0.0],
-                scale: [0.0, 0.0],
-                uv_centre: [0.0, 0.0],
-            };
-            instance_buffer_test.len() as usize
-        ],
-        instance_count_test: 0,
-        update_instances_test: false,
         aspect_ratio: 0.0,
         camera: events::Camera {
             scale: 1.0,
@@ -508,6 +465,7 @@ fn main() {
         starting_time: Instant::now(),
         window_size: [0, 0],
         menu: menus::STARTING_MENU,
+        real_render_buffer_containers: vec![],
         render_buffer_containers: vec![],
     };
 
@@ -598,31 +556,10 @@ fn main() {
                     average_fps,
                 ); // call update once per frame
 
-                update_buffers_old(
+                update_buffers(
                     &mut render_storage,
-                    &vertex_buffer_test,
-                    &mut vertex_count_test,
-                    &index_buffer_test,
-                    &mut index_count_test,
-                    &instance_buffer_test,
-                    &mut instance_count_test,
+                    
                 );
-
-                update_buffers_map(
-                    &mut render_storage,
-                    &vertex_buffers_map,
-                    &mut vertex_counts_map,
-                    &index_buffers_map,
-                    &mut index_counts_map,
-                );
-
-                // update_buffers_ui(
-                //     &mut render_storage,
-                //     &vertex_buffers_ui,
-                //     &mut vertex_counts_ui,
-                //     &index_buffers_ui,
-                //     &mut index_counts_ui,
-                // );
 
                 if recreate_swapchain {
                     // When the window resizes we need to recreate everything dependent on the window size.
@@ -1405,6 +1342,11 @@ fn get_instance_and_event_loop() -> (Arc<vulkano::instance::Instance>, EventLoop
     )
 }
 
+// TODO: put this in events? It will be called from user code, not main. I think.
+fn setup_buffers_and_draw_calls(render_storage: &mut events::RenderStorage) {
+
+}
+
 fn create_buffers(
     memory_allocator: Arc<StandardMemoryAllocator>,
 ) -> (
@@ -1565,104 +1507,14 @@ fn create_buffers_map(
     (vertex_buffers_map, index_buffers_map)
 }
 
-fn create_buffers_ui(
-    memory_allocator: Arc<StandardMemoryAllocator>,
-) -> (
-    [Subbuffer<[vertex_data::UIVertex]>; 2],
-    [Subbuffer<[u32]>; 2],
-) {
-    let vertex_buffers_ui = [
-        Buffer::from_iter(
-            memory_allocator.clone(),
-            BufferCreateInfo {
-                usage: BufferUsage::VERTEX_BUFFER,
-                ..Default::default()
-            },
-            AllocationCreateInfo {
-                //usage: MemoryUsage::Upload,
-                memory_type_filter: MemoryTypeFilter::PREFER_DEVICE
-                    | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
-                ..Default::default()
-            },
-            vec![
-                vertex_data::UIVertex {
-                    position: [0.0, 0.0],
-                    uv: [0.0, 0.0],
-                    colour: [0.0, 0.0, 0.0, 0.0],
-                };
-                events::CHUNK_WIDTH_SQUARED as usize * 4 * 30
-            ],
-        )
-        .unwrap(),
-        Buffer::from_iter(
-            memory_allocator.clone(),
-            BufferCreateInfo {
-                usage: BufferUsage::VERTEX_BUFFER,
-                ..Default::default()
-            },
-            AllocationCreateInfo {
-                //usage: MemoryUsage::Upload,
-                memory_type_filter: MemoryTypeFilter::PREFER_DEVICE
-                    | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
-                ..Default::default()
-            },
-            vec![
-                vertex_data::UIVertex {
-                    position: [0.0, 0.0],
-                    uv: [0.0, 0.0],
-                    colour: [0.0, 0.0, 0.0, 0.0],
-                };
-                events::CHUNK_WIDTH_SQUARED as usize * 4 * 30
-            ],
-        )
-        .unwrap(),
-    ];
-
-    let index_buffers_ui = [
-        Buffer::from_iter(
-            memory_allocator.clone(),
-            BufferCreateInfo {
-                usage: BufferUsage::INDEX_BUFFER,
-                ..Default::default()
-            },
-            AllocationCreateInfo {
-                //usage: MemoryUsage::Upload,
-                memory_type_filter: MemoryTypeFilter::PREFER_DEVICE
-                    | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
-                ..Default::default()
-            },
-            vec![0u32; events::CHUNK_WIDTH_SQUARED as usize * 6 * 30],
-        )
-        .unwrap(),
-        Buffer::from_iter(
-            memory_allocator.clone(),
-            BufferCreateInfo {
-                usage: BufferUsage::INDEX_BUFFER,
-                ..Default::default()
-            },
-            AllocationCreateInfo {
-                //usage: MemoryUsage::Upload,
-                memory_type_filter: MemoryTypeFilter::PREFER_DEVICE
-                    | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
-                ..Default::default()
-            },
-            vec![0u32; events::CHUNK_WIDTH_SQUARED as usize * 6 * 30],
-        )
-        .unwrap(),
-    ];
-
-    (vertex_buffers_ui, index_buffers_ui)
-}
-
 fn update_buffers(
     render_storage: &mut events::RenderStorage,
-    real_render_buffer_containers: &mut Vec<menu_rendering::RealRenderBufferContainer>, // Really hate the name. It is more a list of real buffers
 ) {
-    assert!(render_storage.render_buffer_containers.len() != real_render_buffer_containers.len());
+    assert!(render_storage.render_buffer_containers.len() != render_storage.real_render_buffer_containers.len());
 
-    for i in 0..real_render_buffer_containers.len() {
-        let real_render_buffer_container = &mut real_render_buffer_containers[i];
-        let render_buffer_container = &render_storage.render_buffer_containers[i];
+    for i in 0..render_storage.real_render_buffer_containers.len() {
+        let real_render_buffer_container = &mut render_storage.real_render_buffer_containers[i];
+        let render_buffer_container = &mut render_storage.render_buffer_containers[i];
 
         // TODO: make it not be % 2
 
@@ -1671,154 +1523,86 @@ fn update_buffers(
             &render_buffer_container.index_buffer,
             render_buffer_container.index_count,
             &mut real_render_buffer_container.index_count[render_storage.frame_count as usize % 2],
+            &mut render_buffer_container.update_index_buffer,
         );
 
-        match real_render_buffer_container.vertex_buffer {
-            menu_rendering::RealVertexBuffer::UvVertexBuffer(_) => {}
+
+        match &real_render_buffer_container.vertex_buffer {
+            menu_rendering::RealVertexBuffer::UvVertexBuffer(real_vertex_buffer) => {
+                if let menu_rendering::VertexBuffer::UvVertexBuffer(vertex_buffer) =
+                    &render_buffer_container.vertex_buffer
+                {
+                    update_buffer(
+                        &real_vertex_buffer[render_storage.frame_count as usize % 2],
+                        &vertex_buffer,
+                        render_buffer_container.vertex_count,
+                        &mut real_render_buffer_container.vertex_count
+                            [render_storage.frame_count as usize % 2],
+                        &mut render_buffer_container.update_vertex_buffer,
+                    );
+                }
+            }
+
+            menu_rendering::RealVertexBuffer::ColourVertexBuffer(real_vertex_buffer) => {
+                if let menu_rendering::VertexBuffer::ColourVertexBuffer(vertex_buffer) =
+                    &render_buffer_container.vertex_buffer
+                {
+                    update_buffer(
+                        &real_vertex_buffer[render_storage.frame_count as usize % 2],
+                        &vertex_buffer,
+                        render_buffer_container.vertex_count,
+                        &mut real_render_buffer_container.vertex_count
+                            [render_storage.frame_count as usize % 2],
+                        &mut render_buffer_container.update_vertex_buffer,
+                    );
+                }
+            }
+        }
+
+        if let Some(real_instance_buffer) = &real_render_buffer_container.instance_buffer {
+            match real_instance_buffer {
+                menu_rendering::RealInstanceBuffer::TestInstanceBuffer(real_instance_buffer) => {
+                    if let Some(instance_buffer) = &render_buffer_container.instance_buffer {
+                        if let menu_rendering::InstanceBuffer::TestInstanceBuffer(instance_buffer) =
+                            instance_buffer
+                        {
+                            update_buffer(
+                                &real_instance_buffer[render_storage.frame_count as usize % 2],
+                                &instance_buffer,
+                                render_buffer_container.instance_count,
+                                &mut real_render_buffer_container.instance_count
+                                    [render_storage.frame_count as usize % 2],
+                                &mut render_buffer_container.update_instance_buffer,
+                            );
+                        }
+                    }
+                }
+            }
         }
     }
 }
 
-fn update_buffer<T>(subbuffer: &Subbuffer<[T]>, vec: &Vec<T>, count: usize, real_count: &mut usize)
+fn update_buffer<T>(subbuffer: &Subbuffer<[T]>, vec: &Vec<T>, count: usize, real_count: &mut usize, update: &mut bool)
 where
     T: BufferContents + Copy,
 {
+    if !*update {
+        return
+    }
+
     let writer = subbuffer.write();
 
     match writer {
         Ok(mut writer) => {
             writer[0..count].copy_from_slice(&vec[0..count]);
             *real_count = count;
+            *update = false;
         }
         Err(e) => match e {
             HostAccessError::AccessConflict(access_conflict) => {
                 println!("Failed to update buffer. {access_conflict}");
             }
             _ => panic!("couldn't write to the buffer: {e}"),
-        },
-    };
-}
-
-fn update_buffers_old(
-    render_storage: &mut events::RenderStorage,
-    vertex_buffer_test: &Subbuffer<[vertex_data::TestVertex]>,
-    vertex_count_test: &mut u32,
-    index_buffer_test: &Subbuffer<[u32]>,
-    index_count_test: &mut u32,
-    instance_buffer_test: &Subbuffer<[vertex_data::TestInstance]>,
-    instance_count_test: &mut u32,
-) {
-    if render_storage.update_vertices_test {
-        println!("updated vertices test");
-        let vertex_writer_test = vertex_buffer_test.write();
-
-        match vertex_writer_test {
-            Ok(mut writer) => {
-                writer[0..render_storage.vertex_count_test as usize].copy_from_slice(
-                    &render_storage.vertices_test[0..render_storage.vertex_count_test as usize],
-                );
-                *vertex_count_test = render_storage.vertex_count_test;
-                render_storage.update_vertices_test = false;
-            }
-            Err(e) => match e {
-                HostAccessError::AccessConflict(access_conflict) => {
-                    println!("Failed to update test vertex buffer. {access_conflict}");
-                }
-
-                _ => panic!("couldn't write to the test vertex buffer: {e}"),
-            },
-        };
-    }
-
-    if render_storage.update_indices_test {
-        println!("updated indices test");
-        let index_writer = index_buffer_test.write();
-
-        match index_writer {
-            Ok(mut writer) => {
-                writer[0..render_storage.index_count_test as usize].copy_from_slice(
-                    &render_storage.indices_test[0..render_storage.index_count_test as usize],
-                );
-                *index_count_test = render_storage.index_count_test;
-                render_storage.update_indices_test = false;
-            }
-            Err(e) => match e {
-                HostAccessError::AccessConflict(access_conflict) => {
-                    println!("Failed to update test index buffer. {access_conflict}");
-                }
-                _ => panic!("couldn't write to the test index buffer: {e}"),
-            },
-        };
-    }
-
-    if render_storage.update_instances_test {
-        println!("updated instances test");
-        let instance_writer = instance_buffer_test.write();
-
-        match instance_writer {
-            Ok(mut writer) => {
-                writer[0..render_storage.instance_count_test as usize].copy_from_slice(
-                    &render_storage.instances_test[0..render_storage.instance_count_test as usize],
-                );
-                *instance_count_test = render_storage.instance_count_test;
-                render_storage.update_instances_test = false;
-            }
-            Err(e) => match e {
-                HostAccessError::AccessConflict(access_conflict) => {
-                    println!("Failed to update test instance buffer. {access_conflict}");
-                }
-                _ => panic!("couldn't write to the test instance buffer: {e}"),
-            },
-        };
-    }
-}
-
-#[deprecated]
-fn update_buffers_map(
-    render_storage: &mut events::RenderStorage,
-    vertex_buffers_map: &[Subbuffer<[vertex_data::MapVertex]>; 2],
-    vertex_counts_map: &mut [u32; 2],
-    index_buffers_map: &[Subbuffer<[u32]>; 2],
-    index_counts_map: &mut [u32; 2],
-) {
-    if menus::STARTING_MENU == menus::Menu::Test {
-        return;
-    }
-
-    let vertex_writer_map = vertex_buffers_map[render_storage.frame_count as usize % 2].write();
-
-    match vertex_writer_map {
-        Ok(mut writer) => {
-            writer[0..render_storage.vertex_count_map as usize].copy_from_slice(
-                &render_storage.vertices_map[0..render_storage.vertex_count_map as usize],
-            );
-            vertex_counts_map[render_storage.frame_count as usize % 2] =
-                render_storage.vertex_count_map;
-        }
-        Err(e) => match e {
-            HostAccessError::AccessConflict(access_conflict) => {
-                println!("Failed to update map vertex buffer. {access_conflict}");
-            }
-
-            _ => panic!("couldn't write to the vertex buffer: {e}"),
-        },
-    };
-
-    let index_writer = index_buffers_map[render_storage.frame_count as usize % 2].write();
-
-    match index_writer {
-        Ok(mut writer) => {
-            writer[0..render_storage.index_count_map as usize].copy_from_slice(
-                &render_storage.indices_map[0..render_storage.index_count_map as usize],
-            );
-            index_counts_map[render_storage.frame_count as usize % 2] =
-                render_storage.index_count_map;
-        }
-        Err(e) => match e {
-            HostAccessError::AccessConflict(access_conflict) => {
-                println!("Failed to update map index buffer. {access_conflict}");
-            }
-            _ => panic!("couldn't write to the vertex buffer: {e}"),
         },
     };
 }

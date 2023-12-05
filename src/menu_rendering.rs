@@ -143,16 +143,20 @@ I really like the idea of using enums containing types. Not exactly certain how 
 pub struct RenderBufferContainer {
     pub vertex_buffer: VertexBuffer,
     pub vertex_count: usize,
+    pub update_vertex_buffer: bool,
 
     pub index_buffer: Vec<u32>,
     pub index_count: usize,
+    pub update_index_buffer: bool,
 
     pub instance_buffer: Option<InstanceBuffer>,
     pub instance_count: usize,
+    pub update_instance_buffer: bool,
 }
 
 pub enum VertexBuffer {
     UvVertexBuffer(Vec<vertex_data::UvVertex>),
+    ColourVertexBuffer(Vec<vertex_data::ColourVertex>),
 }
 
 pub enum InstanceBuffer {
@@ -174,6 +178,7 @@ pub struct RealRenderBufferContainer {
 
 pub enum RealVertexBuffer {
     UvVertexBuffer(Vec<Subbuffer<[vertex_data::UvVertex]>>),
+    ColourVertexBuffer(Vec<Subbuffer<[vertex_data::ColourVertex]>>),
 }
 
 pub enum RealInstanceBuffer {

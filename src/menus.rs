@@ -71,15 +71,15 @@ pub const TITLE_SCREEN: MenuData = MenuData {
     start: |user_storage: &mut events::UserStorage, render_storage: &mut events::RenderStorage| {
         (TITLE_SCREEN.on_window_resize)(user_storage, render_storage);
     },
-    update: |user_storage: &mut events::UserStorage,
-             render_storage: &mut events::RenderStorage,
+    update: |_user_storage: &mut events::UserStorage,
+             _render_storage: &mut events::RenderStorage,
              _delta_time: f32,
              _average_fps: f32| {
-        render_storage.vertex_count_ui = 0;
-        render_storage.index_count_ui = 0;
+        //render_storage.vertex_count_ui = 0;
+        //render_storage.index_count_ui = 0;
 
-        ui::render_screen_buttons(render_storage, &user_storage.screen_buttons);
-        ui::render_screen_texts(render_storage, &user_storage.screen_texts);
+        //ui::render_screen_buttons(render_storage, &user_storage.screen_buttons);
+        //ui::render_screen_texts(render_storage, &user_storage.screen_texts);
     },
     end: |_user_storage: &mut events::UserStorage, _render_storage: &mut events::RenderStorage| {},
     on_keyboard_input: |user_storage: &mut events::UserStorage,
@@ -99,6 +99,7 @@ pub const TITLE_SCREEN: MenuData = MenuData {
     },
     on_window_resize: |user_storage: &mut events::UserStorage,
                        render_storage: &mut events::RenderStorage| {
+                        /*
         let screen_width = 2.0 / render_storage.aspect_ratio;
 
         user_storage.screen_texts = vec![
@@ -145,10 +146,12 @@ pub const TITLE_SCREEN: MenuData = MenuData {
                 (ALIVE_OLD.start)(user_storage, render_storage);
             },
         )];
+        */
     },
     on_cursor_moved: |user_storage: &mut events::UserStorage,
                       render_storage: &mut events::RenderStorage,
                       position: PhysicalPosition<f64>| {
+                        /*
         let mouse_position = (
             events::rerange(
                 (0.0, render_storage.window_size[0] as f32),
@@ -168,14 +171,17 @@ pub const TITLE_SCREEN: MenuData = MenuData {
             &mut user_storage.screen_texts,
             mouse_position,
         )
+        */
     },
     on_mouse_input: |user_storage: &mut events::UserStorage,
                      render_storage: &mut events::RenderStorage,
                      state: ElementState,
                      button: MouseButton| {
+                        /*
         if state == ElementState::Released && button == MouseButton::Left {
             ui::process_hovered_screen_buttons(user_storage, render_storage);
         }
+        */
     },
 };
 
@@ -259,6 +265,7 @@ pub const ALIVE_OLD: MenuData = MenuData {
              render_storage: &mut events::RenderStorage,
              delta_time: f32,
              average_fps: f32| {
+        /*
         let seconds_since_start = render_storage.starting_time.elapsed().as_secs_f32();
 
         let mut substeps = 0;
@@ -453,6 +460,7 @@ pub const ALIVE_OLD: MenuData = MenuData {
                 }
             }
         }
+        */
     },
     end: |_user_storage: &mut events::UserStorage, _render_storage: &mut events::RenderStorage| {},
     on_keyboard_input: |user_storage: &mut events::UserStorage,
@@ -549,6 +557,7 @@ pub const ALIVE_OLD: MenuData = MenuData {
     },
     on_window_resize: |user_storage: &mut events::UserStorage,
                        render_storage: &mut events::RenderStorage| {
+                        /*
         let screen_width = 2.0 / render_storage.aspect_ratio;
 
         user_storage.screen_texts = vec![
@@ -619,6 +628,7 @@ pub const ALIVE_OLD: MenuData = MenuData {
                 ),
             ])
         }
+        */
     },
     on_cursor_moved: |_user_storage: &mut events::UserStorage,
                       _render_storage: &mut events::RenderStorage,
@@ -640,10 +650,10 @@ pub const PAUSED: MenuData = MenuData {
              render_storage: &mut events::RenderStorage,
              _delta_time: f32,
              _average_fps: f32| {
-        render_storage.vertex_count_ui = 0;
-        render_storage.index_count_ui = 0;
+        //render_storage.vertex_count_ui = 0;
+        //render_storage.index_count_ui = 0;
 
-        ui::render_screen_texts(render_storage, &user_storage.screen_texts);
+        //ui::render_screen_texts(render_storage, &user_storage.screen_texts);
     },
     end: |_user_storage: &mut events::UserStorage, _render_storage: &mut events::RenderStorage| {},
     on_keyboard_input: |user_storage: &mut events::UserStorage,
@@ -665,6 +675,7 @@ pub const PAUSED: MenuData = MenuData {
     },
     on_window_resize: |user_storage: &mut events::UserStorage,
                        render_storage: &mut events::RenderStorage| {
+                        /*
         let screen_width = 2.0 / render_storage.aspect_ratio;
 
         user_storage.screen_texts = vec![ui::ScreenText::new(
@@ -674,6 +685,7 @@ pub const PAUSED: MenuData = MenuData {
             "Paused!",
             [1.0, 0.0, 1.0, 1.0],
         )];
+        */
     },
     on_cursor_moved: |_user_storage: &mut events::UserStorage,
                       _render_storage: &mut events::RenderStorage,
@@ -695,11 +707,11 @@ pub const DEAD: MenuData = MenuData {
              render_storage: &mut events::RenderStorage,
              _delta_time: f32,
              _average_fps: f32| {
-        render_storage.vertex_count_ui = 0;
-        render_storage.index_count_ui = 0;
+        //render_storage.vertex_count_ui = 0;
+        //render_storage.index_count_ui = 0;
 
-        ui::render_screen_buttons(render_storage, &user_storage.screen_buttons);
-        ui::render_screen_texts(render_storage, &user_storage.screen_texts)
+        //ui::render_screen_buttons(render_storage, &user_storage.screen_buttons);
+        //ui::render_screen_texts(render_storage, &user_storage.screen_texts)
     },
     end: |_user_storage: &mut events::UserStorage, _render_storage: &mut events::RenderStorage| {},
     on_keyboard_input: |user_storage: &mut events::UserStorage,
@@ -719,6 +731,7 @@ pub const DEAD: MenuData = MenuData {
     },
     on_window_resize: |user_storage: &mut events::UserStorage,
                        render_storage: &mut events::RenderStorage| {
+                        /*
         let screen_width = 2.0 / render_storage.aspect_ratio;
 
         user_storage.screen_texts = vec![
@@ -755,11 +768,13 @@ pub const DEAD: MenuData = MenuData {
                 (PERKS_AND_CURSES.start)(user_storage, render_storage);
             },
         )];
+        */
     },
 
     on_cursor_moved: |user_storage: &mut events::UserStorage,
                       render_storage: &mut events::RenderStorage,
                       position: PhysicalPosition<f64>| {
+                        /*
         let mouse_position = (
             events::rerange(
                 (0.0, render_storage.window_size[0] as f32),
@@ -779,14 +794,17 @@ pub const DEAD: MenuData = MenuData {
             &mut user_storage.screen_texts,
             mouse_position,
         )
+        */
     },
     on_mouse_input: |user_storage: &mut events::UserStorage,
                      render_storage: &mut events::RenderStorage,
                      state: ElementState,
                      button: MouseButton| {
+                        /*
         if state == ElementState::Released && button == MouseButton::Left {
             ui::process_hovered_screen_buttons(user_storage, render_storage);
         }
+        */
     },
 };
 
@@ -796,6 +814,7 @@ pub const PERKS_AND_CURSES: MenuData = MenuData {
         colour_vertex_and_index_buffer_settings: None,
     },
     start: |user_storage: &mut events::UserStorage, render_storage: &mut events::RenderStorage| {
+        /*
         user_storage.perks_and_curses.offered_perks = vec![];
         user_storage.perks_and_curses.offered_curses = vec![];
         user_storage.perks_and_curses.cost = 0;
@@ -925,11 +944,13 @@ pub const PERKS_AND_CURSES: MenuData = MenuData {
         (PERKS_AND_CURSES.on_window_resize)(user_storage, render_storage);
         render_storage.vertex_count_map = 0;
         render_storage.index_count_map = 0;
+        */
     },
     update: |user_storage: &mut events::UserStorage,
              render_storage: &mut events::RenderStorage,
              _delta_time: f32,
              _average_fps: f32| {
+                /*
         render_storage.vertex_count_ui = 0;
         render_storage.index_count_ui = 0;
 
@@ -939,6 +960,7 @@ pub const PERKS_AND_CURSES: MenuData = MenuData {
             &user_storage.screen_toggleable_buttons,
         );
         ui::render_screen_texts(render_storage, &user_storage.screen_texts);
+        */
     },
     end: |_user_storage: &mut events::UserStorage, _render_storage: &mut events::RenderStorage| {},
     on_keyboard_input: |user_storage: &mut events::UserStorage,
@@ -963,6 +985,7 @@ pub const PERKS_AND_CURSES: MenuData = MenuData {
     },
     on_window_resize: |user_storage: &mut events::UserStorage,
                        render_storage: &mut events::RenderStorage| {
+                        /*
         let screen_width = 2.0 / render_storage.aspect_ratio;
 
         user_storage.screen_texts = vec![
@@ -1339,10 +1362,12 @@ pub const PERKS_AND_CURSES: MenuData = MenuData {
                     false,
                 ));
         }
+        */
     },
     on_cursor_moved: |user_storage: &mut events::UserStorage,
                       render_storage: &mut events::RenderStorage,
                       position: PhysicalPosition<f64>| {
+                        /*
         let mouse_position = (
             events::rerange(
                 (0.0, render_storage.window_size[0] as f32),
@@ -1364,15 +1389,18 @@ pub const PERKS_AND_CURSES: MenuData = MenuData {
         );
 
         ui::hover_screen_toggleable_buttons(render_storage, user_storage, mouse_position);
+        */
     },
     on_mouse_input: |user_storage: &mut events::UserStorage,
                      render_storage: &mut events::RenderStorage,
                      state: ElementState,
                      button: MouseButton| {
+                        /*
         if state == ElementState::Released && button == MouseButton::Left {
             ui::process_hovered_screen_buttons(user_storage, render_storage);
             ui::process_hovered_screen_toggleable_buttons(user_storage, render_storage);
         }
+        */
     },
 };
 
@@ -1381,7 +1409,8 @@ pub const TEST: MenuData = MenuData {
         uv_vertex_and_index_buffer_settings: None,
         colour_vertex_and_index_buffer_settings: None,
     },
-    start: |_user_storage, render_storage| {
+    start: |_user_storage, _render_storage| {
+        /*
         println!("Test Menu Start");
 
         render_storage.vertices_test[0] = vertex_data::TestVertex {
@@ -1432,6 +1461,7 @@ pub const TEST: MenuData = MenuData {
         render_storage.update_vertices_test = true;
         render_storage.update_indices_test = true;
         render_storage.update_instances_test = true;
+        */
     },
     update: |_user_storage, _render_storage, _delta_time, _average_fps| {},
     end: |_user_storage, _render_storage| {},
