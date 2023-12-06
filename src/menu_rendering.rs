@@ -1,8 +1,8 @@
-use std::sync::Arc;
+use std::{sync::Arc, default};
 
 use vulkano::{
-    buffer::Subbuffer, device::Device, pipeline::graphics::input_assembly::PrimitiveTopology,
-    shader::ShaderModule, Validated, VulkanError,
+    buffer::{Subbuffer, BufferContents, self, Buffer, BufferUsage, BufferCreateInfo}, device::Device, pipeline::graphics::input_assembly::PrimitiveTopology,
+    shader::ShaderModule, Validated, VulkanError, sync::HostAccessError,
 };
 
 use crate::vertex_data;
@@ -78,32 +78,34 @@ EW = Experimental implementation that is working.
 A = Goal achieved.
 */
 
-pub struct RenderSettings {
-    pub vertex_shader: VertexShader,
-    pub fragment_shader: FragmentShader,
-    pub vertex_and_index_buffer_settings: VertexAndIndexBufferSettings,
-    pub instance_buffer_settings: Option<InstanceBufferSettings>,
-    pub depth: bool,
-}
+// TODO: too much duplication, consider removing the whole vertex and index buffer settings, and instance buffer settings. Perhaps make them their own struct, also containing the buffers. Currently we have 3 structs telling us what the buffer type is. Not good. Too much matching.
+// pub struct RenderSettings {
+//     pub vertex_shader: VertexShader,
+//     pub fragment_shader: FragmentShader,
+//     pub vertex_and_index_buffer_settings: VertexAndIndexBufferSettings,
+//     pub instance_buffer_settings: Option<InstanceBufferSettings>,
+//     pub depth: bool,
+// }
 
-pub struct VertexAndIndexBufferSettings {
-    pub vertex_buffer_type: VertexBufferType,
-    pub vertex_buffer_edit_frequency: EditFrequency,
-    pub topology: PrimitiveTopology,
-    pub index_buffer_edit_frequency: EditFrequency,
-}
+// pub struct VertexAndIndexBufferSettings {
+//     pub vertex_buffer_type: VertexBufferType,
+//     pub vertex_buffer_edit_frequency: EditFrequency,
+//     pub topology: PrimitiveTopology,
+//     pub index_buffer_length: usize,
+//     pub index_buffer_edit_frequency: EditFrequency,
+// }
 
-pub struct InstanceBufferSettings {
-    pub instance_buffer_type: InstanceBufferType,
-    pub instance_buffer_edit_frequency: EditFrequency,
-}
+// pub struct InstanceBufferSettings {
+//     pub instance_buffer_type: InstanceBufferType,
+//     pub instance_buffer_edit_frequency: EditFrequency,
+// }
 
 pub enum VertexBufferType {
-    Test,
+    Test(usize),
 }
 
 pub enum InstanceBufferType {
-    Test,
+    Test(usize),
 }
 
 /* problem 7 deconstruction:
@@ -124,50 +126,157 @@ I really like the idea of using enums containing types. Not exactly certain how 
 */
 
 // We can store a Vec of this in render storage, and manipulated via functions run by the menus, should we want to update the buffers.
-pub struct RenderBuffers {
-    pub vertex_buffer: VertexBuffer,
-    pub vertex_count: usize,
-    pub update_vertex_buffer: bool,
+// pub struct RenderBuffers {
+//     pub vertex_buffer: VertexBuffer,
+//     pub vertex_count: usize,
+//     pub update_vertex_buffer: bool,
 
-    pub index_buffer: Vec<u32>,
-    pub index_count: usize,
-    pub update_index_buffer: bool,
+//     pub index_buffer: Vec<u32>,
+//     pub index_count: usize,
+//     pub update_index_buffer: bool,
 
-    pub instance_buffer: Option<InstanceBuffer>,
-    pub instance_count: usize,
-    pub update_instance_buffer: bool,
-}
+//     pub instance_buffer: Option<InstanceBuffer>,
+//     pub instance_count: usize,
+//     pub update_instance_buffer: bool,
+// }
 
-pub enum VertexBuffer {
-    UvVertexBuffer(Vec<vertex_data::UvVertex>),
-    ColourVertexBuffer(Vec<vertex_data::ColourVertex>),
-}
+// pub enum VertexBuffer {
+//     UvVertexBuffer(Vec<vertex_data::UvVertex>),
+//     ColourVertexBuffer(Vec<vertex_data::ColourVertex>),
+// }
 
-pub enum InstanceBuffer {
-    TestInstanceBuffer(Vec<vertex_data::TestInstance>),
-}
+// pub enum InstanceBuffer {
+//     TestInstanceBuffer(Vec<vertex_data::TestInstance>),
+// }
 
 // Real buffers below should contain actual sub buffers. Used only by main, not by menus.
 
-pub struct RealRenderBuffers {
-    pub vertex_buffer: RealVertexBuffer,
-    pub vertex_count: Vec<usize>,
-    pub update_vertex_buffer: Vec<bool>, // Essentially when we get the signal to update the buffer from the menu, we then set that to false, and set this entire vec to true. Whenever we can write to the buffer we set one of them to false, for that specific buffer.
+// pub struct RealRenderBuffers {
+//     pub vertex_buffer: RealVertexBuffer,
+//     pub vertex_count: Vec<usize>,
+//     pub update_vertex_buffer: Vec<bool>, // Essentially when we get the signal to update the buffer from the menu, we then set that to false, and set this entire vec to true. Whenever we can write to the buffer we set one of them to false, for that specific buffer.
 
-    pub index_buffer: Vec<Subbuffer<[u32]>>,
-    pub index_count: Vec<usize>,
-    pub update_index_buffer: Vec<bool>,
+//     pub index_buffer: Vec<Subbuffer<[u32]>>,
+//     pub index_count: Vec<usize>,
+//     pub update_index_buffer: Vec<bool>,
 
-    pub instance_buffer: Option<RealInstanceBuffer>,
-    pub instance_count: Vec<usize>,
-    pub update_instance_buffer: Vec<bool>,
+//     pub instance_buffer: Option<RealInstanceBuffer>,
+//     pub instance_count: Vec<usize>,
+//     pub update_instance_buffer: Vec<bool>,
+// }
+
+// pub enum RealVertexBuffer {
+//     UvVertexBuffer(Vec<Subbuffer<[vertex_data::UvVertex]>>),
+//     ColourVertexBuffer(Vec<Subbuffer<[vertex_data::ColourVertex]>>),
+// }
+
+// pub enum RealInstanceBuffer {
+//     TestInstanceBuffer(Vec<Subbuffer<[vertex_data::TestInstance]>>),
+// }
+
+
+pub struct RenderBuffer<T> where T: BufferContents + Copy {
+    pub buffer: Vec<T>,
+    pub element_count: usize,
+    pub update_buffer: bool,
+
+    pub real_buffer: Vec<Subbuffer<[T]>>,
+    pub real_element_count: Vec<usize>,
+    pub real_update_buffer: Vec<bool>,
+
+    pub edit_frequency: EditFrequency,
 }
 
-pub enum RealVertexBuffer {
-    UvVertexBuffer(Vec<Subbuffer<[vertex_data::UvVertex]>>),
-    ColourVertexBuffer(Vec<Subbuffer<[vertex_data::ColourVertex]>>),
+impl<T> RenderBuffer<T> where T: BufferContents + Copy {
+    pub fn new(default_element: T, length: usize, edit_frequency: EditFrequency, memory_allocator: Arc<StandardMemoryAllocator>, usage: BufferUsage) -> RenderBuffer<T> {
+        let real_length = edit_frequency.to_buffer_amount();
+
+        let real_buffer = vec![];
+
+        for i in 0..real_length {
+            real_buffer.push(Buffer::from_iter(
+                memory_allocator.clone(),
+                BufferCreateInfo {
+                    usage,
+                    ..Default::default()
+                },
+                AllocationCreateInfo {
+                    memory_type_filter: MemoryTypeFilter::PREFER_DEVICE
+                        | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
+                    ..Default::default()
+                },
+                vec![
+                    vertex_data::TestVertex {
+                        position: [0.0, 0.0],
+                        uv: [0.0, 0.0],
+                    };
+                    events::MAX_VERTICES
+                ],
+            )
+            .unwrap())
+        }
+
+        RenderBuffer {
+            buffer: vec![default_element; length],
+            element_count: 0,
+            update_buffer: false,
+
+            real_buffer,
+            real_element_count: vec![0; real_length],
+            real_update_buffer: vec![false; real_length],
+
+            edit_frequency,
+        }
+    }
+
+    pub fn update(&mut self, frame_count: usize) {
+        if self.update_buffer {
+            self.update_buffer = false;
+            for update_buffer in &mut self.real_update_buffer {
+                *update_buffer = true;
+            }
+        }
+
+        let real_index = frame_count % self.edit_frequency.to_buffer_amount();
+
+        if !self.real_update_buffer[real_index] {
+            return;
+        }
+    
+        let writer = self.real_buffer[real_index].write();
+    
+        match writer {
+            Ok(mut writer) => {
+                writer[0..self.element_count].copy_from_slice(&self.buffer[0..self.element_count]);
+                self.real_element_count[real_index] = self.element_count;
+                self.real_update_buffer[real_index] = false;
+            }
+            Err(e) => match e {
+                HostAccessError::AccessConflict(access_conflict) => {
+                    println!("Failed to update buffer. {access_conflict}");
+                }
+                _ => panic!("couldn't write to the buffer: {e}"),
+            },
+        };
+    }
 }
 
-pub enum RealInstanceBuffer {
-    TestInstanceBuffer(Vec<Subbuffer<[vertex_data::TestInstance]>>),
+pub enum VertexBuffer {
+    UvVertexBuffer(RenderBuffer<vertex_data::UvVertex>),
+    ColourVertexBuffer(RenderBuffer<vertex_data::ColourVertex>),
+}
+
+pub enum InstanceBuffer {
+    Test(RenderBuffer<vertex_data::TestInstance>)
+}
+
+pub struct RenderBuffers {
+    pub vertex_buffer: VertexBuffer,
+    pub index_buffer: RenderBuffer<u32>,
+    pub instance_buffer: Option<InstanceBuffer>,
+}
+
+pub struct RenderCall {
+    pub vertex_shader: VertexShader,
+    pub fragment_shader: FragmentShader,
 }

@@ -1506,105 +1506,28 @@ fn create_buffers_map(
 fn update_buffers(
     render_storage: &mut RenderStorage,
 ) {
-    assert!(render_storage.render_buffers_list.len() == render_storage.real_render_buffers_list.len());
-    assert!(render_storage.real_render_buffers_list.len() == render_storage.render_settings_list.len());
+    assert!(render_storage.render_calls.len() == render_storage.render_buffers_list.len());
 
-    for i in 0..render_storage.real_render_buffers_list.len() {
-        let real_render_buffers = &mut render_storage.real_render_buffers_list[i];
-        let render_buffers = &mut render_storage.render_buffers_list[i];
-        let render_settings = &render_storage.render_settings_list[i];
-
-        let real_index_buffer_index = render_storage.frame_count as usize % render_settings.vertex_and_index_buffer_settings.index_buffer_edit_frequency.to_buffer_amount();
-        let real_vertex_buffer_index = render_storage.frame_count as usize % render_settings.vertex_and_index_buffer_settings.vertex_buffer_edit_frequency.to_buffer_amount();
-
-        update_buffer(
-            &real_render_buffers.index_buffer[real_index_buffer_index],
-            &render_buffers.index_buffer,
-            render_buffers.index_count,
-            &mut real_render_buffers.index_count[real_index_buffer_index],
-            // &mut render_buffers.update_index_buffer, This is the old, for reference.
-            &mut real_render_buffers.update_index_buffer[real_index_buffer_index]
-        );
-
-
-        match &real_render_buffer_container.vertex_buffer {
-            menu_rendering::RealVertexBuffer::UvVertexBuffer(real_vertex_buffer) => {
-                if let menu_rendering::VertexBuffer::UvVertexBuffer(vertex_buffer) =
-                    &render_buffer_container.vertex_buffer
-                {
-                    update_buffer(
-                        &real_vertex_buffer[render_storage.frame_count as usize % 2],
-                        &vertex_buffer,
-                        render_buffer_container.vertex_count,
-                        &mut real_render_buffer_container.vertex_count
-                            [render_storage.frame_count as usize % 2],
-                        &mut render_buffer_container.update_vertex_buffer,
-                    );
-                }
-            }
-
-            menu_rendering::RealVertexBuffer::ColourVertexBuffer(real_vertex_buffer) => {
-                if let menu_rendering::VertexBuffer::ColourVertexBuffer(vertex_buffer) =
-                    &render_buffer_container.vertex_buffer
-                {
-                    update_buffer(
-                        &real_vertex_buffer[render_storage.frame_count as usize % 2],
-                        &vertex_buffer,
-                        render_buffer_container.vertex_count,
-                        &mut real_render_buffer_container.vertex_count
-                            [render_storage.frame_count as usize % 2],
-                        &mut render_buffer_container.update_vertex_buffer,
-                    );
-                }
-            }
+    for render_buffers in &mut render_storage.render_buffers_list {
+        render_buffers.index_buffer.update(render_storage.frame_count);
+        
+        match &mut render_buffers.vertex_buffer {
+            menu_rendering::VertexBuffer::UvVertexBuffer(vertex_buffer) => {
+                vertex_buffer.update(render_storage.frame_count);
+            },
+            menu_rendering::VertexBuffer::ColourVertexBuffer(vertex_buffer) => {
+                vertex_buffer.update(render_storage.frame_count);
+            },
         }
 
-        if let Some(real_instance_buffer) = &real_render_buffer_container.instance_buffer {
-            match real_instance_buffer {
-                menu_rendering::RealInstanceBuffer::TestInstanceBuffer(real_instance_buffer) => {
-                    if let Some(instance_buffer) = &render_buffer_container.instance_buffer {
-                        if let menu_rendering::InstanceBuffer::TestInstanceBuffer(instance_buffer) =
-                            instance_buffer
-                        {
-                            update_buffer(
-                                &real_instance_buffer[render_storage.frame_count as usize % 2],
-                                &instance_buffer,
-                                render_buffer_container.instance_count,
-                                &mut real_render_buffer_container.instance_count
-                                    [render_storage.frame_count as usize % 2],
-                                &mut render_buffer_container.update_instance_buffer,
-                            );
-                        }
-                    }
-                }
+        if let Some(instance_buffer) = &mut render_buffers.instance_buffer {
+            match instance_buffer {
+                menu_rendering::InstanceBuffer::Test(instance_buffer) => {
+                    instance_buffer.update(render_storage.frame_count);
+                },
             }
         }
     }
-}
-
-fn update_buffer<T>(subbuffer: &Subbuffer<[T]>, vec: &Vec<T>, count: usize, real_count: &mut usize, update: &mut bool)
-where
-    T: BufferContents + Copy,
-{
-    if !*update {
-        return
-    }
-
-    let writer = subbuffer.write();
-
-    match writer {
-        Ok(mut writer) => {
-            writer[0..count].copy_from_slice(&vec[0..count]);
-            *real_count = count;
-            *update = false;
-        }
-        Err(e) => match e {
-            HostAccessError::AccessConflict(access_conflict) => {
-                println!("Failed to update buffer. {access_conflict}");
-            }
-            _ => panic!("couldn't write to the buffer: {e}"),
-        },
-    };
 }
 
 pub struct Camera {
@@ -1617,24 +1540,12 @@ pub struct RenderStorage {
     pub aspect_ratio: f32,
     pub camera: Camera,
     pub brightness: f32,
-    pub frame_count: u32, // This will overflow after 2 years, assuming 60 fps.
+    pub frame_count: usize, // This will overflow after 2 years, assuming 60 fps.
     pub starting_time: Instant,
     pub window_size: [u32; 2],
 
     pub menu: menus::Menu, // TODO: Why does main need access to the menu? It really shouldn't.
 
-    render_settings_list: Vec<menu_rendering::RenderSettings>,
-    real_render_buffers_list: Vec<menu_rendering::RealRenderBuffers>, // Bad name?
-    pub render_buffers_list: Vec<menu_rendering::RenderBuffers>, // Bad name?
-}
-
-impl RenderStorage {
-    // TODO: put this in events? It will be called from user code, not main. I think.
-    fn setup_buffers_and_draw_calls(&mut self, render_settings_list: Vec<menu_rendering::RenderSettings>) {
-        self.render_settings_list = render_settings_list;
-
-        for render_settings in &self.render_settings_list {
-
-        }
-    }
+    pub render_calls: Vec<menu_rendering::RenderCall>,
+    pub render_buffers_list: Vec<menu_rendering::RenderBuffers>,
 }
