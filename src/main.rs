@@ -221,14 +221,11 @@ fn main() {
     // end of initialization
 
     // start creating buffers
-    let memory_allocator = Arc::new(StandardMemoryAllocator::new_default(device.clone()));
+    let memory_allocator = Arc::new(StandardMemoryAllocator::new_default(device.clone())); // TODO: Store in render storage.
 
-    let (vertex_buffers_map, index_buffers_map) = create_buffers_map(memory_allocator.clone());
+    //let buffer_allocator = Subbuffer
 
-    let (vertex_buffer_test, index_buffer_test, instance_buffer_test) =
-        create_buffers(memory_allocator.clone());
-
-    let uniform_buffer_main = SubbufferAllocator::new(
+    let uniform_buffer_main = SubbufferAllocator::new( // TODO: Work out what the plan is. Also investigate the sub buffer allocator
         memory_allocator.clone(),
         SubbufferAllocatorCreateInfo {
             buffer_usage: BufferUsage::UNIFORM_BUFFER,
@@ -463,8 +460,7 @@ fn main() {
         starting_time: Instant::now(),
         window_size: [0, 0],
         menu: menus::STARTING_MENU,
-        render_settings_list: vec![],
-        real_render_buffers_list: vec![],
+        render_calls: vec![],
         render_buffers_list: vec![],
     };
 
@@ -1341,166 +1337,6 @@ fn get_instance_and_event_loop() -> (Arc<vulkano::instance::Instance>, EventLoop
         .unwrap(),
         event_loop,
     )
-}
-
-fn create_buffers(
-    memory_allocator: Arc<StandardMemoryAllocator>,
-) -> (
-    Subbuffer<[vertex_data::TestVertex]>,
-    Subbuffer<[u32]>,
-    Subbuffer<[vertex_data::TestInstance]>,
-) {
-    let vertex_buffer = Buffer::from_iter(
-        memory_allocator.clone(),
-        BufferCreateInfo {
-            usage: BufferUsage::VERTEX_BUFFER,
-            ..Default::default()
-        },
-        AllocationCreateInfo {
-            memory_type_filter: MemoryTypeFilter::PREFER_DEVICE
-                | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE, // TODO: work out what memorytypefilters we need for this
-            ..Default::default()
-        },
-        vec![
-            vertex_data::TestVertex {
-                position: [0.0, 0.0],
-                uv: [0.0, 0.0],
-            };
-            events::MAX_VERTICES
-        ],
-    )
-    .unwrap();
-
-    let index_buffer = Buffer::from_iter(
-        memory_allocator.clone(),
-        BufferCreateInfo {
-            usage: BufferUsage::INDEX_BUFFER,
-            ..Default::default()
-        },
-        AllocationCreateInfo {
-            memory_type_filter: MemoryTypeFilter::PREFER_DEVICE
-                | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE, // TODO: work out what memorytypefilters we need for this
-            ..Default::default()
-        },
-        vec![0u32; events::MAX_INDICES],
-    )
-    .unwrap();
-
-    let instance_buffer = Buffer::from_iter(
-        memory_allocator,
-        BufferCreateInfo {
-            usage: BufferUsage::VERTEX_BUFFER,
-            ..Default::default()
-        },
-        AllocationCreateInfo {
-            memory_type_filter: MemoryTypeFilter::PREFER_DEVICE
-                | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
-            ..Default::default()
-        },
-        vec![
-            vertex_data::TestInstance {
-                position_offset: [0.0, 0.0, 0.0],
-                scale: [0.0, 0.0],
-                uv_centre: [0.0, 0.0],
-            };
-            events::MAX_INSTANCES
-        ],
-    )
-    .unwrap();
-
-    (vertex_buffer, index_buffer, instance_buffer)
-}
-
-#[deprecated]
-fn create_buffers_map(
-    memory_allocator: Arc<StandardMemoryAllocator>,
-) -> (
-    [Subbuffer<[vertex_data::MapVertex]>; 2],
-    [Subbuffer<[u32]>; 2],
-) {
-    let vertex_buffers_map = [
-        Buffer::from_iter(
-            memory_allocator.clone(),
-            BufferCreateInfo {
-                usage: BufferUsage::VERTEX_BUFFER,
-                ..Default::default()
-            },
-            AllocationCreateInfo {
-                //usage: MemoryUsage::Upload,
-                memory_type_filter: MemoryTypeFilter::PREFER_DEVICE
-                    | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
-                ..Default::default()
-            },
-            //*events::STARTING_VERTICES,
-            vec![
-                vertex_data::MapVertex {
-                    position: [0.0, 0.0, 0.0],
-                    uv: [0.0, 0.0],
-                };
-                events::MAX_VERTICES
-            ],
-        )
-        .unwrap(),
-        Buffer::from_iter(
-            memory_allocator.clone(),
-            BufferCreateInfo {
-                usage: BufferUsage::VERTEX_BUFFER,
-                ..Default::default()
-            },
-            AllocationCreateInfo {
-                //usage: MemoryUsage::Upload,
-                memory_type_filter: MemoryTypeFilter::PREFER_DEVICE
-                    | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
-                ..Default::default()
-            },
-            //*events::STARTING_VERTICES,
-            vec![
-                vertex_data::MapVertex {
-                    position: [0.0, 0.0, 0.0],
-                    uv: [0.0, 0.0],
-                };
-                events::MAX_VERTICES
-            ],
-        )
-        .unwrap(),
-    ];
-
-    let index_buffers_map = [
-        Buffer::from_iter(
-            memory_allocator.clone(),
-            BufferCreateInfo {
-                usage: BufferUsage::INDEX_BUFFER,
-                ..Default::default()
-            },
-            AllocationCreateInfo {
-                //usage: MemoryUsage::Upload,
-                memory_type_filter: MemoryTypeFilter::PREFER_DEVICE
-                    | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
-                ..Default::default()
-            },
-            //*events::STARTING_INDICES,
-            vec![0u32; events::MAX_INDICES],
-        )
-        .unwrap(),
-        Buffer::from_iter(
-            memory_allocator.clone(),
-            BufferCreateInfo {
-                usage: BufferUsage::INDEX_BUFFER,
-                ..Default::default()
-            },
-            AllocationCreateInfo {
-                //usage: MemoryUsage::Upload,
-                memory_type_filter: MemoryTypeFilter::PREFER_DEVICE
-                    | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
-                ..Default::default()
-            },
-            //*events::STARTING_INDICES,
-            vec![0u32; events::MAX_INDICES],
-        )
-        .unwrap(),
-    ];
-
-    (vertex_buffers_map, index_buffers_map)
 }
 
 fn update_buffers(

@@ -2,7 +2,7 @@ use std::{sync::Arc, default};
 
 use vulkano::{
     buffer::{Subbuffer, BufferContents, self, Buffer, BufferUsage, BufferCreateInfo}, device::Device, pipeline::graphics::input_assembly::PrimitiveTopology,
-    shader::ShaderModule, Validated, VulkanError, sync::HostAccessError,
+    shader::ShaderModule, Validated, VulkanError, sync::HostAccessError, memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator},
 };
 
 use crate::vertex_data;
@@ -62,13 +62,14 @@ Ui handling??
 */
 
 /* Goals are ill defined. Better goals:
-S 1. Main should not have to be altered in order to add or remove draw calls. Only menus should have to be altered.
-S 2. Menus should be able to specify draw calls.
-S 3. Menus should be able to specify buffers.
-S 4. Menus should be able to specify vertex buffer types.
+EB 1. Main should not have to be altered in order to add or remove draw calls. Only menus should have to be altered.
+EW 2. Menus should be able to specify draw calls.
+EW 3. Menus should be able to specify buffers.
+EW 4. Menus should be able to specify vertex buffer types.
 EW 5. Menus should be able to specify shaders.
 A 6. Changing menu state should not change any other states, unless the menu requests it in its start function.
-S 7. Menu should have some easy way of accessing the buffers it has requested. Perhaps have a generic that requires a tuple of vertex types? This sounds bad. Split into separate problem, see below.
+EW 7. Menu should have some easy way of accessing the buffers it has requested. Perhaps have a generic that requires a tuple of vertex types? This sounds bad. Split into separate problem, see below.
+N 8. Some way to specify if a buffer should be created using a subbuffer allocator.
 
 Goal state key:
 N = Not started implementation.
@@ -191,7 +192,7 @@ impl<T> RenderBuffer<T> where T: BufferContents + Copy {
     pub fn new(default_element: T, length: usize, edit_frequency: EditFrequency, memory_allocator: Arc<StandardMemoryAllocator>, usage: BufferUsage) -> RenderBuffer<T> {
         let real_length = edit_frequency.to_buffer_amount();
 
-        let real_buffer = vec![];
+        let mut real_buffer = vec![];
 
         for i in 0..real_length {
             real_buffer.push(Buffer::from_iter(
@@ -206,11 +207,8 @@ impl<T> RenderBuffer<T> where T: BufferContents + Copy {
                     ..Default::default()
                 },
                 vec![
-                    vertex_data::TestVertex {
-                        position: [0.0, 0.0],
-                        uv: [0.0, 0.0],
-                    };
-                    events::MAX_VERTICES
+                    default_element;
+                    length
                 ],
             )
             .unwrap())
