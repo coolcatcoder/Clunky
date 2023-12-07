@@ -1,7 +1,7 @@
 use std::{sync::Arc, default};
 
 use vulkano::{
-    buffer::{Subbuffer, BufferContents, self, Buffer, BufferUsage, BufferCreateInfo}, device::Device, pipeline::graphics::input_assembly::PrimitiveTopology,
+    buffer::{Subbuffer, BufferContents, self, Buffer, BufferUsage, BufferCreateInfo, allocator::SubbufferAllocator}, device::Device, pipeline::graphics::{input_assembly::PrimitiveTopology, vertex_input::{Vertex, VertexBufferDescription}},
     shader::ShaderModule, Validated, VulkanError, sync::HostAccessError, memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator},
 };
 
@@ -62,14 +62,15 @@ Ui handling??
 */
 
 /* Goals are ill defined. Better goals:
-EB 1. Main should not have to be altered in order to add or remove draw calls. Only menus should have to be altered.
+EW 1. Main should not have to be altered in order to add or remove draw calls. Only menus should have to be altered.
 EW 2. Menus should be able to specify draw calls.
 EW 3. Menus should be able to specify buffers.
 EW 4. Menus should be able to specify vertex buffer types.
 EW 5. Menus should be able to specify shaders.
-A 6. Changing menu state should not change any other states, unless the menu requests it in its start function.
+A 6. Changing menu state should not change any other states, unless the menu requests it in its start function, or elsewhere.
 EW 7. Menu should have some easy way of accessing the buffers it has requested. Perhaps have a generic that requires a tuple of vertex types? This sounds bad. Split into separate problem, see below.
-N 8. Some way to specify if a buffer should be created using a subbuffer allocator.
+EW 8. Some way to specify if a buffer should be created using a subbuffer allocator.
+N 9. Images. Images need to work with all the above goals. How? Images require a pipeline. This could be tricky.
 
 Goal state key:
 N = Not started implementation.
@@ -175,6 +176,18 @@ I really like the idea of using enums containing types. Not exactly certain how 
 //     TestInstanceBuffer(Vec<Subbuffer<[vertex_data::TestInstance]>>),
 // }
 
+pub struct FrequentAccessRenderBuffer<T> where T: BufferContents + Copy {
+    pub buffer: Vec<T>,
+}
+
+impl<T> FrequentAccessRenderBuffer<T> where T: BufferContents + Copy {
+    pub fn allocate_and_get_real_buffer(&self, buffer_allocator: SubbufferAllocator) -> Subbuffer<[T]> {
+        let real_buffer = buffer_allocator.allocate_slice(self.buffer.len() as u64).unwrap();
+        real_buffer.write().unwrap().copy_from_slice(self.buffer.as_slice());
+
+        real_buffer
+    }
+}
 
 pub struct RenderBuffer<T> where T: BufferContents + Copy {
     pub buffer: Vec<T>,
@@ -259,22 +272,43 @@ impl<T> RenderBuffer<T> where T: BufferContents + Copy {
     }
 }
 
+pub enum BufferTypes<T> where T: BufferContents + Copy {
+    RenderBuffer(RenderBuffer<T>),
+    FrequentAccessRenderBuffer(FrequentAccessRenderBuffer<T>),
+}
+
 pub enum VertexBuffer {
-    UvVertexBuffer(RenderBuffer<vertex_data::UvVertex>),
-    ColourVertexBuffer(RenderBuffer<vertex_data::ColourVertex>),
+    UvVertexBuffer(BufferTypes<vertex_data::UvVertex>),
+    ColourVertexBuffer(BufferTypes<vertex_data::ColourVertex>),
+}
+
+impl VertexBuffer {
+    pub fn per_vertex(&self) -> VertexBufferDescription {
+        match *self {
+            VertexBuffer::UvVertexBuffer(_) => vertex_data::UvVertex::per_vertex(),
+            VertexBuffer::ColourVertexBuffer(_) => vertex_data::ColourVertex::per_vertex(),
+        }
+    }
 }
 
 pub enum InstanceBuffer {
-    Test(RenderBuffer<vertex_data::TestInstance>)
+    Test(BufferTypes<vertex_data::TestInstance>)
+}
+
+pub enum UniformBuffer {
+    Test(BufferTypes<crate::vertex_shader_map::Data>)
 }
 
 pub struct RenderBuffers {
     pub vertex_buffer: VertexBuffer,
-    pub index_buffer: RenderBuffer<u32>,
+    pub index_buffer: BufferTypes<u32>,
     pub instance_buffer: Option<InstanceBuffer>,
+    pub uniform_buffer: Option<UniformBuffer>,
 }
 
 pub struct RenderCall {
     pub vertex_shader: VertexShader,
     pub fragment_shader: FragmentShader,
+    pub topology: PrimitiveTopology,
+    pub depth: bool,
 }
