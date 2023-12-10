@@ -801,6 +801,7 @@ fn window_size_dependent_setup(
     memory_allocator: Arc<StandardMemoryAllocator>,
     images: &[Arc<Image>],
     render_pass: Arc<RenderPass>,
+    user_storage: &mut events::UserStorage,
     render_storage: &mut RenderStorage,
 ) -> (
     Vec<Arc<GraphicsPipeline>>,
@@ -840,7 +841,7 @@ fn window_size_dependent_setup(
         })
         .collect::<Vec<_>>();
 
-    let mut pipelines = vec![];
+    let mut pipelines = (render_storage.menu.get_data().create_pipelines)(user_storage, render_storage);
 
     for (render_buffers, render_call) in &mut render_storage.render_buffers_list_and_render_calls {
         let vertex_shader_entrance = render_call
