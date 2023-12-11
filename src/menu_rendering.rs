@@ -70,7 +70,8 @@ EW 5. Menus should be able to specify shaders.
 A 6. Changing menu state should not change any other states, unless the menu requests it in its start function, or elsewhere.
 EW 7. Menu should have some easy way of accessing the buffers it has requested. Perhaps have a generic that requires a tuple of vertex types? This sounds bad. Split into separate problem, see below.
 EW 8. Some way to specify if a buffer should be created using a subbuffer allocator.
-N 9. Images. Images need to work with all the above goals. How? Images require a pipeline. This could be tricky.
+S 9. Images. Images need to work with all the above goals. How? Images require a pipeline. This could be tricky.
+N 10. descriptor sets are nightmares
 
 Goal state key:
 N = Not started implementation.
@@ -270,11 +271,39 @@ impl<T> RenderBuffer<T> where T: BufferContents + Copy {
             },
         };
     }
+
+    pub fn get_real_buffer(&self, frame_count: usize) -> Subbuffer<[T]> {
+        self.real_buffer[frame_count % self.edit_frequency.to_buffer_amount()]
+    }
 }
 
 pub enum BufferTypes<T> where T: BufferContents + Copy {
     RenderBuffer(RenderBuffer<T>),
     FrequentAccessRenderBuffer(FrequentAccessRenderBuffer<T>),
+}
+
+impl<T> BufferTypes<T> where T: BufferContents + Copy {
+    pub fn get_real_buffer(&self, render_storage: &mut crate::RenderStorage) -> Subbuffer<[T]> {
+        match self {
+            BufferTypes::FrequentAccessRenderBuffer(buffer) => {
+                buffer.allocate_and_get_real_buffer(render_storage.buffer_allocator)
+            }
+            BufferTypes::RenderBuffer(buffer) => {
+                buffer.get_real_buffer(render_storage.frame_count)
+            }
+        }
+    }
+
+    pub fn len(&self, render_storage: &mut crate::RenderStorage) -> usize {
+        match self {
+            BufferTypes::FrequentAccessRenderBuffer(buffer) => {
+                buffer.buffer.len()
+            }
+            BufferTypes::RenderBuffer(buffer) => {
+                buffer.real_element_count[render_storage.frame_count % buffer.edit_frequency.to_buffer_amount()]
+            }
+        }
+    }
 }
 
 pub enum VertexBuffer {
@@ -292,7 +321,8 @@ impl VertexBuffer {
 }
 
 pub enum InstanceBuffer {
-    Test(BufferTypes<vertex_data::TestInstance>)
+    Test(BufferTypes<vertex_data::TestInstance>),
+    ForceMultipleTest(BufferTypes<vertex_data::ForceMultipleTestInstance>)
 }
 
 pub enum UniformBuffer {

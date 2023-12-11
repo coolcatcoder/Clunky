@@ -258,6 +258,57 @@ fn main() {
     )
     .unwrap();
 
+    let sprites = vec![];
+
+    for png_bytes in menus::PNG_BYTES_LIST {
+        sprites.push({
+            let decoder = png::Decoder::new(png_bytes);
+            let mut reader = decoder.read_info().unwrap();
+            let info = reader.info();
+            let extent = [info.width, info.height, 1];
+
+            let upload_buffer = Buffer::new_slice(
+                memory_allocator.clone(),
+                BufferCreateInfo {
+                    usage: BufferUsage::TRANSFER_SRC,
+                    ..Default::default()
+                },
+                AllocationCreateInfo {
+                    memory_type_filter: MemoryTypeFilter::PREFER_HOST | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
+                    ..Default::default()
+                },
+                (info.width * info.height * 4) as DeviceSize,
+            )
+            .unwrap();
+
+            reader
+            .next_frame(&mut upload_buffer.write().unwrap())
+            .unwrap();
+
+            let image = Image::new(
+                memory_allocator.clone(),
+                ImageCreateInfo {
+                    image_type: ImageType::Dim2d,
+                    format: Format::R8G8B8A8_SRGB,
+                    extent,
+                    usage: ImageUsage::TRANSFER_DST | ImageUsage::SAMPLED,
+                    ..Default::default()
+                },
+                AllocationCreateInfo::default(),
+            )
+            .unwrap();
+
+            uploads
+                .copy_buffer_to_image(CopyBufferToImageInfo::buffer_image(
+                    upload_buffer,
+                    image.clone(),
+                ))
+                .unwrap();
+
+            ImageView::new_default(image).unwrap()
+        })
+    }
+
     // TODO: replace this with a function somewhere that returns a vec of images for easy use and editing.
     let sprites_map = {
         let png_bytes = include_bytes!("sprite_sheet.png").as_slice();
@@ -401,7 +452,8 @@ fn main() {
             &mut render_storage,
         );
 
-    let descriptor_set_allocator =
+
+    render_storage.descriptor_set_allocator =
         StandardDescriptorSetAllocator::new(device.clone(), Default::default());
 
     let mut recreate_swapchain = false; // sometimes the swapchain is broken, and need to be fixed
@@ -415,34 +467,6 @@ fn main() {
             .unwrap()
             .boxed(),
     );
-
-    let layout_map = pipeline_map.layout().set_layouts().get(1).unwrap();
-    let layout_ui = pipeline_ui.layout().set_layouts().get(1).unwrap();
-
-    let set_sprites_map = PersistentDescriptorSet::new(
-        &descriptor_set_allocator,
-        layout_map.clone(),
-        [WriteDescriptorSet::image_view_sampler(
-            1,
-            sprites_map,
-            sampler.clone(),
-        )],
-        [],
-    )
-    .unwrap();
-
-    let set_sprites_text = PersistentDescriptorSet::new(
-        // TODO: check the examples, as I'm not so certain this is 100% right...
-        &descriptor_set_allocator,
-        layout_ui.clone(),
-        [WriteDescriptorSet::image_view_sampler(
-            1,
-            sprites_text,
-            sampler,
-        )],
-        [],
-    )
-    .unwrap();
 
     let mut delta_time_sum = 0.0;
     let mut average_fps = 0.0;
@@ -562,17 +586,16 @@ fn main() {
 
                     swapchain = new_swapchain;
 
-                    let (new_pipeline_map, new_pipeline_ui, new_pipeline_test, new_framebuffers) =
-                        window_size_dependent_setup_old(
+                    let (new_pipelines, new_framebuffers) =
+                        window_size_dependent_setup(
                             memory_allocator.clone(),
                             &new_images,
                             render_pass.clone(),
-                            device.clone(),
+                            &mut user_storage,
+                            &mut render_storage,
                         );
 
-                    pipeline_map = new_pipeline_map;
-                    pipeline_ui = new_pipeline_ui;
-                    pipeline_test = new_pipeline_test;
+                    pipelines = new_pipelines;
                     framebuffers = new_framebuffers;
 
                     recreate_swapchain = false;
@@ -649,7 +672,7 @@ fn main() {
                             clear_values: vec![
                                 Some([0.0, 0.0, 1.0, 1.0].into()),
                                 Some((1.0, 0u32).into()),
-                            ], // Sets background colour and something else.
+                            ], // Sets background colour and something else, likely depth buffer.
                             ..RenderPassBeginInfo::framebuffer(
                                 framebuffers[image_index as usize].clone(),
                             )
@@ -658,6 +681,70 @@ fn main() {
                         Default::default(),
                     )
                     .unwrap();
+
+                for i in 0..render_storage.render_buffers_list_and_render_calls.len() {
+                    let (render_buffers, render_call) = render_storage.render_buffers_list_and_render_calls[i];
+                    builder.bind_pipeline_graphics(pipelines[i].clone())
+                    .unwrap();
+
+                    // TODO: work out how to have descriptor sets here
+
+                    let mut instance_count = 0;
+                    if let Some(instance_buffer) = render_buffers.instance_buffer {
+                        match instance_buffer {
+                            menu_rendering::InstanceBuffer::Test(instance_buffer) => {
+                                instance_count = instance_buffer.len(&mut render_storage);
+                                let instance_buffer = instance_buffer.get_real_buffer(&mut render_storage);
+                                match render_buffers.vertex_buffer {
+                                    menu_rendering::VertexBuffer::UvVertexBuffer(vertex_buffer) => {
+                                        let vertex_buffer = vertex_buffer.get_real_buffer(&mut render_storage);
+                                        builder.bind_vertex_buffers(0, (vertex_buffer, instance_buffer)).unwrap();
+                                    }
+                                    menu_rendering::VertexBuffer::ColourVertexBuffer(vertex_buffer) => {
+                                        let vertex_buffer = vertex_buffer.get_real_buffer(&mut render_storage);
+                                        builder.bind_vertex_buffers(0, (vertex_buffer, instance_buffer)).unwrap();
+                                    }
+                                }
+                            }
+                            menu_rendering::InstanceBuffer::ForceMultipleTest(instance_buffer) => {
+                                instance_count = instance_buffer.len(&mut render_storage);
+                                let instance_buffer = instance_buffer.get_real_buffer(&mut render_storage);
+                                match render_buffers.vertex_buffer {
+                                    menu_rendering::VertexBuffer::UvVertexBuffer(vertex_buffer) => {
+                                        let vertex_buffer = vertex_buffer.get_real_buffer(&mut render_storage);
+                                        builder.bind_vertex_buffers(0, (vertex_buffer, instance_buffer)).unwrap();
+                                    }
+                                    menu_rendering::VertexBuffer::ColourVertexBuffer(vertex_buffer) => {
+                                        let vertex_buffer = vertex_buffer.get_real_buffer(&mut render_storage);
+                                        builder.bind_vertex_buffers(0, (vertex_buffer, instance_buffer)).unwrap();
+                                    }
+                                }
+                            }
+                        };
+                    }
+                    else {
+                        match render_buffers.vertex_buffer {
+                            menu_rendering::VertexBuffer::UvVertexBuffer(vertex_buffer) => {
+                                let vertex_buffer = vertex_buffer.get_real_buffer(&mut render_storage);
+                                builder.bind_vertex_buffers(0, vertex_buffer).unwrap();
+                            }
+                            menu_rendering::VertexBuffer::ColourVertexBuffer(vertex_buffer) => {
+                                let vertex_buffer = vertex_buffer.get_real_buffer(&mut render_storage);
+                                builder.bind_vertex_buffers(0, vertex_buffer).unwrap();
+                            }
+                        }
+                    }
+
+                    builder.bind_index_buffer(render_buffers.index_buffer.get_real_buffer(&mut render_storage)).unwrap()
+                    .draw_indexed(
+                        render_buffers.index_buffer.len(&mut render_storage) as u32,
+                        instance_count as u32,
+                        0,
+                        0,
+                        0,
+                    )
+                    .unwrap();
+                }
 
                 builder
                     .bind_pipeline_graphics(pipeline_map.clone())
@@ -1005,4 +1092,7 @@ pub struct RenderStorage {
     pub render_buffers_list_and_render_calls: Vec<(menu_rendering::RenderBuffers, menu_rendering::RenderCall)>,
     pub buffer_allocator: SubbufferAllocator,
     pub memory_allocator: Arc<StandardMemoryAllocator>,
+    pub descriptor_set_allocator: StandardDescriptorSetAllocator,
+
+    pub experimental_descriptor_sets: Vec<PersistentDescriptorSet>,
 }

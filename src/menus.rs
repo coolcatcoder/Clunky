@@ -23,7 +23,7 @@ use crate::{biomes, collision};
 
 pub const STARTING_MENU: Menu = Menu::Test3D;
 
-pub const IMAGE_PATHS_TO_LOAD: [&str; 1] = ["pain"];
+pub const PNG_BYTES_LIST: [&[u8]; 1] = [include_bytes!("sprite_sheet.png").as_slice()];
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum Menu {
@@ -43,7 +43,7 @@ impl Menu {
 pub struct MenuData {
     pub start: fn(&mut events::UserStorage, &mut crate::RenderStorage),
     pub update: fn(&mut events::UserStorage, &mut crate::RenderStorage, f32, f32),
-    // TODO: Add a fixed update here. I would like to be able to specify how often it runs per menu, so perhaps a tuple containing both the function and the fixed time?
+    pub fixed_update: (f32, fn(&mut events::UserStorage, &mut crate::RenderStorage)),
     pub end: fn(&mut events::UserStorage, &mut crate::RenderStorage),
     pub on_keyboard_input: fn(&mut events::UserStorage, &mut crate::RenderStorage, KeyboardInput),
     pub on_window_resize: fn(&mut events::UserStorage, &mut crate::RenderStorage),
@@ -60,6 +60,7 @@ impl Default for MenuData {
         MenuData {
             start: |_user_storage, _render_storage| {},
             update: |_user_storage, _render_storage, _delta_time, _average_fps| {},
+            fixed_update: (f32::INFINITY, |_user_storage, _render_storage| {}),
             end: |_user_storage, _render_storage| {},
             on_keyboard_input: |_user_storage, _render_storage, _input| {},
             on_window_resize: |_user_storage, _render_storage| {},

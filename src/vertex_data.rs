@@ -41,6 +41,20 @@ pub struct TestInstance {
 
 #[derive(BufferContents, Vertex, Copy, Clone, Debug)]
 #[repr(C)]
+pub struct ForceMultipleTestInstance {
+    // TODO: work out how this will work with marching squares
+    #[format(R32G32B32_SFLOAT)]
+    pub position_offset: [f32; 3],
+
+    #[format(R32G32_SFLOAT)]
+    pub scale: [f32; 2],
+
+    #[format(R32G32_SFLOAT)]
+    pub uv_centre: [f32; 2],
+}
+
+#[derive(BufferContents, Vertex, Copy, Clone, Debug)]
+#[repr(C)]
 pub struct TestVertex {
     #[format(R32G32_SFLOAT)]
     pub position: [f32; 2],
