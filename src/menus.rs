@@ -2,18 +2,19 @@ use noise::OpenSimplex;
 use rand::distributions::Bernoulli;
 use rand::distributions::{Distribution, Uniform};
 use rand::thread_rng;
-use vulkano::command_buffer::{AutoCommandBufferBuilder, PrimaryAutoCommandBuffer};
-use vulkano::pipeline::GraphicsPipeline;
-use std::sync::{mpsc, Arc};
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::Sender;
 use std::sync::mpsc::TryRecvError;
+use std::sync::{mpsc, Arc};
+use vulkano::buffer::BufferUsage;
+use vulkano::command_buffer::{AutoCommandBufferBuilder, PrimaryAutoCommandBuffer};
 use vulkano::pipeline::graphics::input_assembly::PrimitiveTopology;
+use vulkano::pipeline::GraphicsPipeline;
 use winit::dpi::PhysicalPosition;
 use winit::event::{ElementState, KeyboardInput, MouseButton, VirtualKeyCode};
 
 use crate::chunks;
-use crate::events::{self, CHUNK_GRID_WIDTH, UserStorage};
+use crate::events::{self, UserStorage, CHUNK_GRID_WIDTH};
 use crate::lost_code;
 use crate::menu_rendering;
 use crate::perks_and_curses;
@@ -51,29 +52,123 @@ pub struct MenuData {
         fn(&mut events::UserStorage, &mut crate::RenderStorage, PhysicalPosition<f64>),
     pub on_mouse_input:
         fn(&mut events::UserStorage, &mut crate::RenderStorage, ElementState, MouseButton),
-    pub create_pipelines: fn(&mut events::UserStorage, &mut crate::RenderStorage) -> Vec<Arc<GraphicsPipeline>>,
-    pub on_draw: fn(&mut events::UserStorage, &mut crate::RenderStorage, &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>),
+    pub create_pipelines:
+        fn(&mut events::UserStorage, &mut crate::RenderStorage) -> Vec<Arc<GraphicsPipeline>>,
+    pub on_draw: fn(
+        &mut events::UserStorage,
+        &mut crate::RenderStorage,
+        &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
+    ),
 }
 
-impl Default for MenuData {
-    fn default() -> Self {
-        MenuData {
-            start: |_user_storage, _render_storage| {},
-            update: |_user_storage, _render_storage, _delta_time, _average_fps| {},
-            fixed_update: (f32::INFINITY, |_user_storage, _render_storage| {}),
-            end: |_user_storage, _render_storage| {},
-            on_keyboard_input: |_user_storage, _render_storage, _input| {},
-            on_window_resize: |_user_storage, _render_storage| {},
-            on_cursor_moved: |_user_storage, _render_storage, _position| {},
-            on_mouse_input: |_user_storage, _render_storage, _state, _button| {},
-            create_pipelines: |_user_storage, _render_storage| {vec![]},
-            on_draw: |_user_storage, _render_storage, _builder| {},
-        }
-    }
-}
+// impl MenuData {
+//     const fn get_default() -> Self {
+//         MenuData {
+//             start: |_user_storage, _render_storage| {},
+//             update: |_user_storage, _render_storage, _delta_time, _average_fps| {},
+//             fixed_update: (f32::INFINITY, |_user_storage, _render_storage| {}),
+//             end: |_user_storage, _render_storage| {},
+//             on_keyboard_input: |_user_storage, _render_storage, _input| {},
+//             on_window_resize: |_user_storage, _render_storage| {},
+//             on_cursor_moved: |_user_storage, _render_storage, _position| {},
+//             on_mouse_input: |_user_storage, _render_storage, _state, _button| {},
+//             create_pipelines: |_user_storage, _render_storage| {vec![]},
+//             on_draw: |_user_storage, _render_storage, _builder| {},
+//         }
+//     }
+// }
+
+// impl Default for MenuData {
+//     fn default() -> Self {
+//         MenuData::get_default()
+//     }
+// }
 
 pub const TEST: MenuData = MenuData {
-    start: |_user_storage, _render_storage| {
+    start: |_user_storage, render_storage| {
+        render_storage.entire_render_datas = vec![menu_rendering::EntireRenderData {
+            render_buffers: menu_rendering::RenderBuffers {
+                vertex_buffer: menu_rendering::VertexBuffer::ColourVertexBuffer(
+                    menu_rendering::BufferTypes::RenderBuffer(menu_rendering::RenderBuffer::new(
+                        vertex_data::ColourVertex {
+                            position: [0.0, 0.0, 0.0],
+                            colour: [0.0, 0.0, 0.0, 0.0],
+                        },
+                        4,
+                        menu_rendering::EditFrequency::Rarely,
+                        render_storage.memory_allocator.clone(),
+                        BufferUsage::VERTEX_BUFFER,
+                    )),
+                ),
+                index_buffer: menu_rendering::BufferTypes::RenderBuffer(
+                    menu_rendering::RenderBuffer::new(
+                        0,
+                        6,
+                        menu_rendering::EditFrequency::Rarely,
+                        render_storage.memory_allocator.clone(),
+                        BufferUsage::INDEX_BUFFER,
+                    ),
+                ),
+                instance_buffer: None,
+            },
+            render_call: menu_rendering::RenderCall {
+                vertex_shader: menu_rendering::VertexShader::SimpleTest,
+                fragment_shader: menu_rendering::FragmentShader::SimpleTest,
+                topology: PrimitiveTopology::TriangleStrip,
+                depth: false,
+            },
+            descriptor_set_and_contained_buffers: None,
+        }];
+
+        // TODO: create macro for assuming a buffer is of a type
+        let vertex_buffer: &mut menu_rendering::RenderBuffer<vertex_data::ColourVertex> = match &mut render_storage.entire_render_datas[0].render_buffers.vertex_buffer {
+            menu_rendering::VertexBuffer::ColourVertexBuffer(ref mut vertex_buffer) => {
+                if let menu_rendering::BufferTypes::RenderBuffer(ref mut vertex_buffer) = vertex_buffer {
+                    vertex_buffer
+                }
+                else {
+                    panic!()
+                }
+            }
+            _ => panic!()
+        };
+
+        let index_buffer: &mut menu_rendering::RenderBuffer<u32> = if let menu_rendering::BufferTypes::RenderBuffer(ref mut index_buffer) = &mut render_storage.entire_render_datas[0].render_buffers.index_buffer {
+            index_buffer
+        }
+        else {
+            panic!()
+        };
+
+        vertex_buffer.buffer[0] = vertex_data::ColourVertex {
+            // top left
+            position: [-0.5, 0.5, 0.0],
+            colour: [1.0, 0.0, 0.0, 1.0],
+        };
+        vertex_buffer.buffer[1] = vertex_data::ColourVertex {
+            // top right
+            position: [0.5, 0.5, 0.0],
+            colour: [1.0, 0.0, 0.0, 1.0],
+        };
+        vertex_buffer.buffer[2] = vertex_data::ColourVertex {
+            // bottom left
+            position: [-0.5, -0.5, 0.0],
+            colour: [1.0, 0.0, 0.0, 1.0],
+        };
+        vertex_buffer.buffer[3] = vertex_data::ColourVertex {
+            // bottom right
+            position: [0.5, -0.5, 0.0],
+            colour: [1.0, 0.0, 0.0, 1.0],
+        };
+
+        index_buffer.buffer[0] = 0;
+        index_buffer.buffer[1] = 2;
+        index_buffer.buffer[2] = 3;
+
+        index_buffer.buffer[3] = 0;
+        index_buffer.buffer[4] = 3;
+        index_buffer.buffer[5] = 1;
+
         /*
         println!("Test Menu Start");
 
@@ -128,21 +223,25 @@ pub const TEST: MenuData = MenuData {
         */
     },
     update: |_user_storage, _render_storage, _delta_time, _average_fps| {},
+    fixed_update: (f32::INFINITY, |_user_storage, _render_storage| {}),
     end: |_user_storage, _render_storage| {},
     on_keyboard_input: |_user_storage, _render_storage, _input| {},
     on_window_resize: |_user_storage, _render_storage| {},
     on_cursor_moved: |_user_storage, _render_storage, _position| {},
     on_mouse_input: |_user_storage, _render_storage, _state, _button| {},
-    ..Default::default()
+    create_pipelines: |_user_storage, _render_storage| vec![],
+    on_draw: |_user_storage, _render_storage, _builder| {},
 };
 
 pub const TEST3D: MenuData = MenuData {
     start: |_user_storage, _render_storage| {},
     update: |_user_storage, _render_storage, _delta_time, _average_fps| {},
+    fixed_update: (f32::INFINITY, |_user_storage, _render_storage| {}),
     end: |_user_storage, _render_storage| {},
     on_keyboard_input: |_user_storage, _render_storage, _input| {},
     on_window_resize: |_user_storage, _render_storage| {},
     on_cursor_moved: |_user_storage, _render_storage, _position| {},
     on_mouse_input: |_user_storage, _render_storage, _state, _button| {},
-    ..Default::default()
+    create_pipelines: |_user_storage, _render_storage| vec![],
+    on_draw: |_user_storage, _render_storage, _builder| {},
 };

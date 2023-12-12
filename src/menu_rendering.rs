@@ -1,8 +1,20 @@
-use std::{sync::Arc, default};
+use std::{default, sync::Arc};
 
 use vulkano::{
-    buffer::{Subbuffer, BufferContents, self, Buffer, BufferUsage, BufferCreateInfo, allocator::SubbufferAllocator}, device::Device, pipeline::graphics::{input_assembly::PrimitiveTopology, vertex_input::{Vertex, VertexBufferDescription}},
-    shader::ShaderModule, Validated, VulkanError, sync::HostAccessError, memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator},
+    buffer::{
+        self, allocator::SubbufferAllocator, Buffer, BufferContents, BufferCreateInfo, BufferUsage,
+        Subbuffer,
+    },
+    descriptor_set::PersistentDescriptorSet,
+    device::Device,
+    memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator},
+    pipeline::graphics::{
+        input_assembly::PrimitiveTopology,
+        vertex_input::{Vertex, VertexBufferDescription},
+    },
+    shader::ShaderModule,
+    sync::HostAccessError,
+    Validated, VulkanError,
 };
 
 use crate::vertex_data;
@@ -25,23 +37,27 @@ impl EditFrequency {
 
 pub enum VertexShader {
     Instanced2D,
+    SimpleTest,
 }
 
 impl VertexShader {
     pub fn load(&self, device: Arc<Device>) -> Result<Arc<ShaderModule>, Validated<VulkanError>> {
         match *self {
             VertexShader::Instanced2D => crate::vertex_shader_map::load(device),
+            VertexShader::SimpleTest => crate::simple_test_vertex_shader::load(device),
         }
     }
 }
 pub enum FragmentShader {
     Instanced2D,
+    SimpleTest,
 }
 
 impl FragmentShader {
     pub fn load(&self, device: Arc<Device>) -> Result<Arc<ShaderModule>, Validated<VulkanError>> {
         match *self {
             FragmentShader::Instanced2D => crate::fragment_shader_map::load(device),
+            FragmentShader::SimpleTest => crate::simple_test_fragment_shader::load(device),
         }
     }
 }
@@ -71,7 +87,7 @@ A 6. Changing menu state should not change any other states, unless the menu req
 EW 7. Menu should have some easy way of accessing the buffers it has requested. Perhaps have a generic that requires a tuple of vertex types? This sounds bad. Split into separate problem, see below.
 EW 8. Some way to specify if a buffer should be created using a subbuffer allocator.
 S 9. Images. Images need to work with all the above goals. How? Images require a pipeline. This could be tricky.
-N 10. descriptor sets are nightmares
+N 10. descriptor sets are nightmares. Consider having 1 optional descriptor set as part of the buffers. Perhaps containing the uniform buffers.
 
 Goal state key:
 N = Not started implementation.
@@ -177,20 +193,37 @@ I really like the idea of using enums containing types. Not exactly certain how 
 //     TestInstanceBuffer(Vec<Subbuffer<[vertex_data::TestInstance]>>),
 // }
 
-pub struct FrequentAccessRenderBuffer<T> where T: BufferContents + Copy {
+pub struct FrequentAccessRenderBuffer<T>
+where
+    T: BufferContents + Copy,
+{
     pub buffer: Vec<T>,
 }
 
-impl<T> FrequentAccessRenderBuffer<T> where T: BufferContents + Copy {
-    pub fn allocate_and_get_real_buffer(&self, buffer_allocator: SubbufferAllocator) -> Subbuffer<[T]> {
-        let real_buffer = buffer_allocator.allocate_slice(self.buffer.len() as u64).unwrap();
-        real_buffer.write().unwrap().copy_from_slice(self.buffer.as_slice());
+impl<T> FrequentAccessRenderBuffer<T>
+where
+    T: BufferContents + Copy,
+{
+    pub fn allocate_and_get_real_buffer(
+        &self,
+        buffer_allocator: &SubbufferAllocator,
+    ) -> Subbuffer<[T]> {
+        let real_buffer = buffer_allocator
+            .allocate_slice(self.buffer.len() as u64)
+            .unwrap();
+        real_buffer
+            .write()
+            .unwrap()
+            .copy_from_slice(self.buffer.as_slice());
 
         real_buffer
     }
 }
 
-pub struct RenderBuffer<T> where T: BufferContents + Copy {
+pub struct RenderBuffer<T>
+where
+    T: BufferContents + Copy,
+{
     pub buffer: Vec<T>,
     pub element_count: usize,
     pub update_buffer: bool,
@@ -202,30 +235,38 @@ pub struct RenderBuffer<T> where T: BufferContents + Copy {
     pub edit_frequency: EditFrequency,
 }
 
-impl<T> RenderBuffer<T> where T: BufferContents + Copy {
-    pub fn new(default_element: T, length: usize, edit_frequency: EditFrequency, memory_allocator: Arc<StandardMemoryAllocator>, usage: BufferUsage) -> RenderBuffer<T> {
+impl<T> RenderBuffer<T>
+where
+    T: BufferContents + Copy,
+{
+    pub fn new(
+        default_element: T,
+        length: usize,
+        edit_frequency: EditFrequency,
+        memory_allocator: Arc<StandardMemoryAllocator>,
+        usage: BufferUsage,
+    ) -> RenderBuffer<T> {
         let real_length = edit_frequency.to_buffer_amount();
 
         let mut real_buffer = vec![];
 
         for i in 0..real_length {
-            real_buffer.push(Buffer::from_iter(
-                memory_allocator.clone(),
-                BufferCreateInfo {
-                    usage,
-                    ..Default::default()
-                },
-                AllocationCreateInfo {
-                    memory_type_filter: MemoryTypeFilter::PREFER_DEVICE
-                        | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
-                    ..Default::default()
-                },
-                vec![
-                    default_element;
-                    length
-                ],
+            real_buffer.push(
+                Buffer::from_iter(
+                    memory_allocator.clone(),
+                    BufferCreateInfo {
+                        usage,
+                        ..Default::default()
+                    },
+                    AllocationCreateInfo {
+                        memory_type_filter: MemoryTypeFilter::PREFER_DEVICE
+                            | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
+                        ..Default::default()
+                    },
+                    vec![default_element; length],
+                )
+                .unwrap(),
             )
-            .unwrap())
         }
 
         RenderBuffer {
@@ -254,9 +295,9 @@ impl<T> RenderBuffer<T> where T: BufferContents + Copy {
         if !self.real_update_buffer[real_index] {
             return;
         }
-    
+
         let writer = self.real_buffer[real_index].write();
-    
+
         match writer {
             Ok(mut writer) => {
                 writer[0..self.element_count].copy_from_slice(&self.buffer[0..self.element_count]);
@@ -272,35 +313,41 @@ impl<T> RenderBuffer<T> where T: BufferContents + Copy {
         };
     }
 
-    pub fn get_real_buffer(&self, frame_count: usize) -> Subbuffer<[T]> {
-        self.real_buffer[frame_count % self.edit_frequency.to_buffer_amount()]
+    pub fn get_real_buffer(&self, frame_count: usize) -> &Subbuffer<[T]> {
+        &self.real_buffer[frame_count % self.edit_frequency.to_buffer_amount()]
     }
 }
 
-pub enum BufferTypes<T> where T: BufferContents + Copy {
+pub enum BufferTypes<T>
+where
+    T: BufferContents + Copy,
+{
     RenderBuffer(RenderBuffer<T>),
     FrequentAccessRenderBuffer(FrequentAccessRenderBuffer<T>),
 }
 
-impl<T> BufferTypes<T> where T: BufferContents + Copy {
-    pub fn get_real_buffer(&self, render_storage: &mut crate::RenderStorage) -> Subbuffer<[T]> {
+impl<T> BufferTypes<T>
+where
+    T: BufferContents + Copy,
+{
+    pub fn get_cloned_buffer(&self, render_storage: &crate::RenderStorage) -> Subbuffer<[T]> {
+        // TODO: bad name, consider take_buffer perhaps?
         match self {
             BufferTypes::FrequentAccessRenderBuffer(buffer) => {
-                buffer.allocate_and_get_real_buffer(render_storage.buffer_allocator)
+                buffer.allocate_and_get_real_buffer(&render_storage.buffer_allocator)
             }
             BufferTypes::RenderBuffer(buffer) => {
-                buffer.get_real_buffer(render_storage.frame_count)
+                buffer.get_real_buffer(render_storage.frame_count).clone()
             }
         }
     }
 
-    pub fn len(&self, render_storage: &mut crate::RenderStorage) -> usize {
+    pub fn len(&self, render_storage: &crate::RenderStorage) -> usize {
         match self {
-            BufferTypes::FrequentAccessRenderBuffer(buffer) => {
-                buffer.buffer.len()
-            }
+            BufferTypes::FrequentAccessRenderBuffer(buffer) => buffer.buffer.len(),
             BufferTypes::RenderBuffer(buffer) => {
-                buffer.real_element_count[render_storage.frame_count % buffer.edit_frequency.to_buffer_amount()]
+                buffer.real_element_count
+                    [render_storage.frame_count % buffer.edit_frequency.to_buffer_amount()]
             }
         }
     }
@@ -322,18 +369,17 @@ impl VertexBuffer {
 
 pub enum InstanceBuffer {
     Test(BufferTypes<vertex_data::TestInstance>),
-    ForceMultipleTest(BufferTypes<vertex_data::ForceMultipleTestInstance>)
+    ForceMultipleTest(BufferTypes<vertex_data::ForceMultipleTestInstance>),
 }
 
 pub enum UniformBuffer {
-    Test(BufferTypes<crate::vertex_shader_map::Data>)
+    Test(BufferTypes<crate::vertex_shader_map::Data>),
 }
 
 pub struct RenderBuffers {
     pub vertex_buffer: VertexBuffer,
     pub index_buffer: BufferTypes<u32>,
     pub instance_buffer: Option<InstanceBuffer>,
-    pub uniform_buffer: Option<UniformBuffer>,
 }
 
 pub struct RenderCall {
@@ -341,4 +387,17 @@ pub struct RenderCall {
     pub fragment_shader: FragmentShader,
     pub topology: PrimitiveTopology,
     pub depth: bool,
+}
+
+pub struct DescriptorSetAndContainedBuffers {
+    pub descriptor_set: Arc<PersistentDescriptorSet>,
+
+    pub uniform_buffer: Option<UniformBuffer>,
+}
+
+pub struct EntireRenderData {
+    // TODO: terrible name
+    pub render_buffers: RenderBuffers,
+    pub render_call: RenderCall,
+    pub descriptor_set_and_contained_buffers: Option<DescriptorSetAndContainedBuffers>,
 }
