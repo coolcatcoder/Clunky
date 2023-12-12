@@ -798,10 +798,8 @@ fn window_size_dependent_setup(
         )
         .unwrap();
 
-        let mut depth_stencil_state = None;
-
-        if entire_render_data.render_call.depth {
-            depth_stencil_state = Some(DepthStencilState {
+        let depth_stencil_state = if entire_render_data.render_call.depth {
+            Some(DepthStencilState {
                 depth: Some(DepthState {
                     write_enable: true,
                     compare_op: CompareOp::Less,
@@ -809,8 +807,19 @@ fn window_size_dependent_setup(
                 depth_bounds: None,
                 stencil: None,
                 ..Default::default()
-            });
+            })
         }
+        else {
+            Some(DepthStencilState {
+                depth: Some(DepthState {
+                    write_enable: false,
+                    compare_op: CompareOp::Less,
+                }),
+                depth_bounds: None,
+                stencil: None,
+                ..Default::default()
+            })
+        };
 
         let subpass = Subpass::from(render_pass.clone(), 0).unwrap();
         pipelines.push(

@@ -87,7 +87,8 @@ A 6. Changing menu state should not change any other states, unless the menu req
 EW 7. Menu should have some easy way of accessing the buffers it has requested. Perhaps have a generic that requires a tuple of vertex types? This sounds bad. Split into separate problem, see below.
 EW 8. Some way to specify if a buffer should be created using a subbuffer allocator.
 S 9. Images. Images need to work with all the above goals. How? Images require a pipeline. This could be tricky.
-N 10. descriptor sets are nightmares. Consider having 1 optional descriptor set as part of the buffers. Perhaps containing the uniform buffers.
+S 10. descriptor sets are nightmares. Consider having 1 optional descriptor set as part of the buffers. Perhaps containing the uniform buffers.
+N 11. Have some easy way to debug everything. Perhaps consider having a debug struct full of bools, that print during different conditions, such as when a buffer updates, and stuff like that.
 
 Goal state key:
 N = Not started implementation.
@@ -295,6 +296,8 @@ where
         if !self.real_update_buffer[real_index] {
             return;
         }
+
+        println!("Updated");
 
         let writer = self.real_buffer[real_index].write();
 

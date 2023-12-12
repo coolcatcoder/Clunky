@@ -22,7 +22,7 @@ use crate::ui;
 use crate::vertex_data;
 use crate::{biomes, collision};
 
-pub const STARTING_MENU: Menu = Menu::Test3D;
+pub const STARTING_MENU: Menu = Menu::Test;
 
 pub const PNG_BYTES_LIST: [&[u8]; 1] = [include_bytes!("sprite_sheet.png").as_slice()];
 
@@ -86,6 +86,8 @@ pub struct MenuData {
 
 pub const TEST: MenuData = MenuData {
     start: |_user_storage, render_storage| {
+        println!("hello world");
+        
         render_storage.entire_render_datas = vec![menu_rendering::EntireRenderData {
             render_buffers: menu_rendering::RenderBuffers {
                 vertex_buffer: menu_rendering::VertexBuffer::ColourVertexBuffer(
@@ -120,8 +122,10 @@ pub const TEST: MenuData = MenuData {
             descriptor_set_and_contained_buffers: None,
         }];
 
+        let entire_render_data = &mut render_storage.entire_render_datas[0];
+
         // TODO: create macro for assuming a buffer is of a type
-        let vertex_buffer: &mut menu_rendering::RenderBuffer<vertex_data::ColourVertex> = match &mut render_storage.entire_render_datas[0].render_buffers.vertex_buffer {
+        let vertex_buffer: &mut menu_rendering::RenderBuffer<vertex_data::ColourVertex> = match &mut entire_render_data.render_buffers.vertex_buffer {
             menu_rendering::VertexBuffer::ColourVertexBuffer(ref mut vertex_buffer) => {
                 if let menu_rendering::BufferTypes::RenderBuffer(ref mut vertex_buffer) = vertex_buffer {
                     vertex_buffer
@@ -133,31 +137,28 @@ pub const TEST: MenuData = MenuData {
             _ => panic!()
         };
 
-        let index_buffer: &mut menu_rendering::RenderBuffer<u32> = if let menu_rendering::BufferTypes::RenderBuffer(ref mut index_buffer) = &mut render_storage.entire_render_datas[0].render_buffers.index_buffer {
-            index_buffer
-        }
-        else {
+        let menu_rendering::BufferTypes::RenderBuffer(index_buffer) = &mut entire_render_data.render_buffers.index_buffer else {
             panic!()
         };
 
         vertex_buffer.buffer[0] = vertex_data::ColourVertex {
             // top left
-            position: [-0.5, 0.5, 0.0],
+            position: [-0.5, 0.5, 0.9],
             colour: [1.0, 0.0, 0.0, 1.0],
         };
         vertex_buffer.buffer[1] = vertex_data::ColourVertex {
             // top right
-            position: [0.5, 0.5, 0.0],
+            position: [0.5, 0.5, 0.9],
             colour: [1.0, 0.0, 0.0, 1.0],
         };
         vertex_buffer.buffer[2] = vertex_data::ColourVertex {
             // bottom left
-            position: [-0.5, -0.5, 0.0],
+            position: [-0.5, -0.5, 0.9],
             colour: [1.0, 0.0, 0.0, 1.0],
         };
         vertex_buffer.buffer[3] = vertex_data::ColourVertex {
             // bottom right
-            position: [0.5, -0.5, 0.0],
+            position: [0.5, -0.5, 0.9],
             colour: [1.0, 0.0, 0.0, 1.0],
         };
 
@@ -168,6 +169,12 @@ pub const TEST: MenuData = MenuData {
         index_buffer.buffer[3] = 0;
         index_buffer.buffer[4] = 3;
         index_buffer.buffer[5] = 1;
+
+        index_buffer.element_count = 6;
+        index_buffer.update_buffer = true;
+
+        vertex_buffer.element_count = 4;
+        vertex_buffer.update_buffer = true;
 
         /*
         println!("Test Menu Start");
