@@ -8,6 +8,8 @@ use crate::vertex_data;
 
 pub const TEXT_SPRITE_SIZE: (f32, f32) = (1.0 / 30.0, 1.0 / 5.0);
 
+/*
+
 #[derive(Clone)]
 pub struct ScreenText {
     pub vertices: Vec<vertex_data::UIVertex>,
@@ -702,3 +704,4 @@ pub fn process_hovered_screen_toggleable_buttons(
         render_screen_texts(render_storage, &user_storage.screen_texts);
     }
 }
+*/
