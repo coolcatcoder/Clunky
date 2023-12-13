@@ -8,9 +8,7 @@ use vulkano::{
         allocator::StandardCommandBufferAllocator, AutoCommandBufferBuilder, CommandBufferUsage,
         CopyBufferToImageInfo, RenderPassBeginInfo,
     },
-    descriptor_set::{
-        allocator::StandardDescriptorSetAllocator, PersistentDescriptorSet, WriteDescriptorSet,
-    },
+    descriptor_set::{allocator::StandardDescriptorSetAllocator, PersistentDescriptorSet, WriteDescriptorSet},
     device::{
         physical::PhysicalDeviceType, Device, DeviceCreateInfo, DeviceExtensions, QueueCreateInfo,
         QueueFlags,
@@ -23,10 +21,10 @@ use vulkano::{
         graphics::{
             color_blend::{AttachmentBlend, ColorBlendAttachmentState, ColorBlendState},
             depth_stencil::{CompareOp, DepthState, DepthStencilState},
-            input_assembly::{InputAssemblyState, PrimitiveTopology},
+            input_assembly::InputAssemblyState,
             multisample::MultisampleState,
             rasterization::RasterizationState,
-            vertex_input::{Vertex, VertexDefinition},
+            vertex_input::VertexDefinition,
             viewport::{Scissor, Viewport, ViewportState},
             GraphicsPipelineCreateInfo,
         },
@@ -53,29 +51,15 @@ use vulkano::image::sampler::SamplerCreateInfo;
 
 use vulkano::command_buffer::PrimaryCommandBufferAbstract;
 
-use vulkano::buffer::Subbuffer;
-
 use vulkano::image::Image;
 
 use vulkano::device::DeviceOwned;
 
-mod vertex_data;
+mod buffer_contents;
 
 mod events;
 
-mod biomes;
-
-mod marching_squares;
-
 mod menus;
-
-mod ui;
-
-mod collision;
-
-mod chunks;
-
-mod perks_and_curses;
 
 mod lost_code;
 
@@ -248,6 +232,7 @@ fn main() {
         starting_time: Instant::now(),
         window_size: [0, 0],
         menu: menus::STARTING_MENU,
+        force_run_window_dependent_setup: false,
         entire_render_datas: vec![],
         buffer_allocator: SubbufferAllocator::new(
             memory_allocator.clone(),
@@ -265,6 +250,7 @@ fn main() {
             device.clone(),
             Default::default(),
         ),
+        fixed_time_passed: 0.0,
     };
 
     let mut user_storage = events::start(&mut render_storage);
@@ -398,16 +384,6 @@ fn main() {
     let mut delta_time = 0.0;
     let mut time = Instant::now();
 
-    let mut vertex_counts_map = [0u32, 0u32];
-    let mut index_counts_map = [0u32, 0u32];
-
-    let mut vertex_counts_ui = [0u32, 0u32];
-    let mut index_counts_ui = [0u32, 0u32];
-
-    let mut vertex_count_test = 0u32;
-    let mut index_count_test = 0u32;
-    let mut instance_count_test = 0u32;
-
     // start event loop
     event_loop.run(move |event, _, control_flow| {
         match event {
@@ -497,9 +473,9 @@ fn main() {
 
                 let mut substeps = 0;
 
-                while user_storage.fixed_time_passed < seconds_since_start {
+                while render_storage.fixed_time_passed < seconds_since_start {
                     (render_storage.menu.get_data().fixed_update.1)(&mut user_storage, &mut render_storage);
-                    user_storage.fixed_time_passed += render_storage.menu.get_data().fixed_update.0;
+                    render_storage.fixed_time_passed += render_storage.menu.get_data().fixed_update.0;
 
                     substeps += 1;
 
@@ -515,7 +491,9 @@ fn main() {
                     &mut render_storage,
                 );
 
-                if recreate_swapchain {
+                if recreate_swapchain || render_storage.force_run_window_dependent_setup {
+                    render_storage.force_run_window_dependent_setup = false;
+
                     // When the window resizes we need to recreate everything dependent on the window size.
                     let (new_swapchain, new_images) = swapchain
                         .recreate(SwapchainCreateInfo {
@@ -589,42 +567,77 @@ fn main() {
                     .unwrap();
 
                     // TODO: work out how to have descriptor sets here
-                    if let Some(descriptor_set_and_contained_buffers) = &entire_render_data.descriptor_set_and_contained_buffers {
+                    if let Some(shader_accessible_buffers) = &entire_render_data.render_buffers.shader_accessible_buffers {
+                        // TODO: fix this up
+
+                        let layout = pipelines[i].layout().set_layouts().get(0).unwrap();
+
+                        let mut descriptor_writes = vec![];
+
+                        if let Some(uniform_buffer) = &shader_accessible_buffers.uniform_buffer {
+                            match uniform_buffer {
+                                menu_rendering::UniformBuffer::Test(uniform_buffer) => {
+                                    descriptor_writes.push(WriteDescriptorSet::buffer(0, uniform_buffer.get_cloned_buffer(&render_storage)));
+                                }
+                            }
+                        }
+
+                        let set = PersistentDescriptorSet::new(
+                            &render_storage.descriptor_set_allocator,
+                            layout.clone(),
+                            descriptor_writes,
+                            [],
+                        ).unwrap();
+                        
                         builder.bind_descriptor_sets(
                             PipelineBindPoint::Graphics,
                             pipelines[i].layout().clone(),
                             0,
-                            vec![descriptor_set_and_contained_buffers.descriptor_set.clone()], // TODO: images should be done here...
-                        )
-                        .unwrap();
+                            set,
+                        ).unwrap();
                     }
 
-                    let mut instance_count = 0;
+                    let mut instance_count = 1;
+                    let vertex_count;
                     if let Some(instance_buffer) = &entire_render_data.render_buffers.instance_buffer {
                         match instance_buffer {
-                            menu_rendering::InstanceBuffer::Test(instance_buffer) => {
+                            menu_rendering::InstanceBuffer::Uv(instance_buffer) => {
                                 instance_count = instance_buffer.len(&render_storage);
                                 let instance_buffer = instance_buffer.get_cloned_buffer(&render_storage);
                                 match &entire_render_data.render_buffers.vertex_buffer {
-                                    menu_rendering::VertexBuffer::UvVertexBuffer(vertex_buffer) => {
+                                    menu_rendering::VertexBuffer::Uv(vertex_buffer) => {
+                                        vertex_count = vertex_buffer.len(&render_storage);
                                         let vertex_buffer = vertex_buffer.get_cloned_buffer(&render_storage);
                                         builder.bind_vertex_buffers(0, (vertex_buffer, instance_buffer)).unwrap();
                                     }
-                                    menu_rendering::VertexBuffer::ColourVertexBuffer(vertex_buffer) => {
+                                    menu_rendering::VertexBuffer::Colour(vertex_buffer) => {
+                                        vertex_count = vertex_buffer.len(&render_storage);
+                                        let vertex_buffer = vertex_buffer.get_cloned_buffer(&render_storage);
+                                        builder.bind_vertex_buffers(0, (vertex_buffer, instance_buffer)).unwrap();
+                                    }
+                                    menu_rendering::VertexBuffer::PositionOnly(vertex_buffer) => {
+                                        vertex_count = vertex_buffer.len(&render_storage);
                                         let vertex_buffer = vertex_buffer.get_cloned_buffer(&render_storage);
                                         builder.bind_vertex_buffers(0, (vertex_buffer, instance_buffer)).unwrap();
                                     }
                                 }
                             }
-                            menu_rendering::InstanceBuffer::ForceMultipleTest(instance_buffer) => {
+                            menu_rendering::InstanceBuffer::Colour(instance_buffer) => {
                                 instance_count = instance_buffer.len(&render_storage);
                                 let instance_buffer = instance_buffer.get_cloned_buffer(&render_storage);
                                 match &entire_render_data.render_buffers.vertex_buffer {
-                                    menu_rendering::VertexBuffer::UvVertexBuffer(vertex_buffer) => {
+                                    menu_rendering::VertexBuffer::Uv(vertex_buffer) => {
+                                        vertex_count = vertex_buffer.len(&render_storage);
                                         let vertex_buffer = vertex_buffer.get_cloned_buffer(&render_storage);
                                         builder.bind_vertex_buffers(0, (vertex_buffer, instance_buffer)).unwrap();
                                     }
-                                    menu_rendering::VertexBuffer::ColourVertexBuffer(vertex_buffer) => {
+                                    menu_rendering::VertexBuffer::Colour(vertex_buffer) => {
+                                        vertex_count = vertex_buffer.len(&render_storage);
+                                        let vertex_buffer = vertex_buffer.get_cloned_buffer(&render_storage);
+                                        builder.bind_vertex_buffers(0, (vertex_buffer, instance_buffer)).unwrap();
+                                    }
+                                    menu_rendering::VertexBuffer::PositionOnly(vertex_buffer) => {
+                                        vertex_count = vertex_buffer.len(&render_storage);
                                         let vertex_buffer = vertex_buffer.get_cloned_buffer(&render_storage);
                                         builder.bind_vertex_buffers(0, (vertex_buffer, instance_buffer)).unwrap();
                                     }
@@ -634,26 +647,44 @@ fn main() {
                     }
                     else {
                         match &entire_render_data.render_buffers.vertex_buffer {
-                            menu_rendering::VertexBuffer::UvVertexBuffer(vertex_buffer) => {
+                            menu_rendering::VertexBuffer::Uv(vertex_buffer) => {
+                                vertex_count = vertex_buffer.len(&render_storage);
                                 let vertex_buffer = vertex_buffer.get_cloned_buffer(&render_storage);
                                 builder.bind_vertex_buffers(0, vertex_buffer).unwrap();
                             }
-                            menu_rendering::VertexBuffer::ColourVertexBuffer(vertex_buffer) => {
+                            menu_rendering::VertexBuffer::Colour(vertex_buffer) => {
+                                vertex_count = vertex_buffer.len(&render_storage);
+                                let vertex_buffer = vertex_buffer.get_cloned_buffer(&render_storage);
+                                builder.bind_vertex_buffers(0, vertex_buffer).unwrap();
+                            }
+                            menu_rendering::VertexBuffer::PositionOnly(vertex_buffer) => {
+                                vertex_count = vertex_buffer.len(&render_storage);
                                 let vertex_buffer = vertex_buffer.get_cloned_buffer(&render_storage);
                                 builder.bind_vertex_buffers(0, vertex_buffer).unwrap();
                             }
                         }
                     }
 
-                    builder.bind_index_buffer(entire_render_data.render_buffers.index_buffer.get_cloned_buffer(&render_storage)).unwrap()
-                    .draw_indexed(
-                        entire_render_data.render_buffers.index_buffer.len(&render_storage) as u32,
-                        instance_count as u32,
-                        0,
-                        0,
-                        0,
-                    )
-                    .unwrap();
+                    if let Some(index_buffer) = &entire_render_data.render_buffers.index_buffer {
+                        builder.bind_index_buffer(index_buffer.get_cloned_buffer(&render_storage)).unwrap()
+                        .draw_indexed(
+                            index_buffer.len(&render_storage) as u32,
+                            instance_count as u32,
+                            0,
+                            0,
+                            0,
+                        )
+                        .unwrap();
+                    }
+                    else {
+                        builder.draw(
+                            vertex_count as u32,
+                            instance_count as u32,
+                            0,
+                            0,
+                        )
+                        .unwrap();
+                    }
                 }
 
                 builder.end_render_pass(Default::default()).unwrap();
@@ -888,19 +919,26 @@ fn get_instance_and_event_loop() -> (Arc<vulkano::instance::Instance>, EventLoop
 
 fn update_buffers(render_storage: &mut RenderStorage) {
     for entire_render_data in &mut render_storage.entire_render_datas {
-        if let menu_rendering::BufferTypes::RenderBuffer(index_buffer) =
-            &mut entire_render_data.render_buffers.index_buffer
-        {
-            index_buffer.update(render_storage.frame_count);
+        if let Some(index_buffer) = &mut entire_render_data.render_buffers.index_buffer {
+            if let menu_rendering::BufferTypes::RenderBuffer(index_buffer) =
+                index_buffer
+            {
+                index_buffer.update(render_storage.frame_count);
+            }
         }
 
         match &mut entire_render_data.render_buffers.vertex_buffer {
-            menu_rendering::VertexBuffer::UvVertexBuffer(vertex_buffer) => {
+            menu_rendering::VertexBuffer::Uv(vertex_buffer) => {
                 if let menu_rendering::BufferTypes::RenderBuffer(vertex_buffer) = vertex_buffer {
                     vertex_buffer.update(render_storage.frame_count);
                 }
             }
-            menu_rendering::VertexBuffer::ColourVertexBuffer(vertex_buffer) => {
+            menu_rendering::VertexBuffer::Colour(vertex_buffer) => {
+                if let menu_rendering::BufferTypes::RenderBuffer(vertex_buffer) = vertex_buffer {
+                    vertex_buffer.update(render_storage.frame_count);
+                }
+            }
+            menu_rendering::VertexBuffer::PositionOnly(vertex_buffer) => {
                 if let menu_rendering::BufferTypes::RenderBuffer(vertex_buffer) = vertex_buffer {
                     vertex_buffer.update(render_storage.frame_count);
                 }
@@ -909,14 +947,14 @@ fn update_buffers(render_storage: &mut RenderStorage) {
 
         if let Some(instance_buffer) = &mut entire_render_data.render_buffers.instance_buffer {
             match instance_buffer {
-                menu_rendering::InstanceBuffer::Test(instance_buffer) => {
+                menu_rendering::InstanceBuffer::Uv(instance_buffer) => {
                     if let menu_rendering::BufferTypes::RenderBuffer(instance_buffer) =
                         instance_buffer
                     {
                         instance_buffer.update(render_storage.frame_count);
                     }
                 }
-                menu_rendering::InstanceBuffer::ForceMultipleTest(instance_buffer) => {
+                menu_rendering::InstanceBuffer::Colour(instance_buffer) => {
                     if let menu_rendering::BufferTypes::RenderBuffer(instance_buffer) =
                         instance_buffer
                     {
@@ -944,9 +982,12 @@ pub struct RenderStorage {
 
     pub menu: menus::Menu, // TODO: Why does main need access to the menu? It really shouldn't.
 
+    pub force_run_window_dependent_setup: bool,
     pub entire_render_datas: Vec<menu_rendering::EntireRenderData>, // Plural of data, must be datas, I'm so sorry.
 
     pub buffer_allocator: SubbufferAllocator,
     pub memory_allocator: Arc<StandardMemoryAllocator>,
     pub descriptor_set_allocator: StandardDescriptorSetAllocator,
+
+    pub fixed_time_passed: f32,
 }

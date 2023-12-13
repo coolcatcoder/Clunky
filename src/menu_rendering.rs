@@ -1,11 +1,10 @@
-use std::{default, sync::Arc};
+use std::sync::Arc;
 
 use vulkano::{
     buffer::{
-        self, allocator::SubbufferAllocator, Buffer, BufferContents, BufferCreateInfo, BufferUsage,
+        allocator::SubbufferAllocator, Buffer, BufferContents, BufferCreateInfo, BufferUsage,
         Subbuffer,
     },
-    descriptor_set::PersistentDescriptorSet,
     device::Device,
     memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator},
     pipeline::graphics::{
@@ -17,7 +16,7 @@ use vulkano::{
     Validated, VulkanError,
 };
 
-use crate::vertex_data;
+use crate::buffer_contents;
 
 pub enum EditFrequency {
     Rarely,
@@ -62,33 +61,19 @@ impl FragmentShader {
     }
 }
 
-/* Unsolved problems:
-
-How will uniform buffers work? Perhaps have a function field in the struct that gives access to render and user stuff?
-
-How on earth are regular buffers even going to work?
-
-We need someway to force recreation of pipelines from user code, so switching menus can force recreation
-
-How will multiple pipelines work? What if something needs multiple vertex definitions, and therefore multiple draw calls? How can this be handled? Temp solution: Only allow 2 vertex buffers. One with colours, and one with uv.
-
-Perhaps instead of having arrays of 2, we should instead have an option<> of an array of the whole struct. Like [Option<MenuRenderSettings>; 2] or something.
-
-Ui handling??
-*/
-
 /* Goals are ill defined. Better goals:
-EW 1. Main should not have to be altered in order to add or remove draw calls. Only menus should have to be altered.
-EW 2. Menus should be able to specify draw calls.
-EW 3. Menus should be able to specify buffers.
-EW 4. Menus should be able to specify vertex buffer types.
-EW 5. Menus should be able to specify shaders.
+A 1. Main should not have to be altered in order to add or remove draw calls. Only menus should have to be altered.
+A 2. Menus should be able to specify draw calls.
+A 3. Menus should be able to specify buffers.
+A 4. Menus should be able to specify vertex buffer types.
+A 5. Menus should be able to specify shaders.
 A 6. Changing menu state should not change any other states, unless the menu requests it in its start function, or elsewhere.
-EW 7. Menu should have some easy way of accessing the buffers it has requested. Perhaps have a generic that requires a tuple of vertex types? This sounds bad. Split into separate problem, see below.
-EW 8. Some way to specify if a buffer should be created using a subbuffer allocator.
+A 7. Menu should have some easy way of accessing the buffers it has requested. Perhaps have a generic that requires a tuple of vertex types?
+A 8. Some way to specify if a buffer should be created using a subbuffer allocator.
 S 9. Images. Images need to work with all the above goals. How? Images require a pipeline. This could be tricky.
 S 10. descriptor sets are nightmares. Consider having 1 optional descriptor set as part of the buffers. Perhaps containing the uniform buffers.
 N 11. Have some easy way to debug everything. Perhaps consider having a debug struct full of bools, that print during different conditions, such as when a buffer updates, and stuff like that.
+N 12. Having an easy way for menus to assume the buffers are of a type would be nice. Create a function called assume_render_buffer_is_of_type or perhaps a macro?
 
 Goal state key:
 N = Not started implementation.
@@ -96,53 +81,6 @@ S = Started work on implementation.
 EB = Experimental implementation that is broken.
 EW = Experimental implementation that is working.
 A = Goal achieved.
-*/
-
-// TODO: too much duplication, consider removing the whole vertex and index buffer settings, and instance buffer settings. Perhaps make them their own struct, also containing the buffers. Currently we have 3 structs telling us what the buffer type is. Not good. Too much matching.
-// pub struct RenderSettings {
-//     pub vertex_shader: VertexShader,
-//     pub fragment_shader: FragmentShader,
-//     pub vertex_and_index_buffer_settings: VertexAndIndexBufferSettings,
-//     pub instance_buffer_settings: Option<InstanceBufferSettings>,
-//     pub depth: bool,
-// }
-
-// pub struct VertexAndIndexBufferSettings {
-//     pub vertex_buffer_type: VertexBufferType,
-//     pub vertex_buffer_edit_frequency: EditFrequency,
-//     pub topology: PrimitiveTopology,
-//     pub index_buffer_length: usize,
-//     pub index_buffer_edit_frequency: EditFrequency,
-// }
-
-// pub struct InstanceBufferSettings {
-//     pub instance_buffer_type: InstanceBufferType,
-//     pub instance_buffer_edit_frequency: EditFrequency,
-// }
-
-pub enum VertexBufferType {
-    Test(usize),
-}
-
-pub enum InstanceBufferType {
-    Test(usize),
-}
-
-/* problem 7 deconstruction:
-
-we want a struct of an unknown amount of arrays, each of an unknown type. So perhaps a tuple, but how to construct.
-Generics might be possible somehow. Perhaps macros?
-
-Perhaps have each menu be its own struct? We can use traits to constrain it heavily perhaps?
-Then they can just specify in a trait, what type they want? All menu using functions would need to be generics then...
-I don't know.
-
-Easier solution, have a struct of all possible buffers, stored in render_storage. Code is nastier, but it might not work...
-We would somehow have to work out what the max amount of buffers is, by checking every menu.
-Cause draw calls are decided by the menus.. ahhh
-
-check out https://users.rust-lang.org/t/vector-with-generic-types-heterogeneous-container/46644
-I really like the idea of using enums containing types. Not exactly certain how yet. But I'll work it out!
 */
 
 // We can store a Vec of this in render storage, and manipulated via functions run by the menus, should we want to update the buffers.
@@ -251,7 +189,7 @@ where
 
         let mut real_buffer = vec![];
 
-        for i in 0..real_length {
+        for _ in 0..real_length {
             real_buffer.push(
                 Buffer::from_iter(
                     memory_allocator.clone(),
@@ -306,6 +244,8 @@ where
                 writer[0..self.element_count].copy_from_slice(&self.buffer[0..self.element_count]);
                 self.real_element_count[real_index] = self.element_count;
                 self.real_update_buffer[real_index] = false;
+
+                println!("{}",self.element_count);
             }
             Err(e) => match e {
                 HostAccessError::AccessConflict(access_conflict) => {
@@ -357,22 +297,24 @@ where
 }
 
 pub enum VertexBuffer {
-    UvVertexBuffer(BufferTypes<vertex_data::UvVertex>),
-    ColourVertexBuffer(BufferTypes<vertex_data::ColourVertex>),
+    Uv(BufferTypes<buffer_contents::UvVertex>),
+    Colour(BufferTypes<buffer_contents::ColourVertex>),
+    PositionOnly(BufferTypes<buffer_contents::PositionOnlyVertex>),
 }
 
 impl VertexBuffer {
     pub fn per_vertex(&self) -> VertexBufferDescription {
         match *self {
-            VertexBuffer::UvVertexBuffer(_) => vertex_data::UvVertex::per_vertex(),
-            VertexBuffer::ColourVertexBuffer(_) => vertex_data::ColourVertex::per_vertex(),
+            VertexBuffer::Uv(_) => buffer_contents::UvVertex::per_vertex(),
+            VertexBuffer::Colour(_) => buffer_contents::ColourVertex::per_vertex(),
+            VertexBuffer::PositionOnly(_) => buffer_contents::PositionOnlyVertex::per_vertex(),
         }
     }
 }
 
 pub enum InstanceBuffer {
-    Test(BufferTypes<vertex_data::TestInstance>),
-    ForceMultipleTest(BufferTypes<vertex_data::ForceMultipleTestInstance>),
+    Uv(BufferTypes<buffer_contents::UvInstance>),
+    Colour(BufferTypes<buffer_contents::ColourInstance>),
 }
 
 pub enum UniformBuffer {
@@ -381,8 +323,9 @@ pub enum UniformBuffer {
 
 pub struct RenderBuffers {
     pub vertex_buffer: VertexBuffer,
-    pub index_buffer: BufferTypes<u32>,
+    pub index_buffer: Option<BufferTypes<u32>>,
     pub instance_buffer: Option<InstanceBuffer>,
+    pub shader_accessible_buffers: Option<ShaderAccessibleBuffers>,
 }
 
 pub struct RenderCall {
@@ -392,9 +335,7 @@ pub struct RenderCall {
     pub depth: bool,
 }
 
-pub struct DescriptorSetAndContainedBuffers {
-    pub descriptor_set: Arc<PersistentDescriptorSet>,
-
+pub struct ShaderAccessibleBuffers {
     pub uniform_buffer: Option<UniformBuffer>,
 }
 
@@ -402,5 +343,4 @@ pub struct EntireRenderData {
     // TODO: terrible name
     pub render_buffers: RenderBuffers,
     pub render_call: RenderCall,
-    pub descriptor_set_and_contained_buffers: Option<DescriptorSetAndContainedBuffers>,
 }
