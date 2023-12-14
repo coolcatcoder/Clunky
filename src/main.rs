@@ -8,11 +8,14 @@ use vulkano::{
         allocator::StandardCommandBufferAllocator, AutoCommandBufferBuilder, CommandBufferUsage,
         CopyBufferToImageInfo, RenderPassBeginInfo,
     },
-    descriptor_set::{allocator::StandardDescriptorSetAllocator, PersistentDescriptorSet, WriteDescriptorSet},
+    descriptor_set::{
+        allocator::StandardDescriptorSetAllocator, PersistentDescriptorSet, WriteDescriptorSet,
+    },
     device::{
         physical::PhysicalDeviceType, Device, DeviceCreateInfo, DeviceExtensions, QueueCreateInfo,
         QueueFlags,
     },
+    format::ClearValue,
     image::sampler::{Filter, SamplerAddressMode},
     image::{view::ImageView, ImageCreateInfo, ImageType, ImageUsage},
     instance::{Instance, InstanceCreateFlags, InstanceCreateInfo},
@@ -37,7 +40,7 @@ use vulkano::{
         acquire_next_image, Surface, Swapchain, SwapchainCreateInfo, SwapchainPresentInfo,
     },
     sync::{self, GpuFuture},
-    DeviceSize, Validated, VulkanError, VulkanLibrary, format::ClearValue,
+    DeviceSize, Validated, VulkanError, VulkanLibrary,
 };
 use winit::{
     event::{Event, WindowEvent},
@@ -65,17 +68,31 @@ mod lost_code;
 
 mod menu_rendering;
 
-mod simple_test_vertex_shader {
+mod colour_2d_vertex_shader {
     vulkano_shaders::shader! {
         ty: "vertex",
-        path: "src/simple_test_shaders/vertex_shader.glsl",
+        path: "src/shaders/colour_2d_shaders/vertex_shader.glsl",
     }
 }
 
-mod simple_test_fragment_shader {
+mod colour_2d_fragment_shader {
     vulkano_shaders::shader! {
         ty: "fragment",
-        path: "src/simple_test_shaders/fragment_shader.glsl",
+        path: "src/shaders/colour_2d_shaders/fragment_shader.glsl",
+    }
+}
+
+mod uv_2d_vertex_shader {
+    vulkano_shaders::shader! {
+        ty: "vertex",
+        path: "src/shaders/uv_2d_shaders/vertex_shader.glsl",
+    }
+}
+
+mod uv_2d_fragment_shader {
+    vulkano_shaders::shader! {
+        ty: "fragment",
+        path: "src/shaders/uv_2d_shaders/fragment_shader.glsl",
     }
 }
 
@@ -561,6 +578,12 @@ fn main() {
                     )
                     .unwrap();
 
+                (render_storage.menu.get_data().on_draw)(
+                    &mut user_storage,
+                    &mut render_storage,
+                    &mut builder,
+                );
+
                 for i in 0..render_storage.entire_render_datas.len() {
                     let entire_render_data = &render_storage.entire_render_datas[i];
                     builder.bind_pipeline_graphics(pipelines[i].clone())
@@ -570,30 +593,40 @@ fn main() {
                     if let Some(shader_accessible_buffers) = &entire_render_data.render_buffers.shader_accessible_buffers {
                         // TODO: fix this up
 
-                        let layout = pipelines[i].layout().set_layouts().get(0).unwrap();
+                        let layouts = pipelines[i].layout().set_layouts();
 
-                        let mut descriptor_writes = vec![];
+                        let mut sets = vec![];
 
                         if let Some(uniform_buffer) = &shader_accessible_buffers.uniform_buffer {
                             match uniform_buffer {
-                                menu_rendering::UniformBuffer::Test(uniform_buffer) => {
-                                    descriptor_writes.push(WriteDescriptorSet::buffer(0, uniform_buffer.get_cloned_buffer(&render_storage)));
+                                menu_rendering::UniformBuffer::CameraData2D(uniform_buffer) => {
+                                    sets.push(PersistentDescriptorSet::new(
+                                        &render_storage.descriptor_set_allocator,
+                                        layouts.get(0).unwrap().clone(),
+                                        [WriteDescriptorSet::buffer(0, uniform_buffer.get_cloned_buffer(&render_storage))],
+                                        [],
+                                    ).unwrap())
                                 }
                             }
                         }
 
-                        let set = PersistentDescriptorSet::new(
-                            &render_storage.descriptor_set_allocator,
-                            layout.clone(),
-                            descriptor_writes,
-                            [],
-                        ).unwrap();
-                        
+                        if let Some(image) = &shader_accessible_buffers.image {
+                            sets.push(PersistentDescriptorSet::new(
+                                &render_storage.descriptor_set_allocator,
+                                layouts.get(1).unwrap().clone(),
+                                [
+                                    WriteDescriptorSet::sampler(0, sampler.clone()),
+                                    WriteDescriptorSet::image_view(1, sprites[*image].clone()),
+                                ],
+                                [],
+                            ).unwrap())
+                        }
+
                         builder.bind_descriptor_sets(
                             PipelineBindPoint::Graphics,
                             pipelines[i].layout().clone(),
                             0,
-                            set,
+                            sets,
                         ).unwrap();
                     }
 
@@ -839,8 +872,7 @@ fn window_size_dependent_setup(
                 stencil: None,
                 ..Default::default()
             })
-        }
-        else {
+        } else {
             Some(DepthStencilState {
                 depth: Some(DepthState {
                     write_enable: false,
@@ -920,9 +952,7 @@ fn get_instance_and_event_loop() -> (Arc<vulkano::instance::Instance>, EventLoop
 fn update_buffers(render_storage: &mut RenderStorage) {
     for entire_render_data in &mut render_storage.entire_render_datas {
         if let Some(index_buffer) = &mut entire_render_data.render_buffers.index_buffer {
-            if let menu_rendering::BufferTypes::RenderBuffer(index_buffer) =
-                index_buffer
-            {
+            if let menu_rendering::BufferTypes::RenderBuffer(index_buffer) = index_buffer {
                 index_buffer.update(render_storage.frame_count);
             }
         }

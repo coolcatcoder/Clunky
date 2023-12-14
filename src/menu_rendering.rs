@@ -35,28 +35,29 @@ impl EditFrequency {
 }
 
 pub enum VertexShader {
-    Instanced2D,
-    SimpleTest,
+    Colour2D,
+    Uv2D,
 }
 
 impl VertexShader {
     pub fn load(&self, device: Arc<Device>) -> Result<Arc<ShaderModule>, Validated<VulkanError>> {
         match *self {
-            VertexShader::Instanced2D => crate::vertex_shader_map::load(device),
-            VertexShader::SimpleTest => crate::simple_test_vertex_shader::load(device),
+            VertexShader::Colour2D => crate::colour_2d_vertex_shader::load(device),
+            VertexShader::Uv2D => crate::uv_2d_vertex_shader::load(device),
         }
     }
 }
 pub enum FragmentShader {
-    Instanced2D,
-    SimpleTest,
+    Colour2D,
+    Uv2D,
 }
 
 impl FragmentShader {
     pub fn load(&self, device: Arc<Device>) -> Result<Arc<ShaderModule>, Validated<VulkanError>> {
         match *self {
-            FragmentShader::Instanced2D => crate::fragment_shader_map::load(device),
-            FragmentShader::SimpleTest => crate::simple_test_fragment_shader::load(device),
+            FragmentShader::Colour2D => crate::colour_2d_fragment_shader::load(device),
+            FragmentShader::Uv2D => crate::uv_2d_fragment_shader::load(device),
+
         }
     }
 }
@@ -70,8 +71,8 @@ A 5. Menus should be able to specify shaders.
 A 6. Changing menu state should not change any other states, unless the menu requests it in its start function, or elsewhere.
 A 7. Menu should have some easy way of accessing the buffers it has requested. Perhaps have a generic that requires a tuple of vertex types?
 A 8. Some way to specify if a buffer should be created using a subbuffer allocator.
-S 9. Images. Images need to work with all the above goals. How? Images require a pipeline. This could be tricky.
-S 10. descriptor sets are nightmares. Consider having 1 optional descriptor set as part of the buffers. Perhaps containing the uniform buffers.
+A 9. Images. Images need to work with all the above goals. How? Images require a pipeline. This could be tricky.
+A 10. descriptor sets are nightmares. Consider having 1 optional descriptor set as part of the buffers. Perhaps containing the uniform buffers.
 N 11. Have some easy way to debug everything. Perhaps consider having a debug struct full of bools, that print during different conditions, such as when a buffer updates, and stuff like that.
 N 12. Having an easy way for menus to assume the buffers are of a type would be nice. Create a function called assume_render_buffer_is_of_type or perhaps a macro?
 
@@ -82,55 +83,6 @@ EB = Experimental implementation that is broken.
 EW = Experimental implementation that is working.
 A = Goal achieved.
 */
-
-// We can store a Vec of this in render storage, and manipulated via functions run by the menus, should we want to update the buffers.
-// pub struct RenderBuffers {
-//     pub vertex_buffer: VertexBuffer,
-//     pub vertex_count: usize,
-//     pub update_vertex_buffer: bool,
-
-//     pub index_buffer: Vec<u32>,
-//     pub index_count: usize,
-//     pub update_index_buffer: bool,
-
-//     pub instance_buffer: Option<InstanceBuffer>,
-//     pub instance_count: usize,
-//     pub update_instance_buffer: bool,
-// }
-
-// pub enum VertexBuffer {
-//     UvVertexBuffer(Vec<vertex_data::UvVertex>),
-//     ColourVertexBuffer(Vec<vertex_data::ColourVertex>),
-// }
-
-// pub enum InstanceBuffer {
-//     TestInstanceBuffer(Vec<vertex_data::TestInstance>),
-// }
-
-// Real buffers below should contain actual sub buffers. Used only by main, not by menus.
-
-// pub struct RealRenderBuffers {
-//     pub vertex_buffer: RealVertexBuffer,
-//     pub vertex_count: Vec<usize>,
-//     pub update_vertex_buffer: Vec<bool>, // Essentially when we get the signal to update the buffer from the menu, we then set that to false, and set this entire vec to true. Whenever we can write to the buffer we set one of them to false, for that specific buffer.
-
-//     pub index_buffer: Vec<Subbuffer<[u32]>>,
-//     pub index_count: Vec<usize>,
-//     pub update_index_buffer: Vec<bool>,
-
-//     pub instance_buffer: Option<RealInstanceBuffer>,
-//     pub instance_count: Vec<usize>,
-//     pub update_instance_buffer: Vec<bool>,
-// }
-
-// pub enum RealVertexBuffer {
-//     UvVertexBuffer(Vec<Subbuffer<[vertex_data::UvVertex]>>),
-//     ColourVertexBuffer(Vec<Subbuffer<[vertex_data::ColourVertex]>>),
-// }
-
-// pub enum RealInstanceBuffer {
-//     TestInstanceBuffer(Vec<Subbuffer<[vertex_data::TestInstance]>>),
-// }
 
 pub struct FrequentAccessRenderBuffer<T>
 where
@@ -245,7 +197,7 @@ where
                 self.real_element_count[real_index] = self.element_count;
                 self.real_update_buffer[real_index] = false;
 
-                println!("{}",self.element_count);
+                println!("{}", self.element_count);
             }
             Err(e) => match e {
                 HostAccessError::AccessConflict(access_conflict) => {
@@ -318,7 +270,7 @@ pub enum InstanceBuffer {
 }
 
 pub enum UniformBuffer {
-    Test(BufferTypes<crate::vertex_shader_map::Data>),
+    CameraData2D(BufferTypes<crate::colour_2d_vertex_shader::CameraData2D>),
 }
 
 pub struct RenderBuffers {
@@ -337,6 +289,7 @@ pub struct RenderCall {
 
 pub struct ShaderAccessibleBuffers {
     pub uniform_buffer: Option<UniformBuffer>,
+    pub image: Option<usize>,
 }
 
 pub struct EntireRenderData {
