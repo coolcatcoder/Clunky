@@ -37,6 +37,7 @@ impl EditFrequency {
 pub enum VertexShader {
     Colour2D,
     Uv2D,
+    Colour3DInstanced,
 }
 
 impl VertexShader {
@@ -44,12 +45,16 @@ impl VertexShader {
         match *self {
             VertexShader::Colour2D => crate::colour_2d_vertex_shader::load(device),
             VertexShader::Uv2D => crate::uv_2d_vertex_shader::load(device),
+            VertexShader::Colour3DInstanced => {
+                crate::colour_3d_instanced_vertex_shader::load(device)
+            }
         }
     }
 }
 pub enum FragmentShader {
     Colour2D,
     Uv2D,
+    Colour3DInstanced,
 }
 
 impl FragmentShader {
@@ -57,7 +62,9 @@ impl FragmentShader {
         match *self {
             FragmentShader::Colour2D => crate::colour_2d_fragment_shader::load(device),
             FragmentShader::Uv2D => crate::uv_2d_fragment_shader::load(device),
-
+            FragmentShader::Colour3DInstanced => {
+                crate::colour_3d_instanced_fragment_shader::load(device)
+            }
         }
     }
 }
@@ -187,8 +194,6 @@ where
             return;
         }
 
-        println!("Updated");
-
         let writer = self.real_buffer[real_index].write();
 
         match writer {
@@ -196,8 +201,6 @@ where
                 writer[0..self.element_count].copy_from_slice(&self.buffer[0..self.element_count]);
                 self.real_element_count[real_index] = self.element_count;
                 self.real_update_buffer[real_index] = false;
-
-                println!("{}", self.element_count);
             }
             Err(e) => match e {
                 HostAccessError::AccessConflict(access_conflict) => {
@@ -237,7 +240,7 @@ where
         }
     }
 
-    pub fn len(&self, render_storage: &crate::RenderStorage) -> usize {
+    pub fn length(&self, render_storage: &crate::RenderStorage) -> usize {
         match self {
             BufferTypes::FrequentAccessRenderBuffer(buffer) => buffer.buffer.len(),
             BufferTypes::RenderBuffer(buffer) => {
@@ -248,10 +251,28 @@ where
     }
 }
 
+// This function shouldn't exist right? What the hell?????
+pub fn buffer_types_length<T>(
+    buffer_type: &BufferTypes<T>,
+    render_storage: &crate::RenderStorage,
+) -> usize
+where
+    T: BufferContents + Copy,
+{
+    match buffer_type {
+        BufferTypes::FrequentAccessRenderBuffer(buffer) => buffer.buffer.len(),
+        BufferTypes::RenderBuffer(buffer) => {
+            buffer.real_element_count
+                [render_storage.frame_count % buffer.edit_frequency.to_buffer_amount()]
+        }
+    }
+}
+
 pub enum VertexBuffer {
     Uv(BufferTypes<buffer_contents::UvVertex>),
     Colour(BufferTypes<buffer_contents::ColourVertex>),
     PositionOnly(BufferTypes<buffer_contents::PositionOnlyVertex>),
+    Basic3D(BufferTypes<buffer_contents::Basic3DVertex>),
 }
 
 impl VertexBuffer {
@@ -260,17 +281,54 @@ impl VertexBuffer {
             VertexBuffer::Uv(_) => buffer_contents::UvVertex::per_vertex(),
             VertexBuffer::Colour(_) => buffer_contents::ColourVertex::per_vertex(),
             VertexBuffer::PositionOnly(_) => buffer_contents::PositionOnlyVertex::per_vertex(),
+            VertexBuffer::Basic3D(_) => buffer_contents::Basic3DVertex::per_vertex(),
         }
     }
 }
 
+// TODO: horrific name
+macro_rules! vertex_buffer_generic_caller {
+    ($vertex_buffer:expr, $function:expr) => {
+        match $vertex_buffer {
+            menu_rendering::VertexBuffer::Uv(buffer) => $function(buffer),
+            menu_rendering::VertexBuffer::Colour(buffer) => $function(buffer),
+            menu_rendering::VertexBuffer::PositionOnly(buffer) => $function(buffer),
+            menu_rendering::VertexBuffer::Basic3D(buffer) => $function(buffer),
+        }
+    };
+}
+pub(crate) use vertex_buffer_generic_caller;
+
 pub enum InstanceBuffer {
     Uv(BufferTypes<buffer_contents::UvInstance>),
     Colour(BufferTypes<buffer_contents::ColourInstance>),
+    Colour3D(BufferTypes<buffer_contents::Colour3DInstance>),
 }
+
+impl InstanceBuffer {
+    pub fn per_instance(&self) -> VertexBufferDescription {
+        match *self {
+            InstanceBuffer::Uv(_) => buffer_contents::UvInstance::per_instance(),
+            InstanceBuffer::Colour(_) => buffer_contents::ColourInstance::per_instance(),
+            InstanceBuffer::Colour3D(_) => buffer_contents::Colour3DInstance::per_instance(),
+        }
+    }
+}
+
+macro_rules! instance_buffer_generic_caller {
+    ($instance_buffer:expr, $function:expr) => {
+        match $instance_buffer {
+            menu_rendering::InstanceBuffer::Uv(buffer) => $function(buffer),
+            menu_rendering::InstanceBuffer::Colour(buffer) => $function(buffer),
+            menu_rendering::InstanceBuffer::Colour3D(buffer) => $function(buffer),
+        }
+    };
+}
+pub(crate) use instance_buffer_generic_caller;
 
 pub enum UniformBuffer {
     CameraData2D(BufferTypes<crate::colour_2d_vertex_shader::CameraData2D>),
+    CameraData3D(BufferTypes<crate::colour_3d_instanced_vertex_shader::CameraData3D>),
 }
 
 pub struct RenderBuffers {

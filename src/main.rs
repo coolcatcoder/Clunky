@@ -68,31 +68,49 @@ mod lost_code;
 
 mod menu_rendering;
 
+mod math;
+
+mod meshes;
+
+mod colour_3d_instanced_vertex_shader {
+    vulkano_shaders::shader! {
+        ty: "vertex",
+        path: "src/shaders/colour_3d_instanced_shaders/vertex_shader.vert",
+    }
+}
+
+mod colour_3d_instanced_fragment_shader {
+    vulkano_shaders::shader! {
+        ty: "fragment",
+        path: "src/shaders/colour_3d_instanced_shaders/fragment_shader.frag",
+    }
+}
+
 mod colour_2d_vertex_shader {
     vulkano_shaders::shader! {
         ty: "vertex",
-        path: "src/shaders/colour_2d_shaders/vertex_shader.glsl",
+        path: "src/shaders/colour_2d_shaders/vertex_shader.vert",
     }
 }
 
 mod colour_2d_fragment_shader {
     vulkano_shaders::shader! {
         ty: "fragment",
-        path: "src/shaders/colour_2d_shaders/fragment_shader.glsl",
+        path: "src/shaders/colour_2d_shaders/fragment_shader.frag",
     }
 }
 
 mod uv_2d_vertex_shader {
     vulkano_shaders::shader! {
         ty: "vertex",
-        path: "src/shaders/uv_2d_shaders/vertex_shader.glsl",
+        path: "src/shaders/uv_2d_shaders/vertex_shader.vert",
     }
 }
 
 mod uv_2d_fragment_shader {
     vulkano_shaders::shader! {
         ty: "fragment",
-        path: "src/shaders/uv_2d_shaders/fragment_shader.glsl",
+        path: "src/shaders/uv_2d_shaders/fragment_shader.frag",
     }
 }
 
@@ -240,11 +258,7 @@ fn main() {
 
     let mut render_storage = RenderStorage {
         aspect_ratio: 0.0,
-        camera: Camera {
-            scale: 1.0,
-            position: (0.0, 0.0),
-        },
-        brightness: 0.0,
+        other_aspect_ratio: 0.01,
         frame_count: 0,
         starting_time: Instant::now(),
         window_size: [0, 0],
@@ -268,6 +282,8 @@ fn main() {
             Default::default(),
         ),
         fixed_time_passed: 0.0,
+
+        window,
     };
 
     let mut user_storage = events::start(&mut render_storage);
@@ -402,7 +418,7 @@ fn main() {
     let mut time = Instant::now();
 
     // start event loop
-    event_loop.run(move |event, _, control_flow| {
+    event_loop.run(move |event, _, control_flow| { // TODO: to simplify menu coding, I should just pass event into a menu function called event_handler() or something, and it can deal with it from there.
         match event {
             Event::WindowEvent {
                 event: WindowEvent::CloseRequested,
@@ -418,46 +434,12 @@ fn main() {
                 recreate_swapchain = true;
             }
 
-            Event::WindowEvent {
-                event: WindowEvent::KeyboardInput { input, .. },
-                ..
-            } => {
-                (render_storage.menu.get_data().on_keyboard_input)(
-                    &mut user_storage,
-                    &mut render_storage,
-                    input,
-                );
-            }
-
-            Event::WindowEvent {
-                event: WindowEvent::CursorMoved { position, .. },
-                ..
-            } => {
-                (render_storage.menu.get_data().on_cursor_moved)(
-                    &mut user_storage,
-                    &mut render_storage,
-                    position,
-                );
-            }
-
-            Event::WindowEvent {
-                event: WindowEvent::MouseInput { state, button, .. },
-                ..
-            } => {
-                (render_storage.menu.get_data().on_mouse_input)(
-                    &mut user_storage,
-                    &mut render_storage,
-                    state,
-                    button,
-                );
-            }
-
             Event::RedrawEventsCleared => {
                 // This should run once per frame.
-                let window = surface.object().unwrap().downcast_ref::<Window>().unwrap();
+                //let window = surface.object().unwrap().downcast_ref::<Window>().unwrap(); // TODO: work out why this existed?
 
                 //let dimensions = window.inner_size();
-                let image_extent: [u32; 2] = window.inner_size().into();
+                let image_extent: [u32; 2] = render_storage.window.inner_size().into();
 
                 if image_extent.contains(&0) {
                     // If the window is 0 in size, don't bother drawing the frame.
@@ -469,15 +451,19 @@ fn main() {
                 render_storage.aspect_ratio =
                     swapchain.image_extent()[1] as f32 / swapchain.image_extent()[0] as f32;
 
+                render_storage.other_aspect_ratio =
+                    swapchain.image_extent()[0] as f32 / swapchain.image_extent()[1] as f32;
+
                 let previous_window_size = render_storage.window_size;
                 render_storage.window_size = swapchain.image_extent();
 
-                if previous_window_size != render_storage.window_size {
-                    (render_storage.menu.get_data().on_window_resize)(
-                        &mut user_storage,
-                        &mut render_storage,
-                    );
-                }
+                // TODO: this ancient artifact of code suggests that perhaps the resized window event might potentially not work correctly? Investigate.
+                // if previous_window_size != render_storage.window_size {
+                //     (render_storage.menu.get_data().on_window_resize)(
+                //         &mut user_storage,
+                //         &mut render_storage,
+                //     );
+                // }
 
                 (render_storage.menu.get_data().update)(
                     &mut user_storage,
@@ -607,6 +593,14 @@ fn main() {
                                         [],
                                     ).unwrap())
                                 }
+                                menu_rendering::UniformBuffer::CameraData3D(uniform_buffer) => {
+                                    sets.push(PersistentDescriptorSet::new(
+                                        &render_storage.descriptor_set_allocator,
+                                        layouts.get(0).unwrap().clone(),
+                                        [WriteDescriptorSet::buffer(0, uniform_buffer.get_cloned_buffer(&render_storage))],
+                                        [],
+                                    ).unwrap())
+                                }
                             }
                         }
 
@@ -631,77 +625,33 @@ fn main() {
                     }
 
                     let mut instance_count = 1;
-                    let vertex_count;
+                    let mut vertex_count = 0;
                     if let Some(instance_buffer) = &entire_render_data.render_buffers.instance_buffer {
-                        match instance_buffer {
-                            menu_rendering::InstanceBuffer::Uv(instance_buffer) => {
-                                instance_count = instance_buffer.len(&render_storage);
-                                let instance_buffer = instance_buffer.get_cloned_buffer(&render_storage);
-                                match &entire_render_data.render_buffers.vertex_buffer {
-                                    menu_rendering::VertexBuffer::Uv(vertex_buffer) => {
-                                        vertex_count = vertex_buffer.len(&render_storage);
-                                        let vertex_buffer = vertex_buffer.get_cloned_buffer(&render_storage);
-                                        builder.bind_vertex_buffers(0, (vertex_buffer, instance_buffer)).unwrap();
-                                    }
-                                    menu_rendering::VertexBuffer::Colour(vertex_buffer) => {
-                                        vertex_count = vertex_buffer.len(&render_storage);
-                                        let vertex_buffer = vertex_buffer.get_cloned_buffer(&render_storage);
-                                        builder.bind_vertex_buffers(0, (vertex_buffer, instance_buffer)).unwrap();
-                                    }
-                                    menu_rendering::VertexBuffer::PositionOnly(vertex_buffer) => {
-                                        vertex_count = vertex_buffer.len(&render_storage);
-                                        let vertex_buffer = vertex_buffer.get_cloned_buffer(&render_storage);
-                                        builder.bind_vertex_buffers(0, (vertex_buffer, instance_buffer)).unwrap();
-                                    }
-                                }
-                            }
-                            menu_rendering::InstanceBuffer::Colour(instance_buffer) => {
-                                instance_count = instance_buffer.len(&render_storage);
-                                let instance_buffer = instance_buffer.get_cloned_buffer(&render_storage);
-                                match &entire_render_data.render_buffers.vertex_buffer {
-                                    menu_rendering::VertexBuffer::Uv(vertex_buffer) => {
-                                        vertex_count = vertex_buffer.len(&render_storage);
-                                        let vertex_buffer = vertex_buffer.get_cloned_buffer(&render_storage);
-                                        builder.bind_vertex_buffers(0, (vertex_buffer, instance_buffer)).unwrap();
-                                    }
-                                    menu_rendering::VertexBuffer::Colour(vertex_buffer) => {
-                                        vertex_count = vertex_buffer.len(&render_storage);
-                                        let vertex_buffer = vertex_buffer.get_cloned_buffer(&render_storage);
-                                        builder.bind_vertex_buffers(0, (vertex_buffer, instance_buffer)).unwrap();
-                                    }
-                                    menu_rendering::VertexBuffer::PositionOnly(vertex_buffer) => {
-                                        vertex_count = vertex_buffer.len(&render_storage);
-                                        let vertex_buffer = vertex_buffer.get_cloned_buffer(&render_storage);
-                                        builder.bind_vertex_buffers(0, (vertex_buffer, instance_buffer)).unwrap();
-                                    }
-                                }
-                            }
-                        };
+                        menu_rendering::instance_buffer_generic_caller!(instance_buffer, |instance_buffer| {
+                            //instance_count = instance_buffer.length(&render_storage);
+                            instance_count = menu_rendering::buffer_types_length(instance_buffer, &render_storage);
+                            let instance_buffer = instance_buffer.get_cloned_buffer(&render_storage);
+
+                            menu_rendering::vertex_buffer_generic_caller!(&entire_render_data.render_buffers.vertex_buffer, |vertex_buffer| {
+                                //vertex_count = vertex_buffer.len(&render_storage);
+                                vertex_count = menu_rendering::buffer_types_length(vertex_buffer, &render_storage);
+                                let vertex_buffer = vertex_buffer.get_cloned_buffer(&render_storage);
+                                builder.bind_vertex_buffers(0, (vertex_buffer, instance_buffer)).unwrap();
+                            });
+                        });
                     }
                     else {
-                        match &entire_render_data.render_buffers.vertex_buffer {
-                            menu_rendering::VertexBuffer::Uv(vertex_buffer) => {
-                                vertex_count = vertex_buffer.len(&render_storage);
-                                let vertex_buffer = vertex_buffer.get_cloned_buffer(&render_storage);
-                                builder.bind_vertex_buffers(0, vertex_buffer).unwrap();
-                            }
-                            menu_rendering::VertexBuffer::Colour(vertex_buffer) => {
-                                vertex_count = vertex_buffer.len(&render_storage);
-                                let vertex_buffer = vertex_buffer.get_cloned_buffer(&render_storage);
-                                builder.bind_vertex_buffers(0, vertex_buffer).unwrap();
-                            }
-                            menu_rendering::VertexBuffer::PositionOnly(vertex_buffer) => {
-                                vertex_count = vertex_buffer.len(&render_storage);
-                                let vertex_buffer = vertex_buffer.get_cloned_buffer(&render_storage);
-                                builder.bind_vertex_buffers(0, vertex_buffer).unwrap();
-                            }
-                        }
+                        menu_rendering::vertex_buffer_generic_caller!(&entire_render_data.render_buffers.vertex_buffer, |vertex_buffer| {
+                            vertex_count = menu_rendering::buffer_types_length(vertex_buffer, &render_storage);
+                            let vertex_buffer = vertex_buffer.get_cloned_buffer(&render_storage);
+                            builder.bind_vertex_buffers(0, vertex_buffer).unwrap();
+                        });
                     }
 
                     if let Some(index_buffer) = &entire_render_data.render_buffers.index_buffer {
                         builder.bind_index_buffer(index_buffer.get_cloned_buffer(&render_storage)).unwrap()
                         .draw_indexed(
-                            index_buffer.len(&render_storage) as u32,
+                            index_buffer.length(&render_storage) as u32,
                             instance_count as u32,
                             0,
                             0,
@@ -776,7 +726,9 @@ fn main() {
                 time = Instant::now();
                 // End calculating time.
             }
-            _ => (),
+            _ => {
+                (render_storage.menu.get_data().handle_events)(&mut user_storage, &mut render_storage, event);
+            },
         }
     })
     // end event loop
@@ -842,12 +794,23 @@ fn window_size_dependent_setup(
             .entry_point("main")
             .unwrap();
 
-        let vertex_input_state = entire_render_data
-            .render_buffers
-            .vertex_buffer
-            .per_vertex()
+        let vertex_input_state;
+
+        if let Some(instance_buffer) = &entire_render_data.render_buffers.instance_buffer {
+            vertex_input_state = [
+                entire_render_data.render_buffers.vertex_buffer.per_vertex(),
+                instance_buffer.per_instance(),
+            ]
             .definition(&vertex_shader_entrance.info().input_interface)
             .unwrap();
+        } else {
+            vertex_input_state = entire_render_data
+                .render_buffers
+                .vertex_buffer
+                .per_vertex()
+                .definition(&vertex_shader_entrance.info().input_interface)
+                .unwrap();
+        }
 
         let stages = [
             PipelineShaderStageCreateInfo::new(vertex_shader_entrance),
@@ -951,51 +914,37 @@ fn get_instance_and_event_loop() -> (Arc<vulkano::instance::Instance>, EventLoop
 
 fn update_buffers(render_storage: &mut RenderStorage) {
     for entire_render_data in &mut render_storage.entire_render_datas {
-        if let Some(index_buffer) = &mut entire_render_data.render_buffers.index_buffer {
-            if let menu_rendering::BufferTypes::RenderBuffer(index_buffer) = index_buffer {
-                index_buffer.update(render_storage.frame_count);
-            }
+        if let Some(menu_rendering::BufferTypes::RenderBuffer(index_buffer)) =
+            &mut entire_render_data.render_buffers.index_buffer
+        {
+            index_buffer.update(render_storage.frame_count);
         }
 
-        match &mut entire_render_data.render_buffers.vertex_buffer {
-            menu_rendering::VertexBuffer::Uv(vertex_buffer) => {
+        menu_rendering::vertex_buffer_generic_caller!(
+            &mut entire_render_data.render_buffers.vertex_buffer,
+            |vertex_buffer: &mut _| {
                 if let menu_rendering::BufferTypes::RenderBuffer(vertex_buffer) = vertex_buffer {
                     vertex_buffer.update(render_storage.frame_count);
                 }
             }
-            menu_rendering::VertexBuffer::Colour(vertex_buffer) => {
-                if let menu_rendering::BufferTypes::RenderBuffer(vertex_buffer) = vertex_buffer {
-                    vertex_buffer.update(render_storage.frame_count);
-                }
-            }
-            menu_rendering::VertexBuffer::PositionOnly(vertex_buffer) => {
-                if let menu_rendering::BufferTypes::RenderBuffer(vertex_buffer) = vertex_buffer {
-                    vertex_buffer.update(render_storage.frame_count);
-                }
-            }
-        }
+        );
 
         if let Some(instance_buffer) = &mut entire_render_data.render_buffers.instance_buffer {
-            match instance_buffer {
-                menu_rendering::InstanceBuffer::Uv(instance_buffer) => {
+            menu_rendering::instance_buffer_generic_caller!(
+                instance_buffer,
+                |instance_buffer: &mut _| {
                     if let menu_rendering::BufferTypes::RenderBuffer(instance_buffer) =
                         instance_buffer
                     {
                         instance_buffer.update(render_storage.frame_count);
                     }
                 }
-                menu_rendering::InstanceBuffer::Colour(instance_buffer) => {
-                    if let menu_rendering::BufferTypes::RenderBuffer(instance_buffer) =
-                        instance_buffer
-                    {
-                        instance_buffer.update(render_storage.frame_count);
-                    }
-                }
-            }
+            );
         }
     }
 }
 
+#[deprecated] // TODO: work out why this exists??? This certainly ain't going to be used by main. This feels like it was inteded for user storage?
 pub struct Camera {
     pub scale: f32,
     pub position: (f32, f32),
@@ -1003,14 +952,13 @@ pub struct Camera {
 
 pub struct RenderStorage {
     // TODO: Perhaps removing or refining what belongs in this struct.
-    pub aspect_ratio: f32,
-    pub camera: Camera,
-    pub brightness: f32,
+    pub aspect_ratio: f32, // TODO: sort out these 2 different aspect ratios. Very messy.
+    pub other_aspect_ratio: f32,
     pub frame_count: usize, // This will overflow after 2 years, assuming 60 fps.
     pub starting_time: Instant,
     pub window_size: [u32; 2],
 
-    pub menu: menus::Menu, // TODO: Why does main need access to the menu? It really shouldn't.
+    pub menu: menus::Menu,
 
     pub force_run_window_dependent_setup: bool,
     pub entire_render_datas: Vec<menu_rendering::EntireRenderData>, // Plural of data, must be datas, I'm so sorry.
@@ -1020,4 +968,6 @@ pub struct RenderStorage {
     pub descriptor_set_allocator: StandardDescriptorSetAllocator,
 
     pub fixed_time_passed: f32,
+
+    pub window: Arc<Window>,
 }

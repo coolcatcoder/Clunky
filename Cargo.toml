@@ -6,6 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+cgmath = "0.18.0"
+gltf = "1.4.0"
 noise = "0.8.2"
 png = "0.17.10"
 rand = "0.8.5"
