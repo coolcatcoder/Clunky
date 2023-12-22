@@ -114,7 +114,7 @@ pub const MENU: menus::Data = menus::Data {
                                         // }
 
                                         crate::colour_3d_instanced_vertex_shader::CameraData3D {
-                                            //position: user_storage.camera_3d_position,
+                                            position: user_storage.camera_3d_position.into(),
                                             camera_to_clip: cgmath::perspective(
                                                 Rad(std::f32::consts::FRAC_PI_2),
                                                 //f32::max(render_storage.other_aspect_ratio, 0.01),
@@ -264,6 +264,8 @@ pub const MENU: menus::Data = menus::Data {
 
         user_storage.camera_3d_position[0] += real_motion.0;
         user_storage.camera_3d_position[2] += real_motion.1;
+
+        uniform_buffer.buffer[0].position = user_storage.camera_3d_position.into();
 
         uniform_buffer.buffer[0].world_to_camera =
             (Matrix4::from_angle_x(Deg(user_storage.camera_3d_rotation[0])) * Matrix4::from_angle_y(Deg(user_storage.camera_3d_rotation[1])) * Matrix4::from_translation(user_storage.camera_3d_position.into())).into();
