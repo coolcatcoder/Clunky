@@ -7,7 +7,7 @@ pub fn start(render_storage: &mut crate::RenderStorage) -> UserStorage {
         wasd_held: (false, false, false, false),
         zoom_held: (false, false),
         camera_3d_rotation: [0.0; 3],
-        camera_3d_position: [0.0; 3],
+        camera_3d_position: [0.0, 2.0, 0.0],
         sensitivity: 0.25,
         sprinting: true,
     };

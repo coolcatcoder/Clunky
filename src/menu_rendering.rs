@@ -9,6 +9,7 @@ use vulkano::{
     memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator},
     pipeline::graphics::{
         input_assembly::PrimitiveTopology,
+        rasterization::{CullMode, FrontFace},
         vertex_input::{Vertex, VertexBufferDescription},
     },
     shader::ShaderModule,
@@ -82,6 +83,7 @@ A 9. Images. Images need to work with all the above goals. How? Images require a
 A 10. descriptor sets are nightmares. Consider having 1 optional descriptor set as part of the buffers. Perhaps containing the uniform buffers.
 N 11. Have some easy way to debug everything. Perhaps consider having a debug struct full of bools, that print during different conditions, such as when a buffer updates, and stuff like that.
 N 12. Having an easy way for menus to assume the buffers are of a type would be nice. Create a function called assume_render_buffer_is_of_type or perhaps a macro?
+N 13. Buffer reuse across multiple entire render datas should be allowed, somehow. Avoid recursion by having a single match statement which panics upon recursion.
 
 Goal state key:
 N = Not started implementation.
@@ -222,7 +224,65 @@ where
 {
     RenderBuffer(RenderBuffer<T>),
     FrequentAccessRenderBuffer(FrequentAccessRenderBuffer<T>),
+    //ReuseBuffer(ReusableBuffers, usize) // This name is confusing. Essentially the usize is an index into render_storage.entire_render_datas, and the ReusableBuffers lets you know what buffer you are trying to reuse.
+    // TODO: Consider placing the reusable buffers as a generic that is part of the enum or something.
 }
+
+// pub enum ReusableBuffers {
+//     UniformBuffer,
+//     VertexBuffer,
+//     IndexBuffer,
+//     InstanceBuffer,
+// }
+
+// TODO: asap get this working please. This is probably the most advanced thing I've ever done!
+// macro_rules! reusable_buffers_generic_caller {
+//     ($reusable_buffers:expr, $render_buffers:expr, $function:expr) => {
+//         match $reusable_buffers {
+//             crate::menu_rendering::ReusableBuffers::UniformBuffer => {
+//                 let Some(shader_accessible_buffers) = $render_buffers.shader_accessible_buffers else {
+//                     panic!()
+//                 };
+//                 let Some(uniform_buffer) = shader_accessible_buffers.uniform_buffer else {
+//                     panic!()
+//                 };
+
+//                 $function(uniform_buffer)
+//             },
+//             crate::menu_rendering::ReusableBuffers::VertexBuffer => {
+//                 let Some(shader_accessible_buffers) = $render_buffers.shader_accessible_buffers else {
+//                     panic!()
+//                 };
+//                 let Some(uniform_buffer) = shader_accessible_buffers.uniform_buffer else {
+//                     panic!()
+//                 };
+
+//                 $function(uniform_buffer)
+//             },
+//             crate::menu_rendering::ReusableBuffers::IndexBuffer => {
+//                 let Some(shader_accessible_buffers) = $render_buffers.shader_accessible_buffers else {
+//                     panic!()
+//                 };
+//                 let Some(uniform_buffer) = shader_accessible_buffers.uniform_buffer else {
+//                     panic!()
+//                 };
+
+//                 $function(uniform_buffer)
+//             },
+//             crate::menu_rendering::ReusableBuffers::InstanceBuffer => {
+//                 let Some(shader_accessible_buffers) = $render_buffers.shader_accessible_buffers else {
+//                     panic!()
+//                 };
+//                 let Some(uniform_buffer) = shader_accessible_buffers.uniform_buffer else {
+//                     panic!()
+//                 };
+
+//                 $function(uniform_buffer)
+//             },
+//         }
+//     };
+// }
+// pub(crate) use reusable_buffers_generic_caller;
 
 impl<T> BufferTypes<T>
 where
@@ -338,11 +398,13 @@ pub struct RenderBuffers {
     pub shader_accessible_buffers: Option<ShaderAccessibleBuffers>,
 }
 
-pub struct RenderCall {
+pub struct Settings {
     pub vertex_shader: VertexShader,
     pub fragment_shader: FragmentShader,
     pub topology: PrimitiveTopology,
     pub depth: bool,
+    pub cull_mode: CullMode,
+    pub front_face: FrontFace,
 }
 
 pub struct ShaderAccessibleBuffers {
@@ -353,5 +415,5 @@ pub struct ShaderAccessibleBuffers {
 pub struct EntireRenderData {
     // TODO: terrible name
     pub render_buffers: RenderBuffers,
-    pub render_call: RenderCall,
+    pub settings: Settings,
 }

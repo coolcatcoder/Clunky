@@ -8,7 +8,7 @@ mod example_1;
 mod example_3d;
 mod image_example;
 
-pub const STARTING_MENU: Menu = Menu::Example1; // TODO: Very worried! When I set this to example 1 and then transition to example 3d, then example 3d works. If I go to example 3d directly using this const, then it doesn't work. WHAT THE HELL
+pub const STARTING_MENU: Menu = Menu::Example3D; // TODO: Very worried! When I set this to example 1 and then transition to example 3d, then example 3d works. If I go to example 3d directly using this const, then it doesn't work. WHAT THE HELL
 
 pub const PNG_BYTES_LIST: [&[u8]; 1] = [include_bytes!("sprite_sheet.png").as_slice()];
 

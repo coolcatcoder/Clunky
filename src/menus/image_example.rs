@@ -1,4 +1,6 @@
 use vulkano::pipeline::graphics::input_assembly::PrimitiveTopology;
+use vulkano::pipeline::graphics::rasterization::CullMode;
+use vulkano::pipeline::graphics::rasterization::FrontFace;
 use winit::event::Event;
 use winit::event::KeyboardInput;
 use winit::event::VirtualKeyCode;
@@ -47,11 +49,13 @@ pub const MENU: menus::Data = menus::Data {
                     image: Some(0),
                 }),
             },
-            render_call: menu_rendering::RenderCall {
+            settings: menu_rendering::Settings {
                 vertex_shader: menu_rendering::VertexShader::Uv2D,
                 fragment_shader: menu_rendering::FragmentShader::Uv2D,
                 topology: PrimitiveTopology::TriangleStrip,
                 depth: true,
+                cull_mode: CullMode::default(),
+                front_face: FrontFace::default(),
             },
         }];
 
@@ -175,17 +179,21 @@ fn on_keyboard_input(
             VirtualKeyCode::Up => user_storage.zoom_held.0 = is_pressed(input.state),
             VirtualKeyCode::Down => user_storage.zoom_held.1 = is_pressed(input.state),
 
-            VirtualKeyCode::F => if is_pressed(input.state) {
-                println!("Switching to example 1.");
-                render_storage.menu = menus::Menu::Example1;
-                (render_storage.menu.get_data().start)(user_storage, render_storage);
-            },
+            VirtualKeyCode::F => {
+                if is_pressed(input.state) {
+                    println!("Switching to example 1.");
+                    render_storage.menu = menus::Menu::Example1;
+                    (render_storage.menu.get_data().start)(user_storage, render_storage);
+                }
+            }
 
-            VirtualKeyCode::P => if is_pressed(input.state) {
-                println!("Switching to example 3d.");
-                render_storage.menu = menus::Menu::Example3D;
-                (render_storage.menu.get_data().start)(user_storage, render_storage);
-            },
+            VirtualKeyCode::P => {
+                if is_pressed(input.state) {
+                    println!("Switching to example 3d.");
+                    render_storage.menu = menus::Menu::Example3D;
+                    (render_storage.menu.get_data().start)(user_storage, render_storage);
+                }
+            }
             _ => (),
         }
     }

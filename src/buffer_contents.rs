@@ -1,3 +1,5 @@
+use crate::math;
+use cgmath::Matrix4;
 use vulkano::{buffer::BufferContents, pipeline::graphics::vertex_input::Vertex};
 
 #[derive(BufferContents, Vertex, Copy, Clone, Debug)]
@@ -43,6 +45,51 @@ pub struct Colour3DInstance {
 
     #[format(R32G32B32A32_SFLOAT)]
     pub model_to_world_3: [f32; 4],
+}
+
+impl Colour3DInstance {
+    pub const fn new_with_cgmath_matrix(
+        colour: [f32; 4],
+        model_to_world: Matrix4<f32>,
+    ) -> Colour3DInstance {
+        Colour3DInstance {
+            colour,
+            model_to_world_0: [
+                model_to_world.x.x,
+                model_to_world.x.y,
+                model_to_world.x.z,
+                model_to_world.x.w,
+            ],
+            model_to_world_1: [
+                model_to_world.y.x,
+                model_to_world.y.y,
+                model_to_world.y.z,
+                model_to_world.y.w,
+            ],
+            model_to_world_2: [
+                model_to_world.z.x,
+                model_to_world.z.y,
+                model_to_world.z.z,
+                model_to_world.z.w,
+            ],
+            model_to_world_3: [
+                model_to_world.w.x,
+                model_to_world.w.y,
+                model_to_world.w.z,
+                model_to_world.w.w,
+            ],
+        }
+    }
+
+    pub const fn new(colour: [f32; 4], model_to_world: math::Matrix4) -> Colour3DInstance {
+        Colour3DInstance {
+            colour,
+            model_to_world_0: model_to_world.x,
+            model_to_world_1: model_to_world.y,
+            model_to_world_2: model_to_world.z,
+            model_to_world_3: model_to_world.w,
+        }
+    }
 }
 
 #[derive(BufferContents, Vertex, Copy, Clone, Debug)]

@@ -1,3 +1,5 @@
+#![feature(const_fn_floating_point_arithmetic)] // Required for math for now.
+
 use std::{sync::Arc, time::Instant};
 use vulkano::{
     buffer::{
@@ -159,6 +161,10 @@ mod fragment_shader_test {
 const DEPTH_FORMAT: Format = Format::D16_UNORM; // TODO: work out what this should be
 
 fn main() {
+    if meshes::DEBUG_VIEWER {
+        println!("{}", meshes::DEBUG);
+    }
+
     let (instance, event_loop) = get_instance_and_event_loop();
 
     let window = Arc::new(WindowBuilder::new().build(&event_loop).unwrap());
@@ -454,7 +460,7 @@ fn main() {
                 render_storage.other_aspect_ratio =
                     swapchain.image_extent()[0] as f32 / swapchain.image_extent()[1] as f32;
 
-                let previous_window_size = render_storage.window_size;
+                //let previous_window_size = render_storage.window_size;
                 render_storage.window_size = swapchain.image_extent();
 
                 // TODO: this ancient artifact of code suggests that perhaps the resized window event might potentially not work correctly? Investigate.
@@ -780,14 +786,14 @@ fn window_size_dependent_setup(
 
     for entire_render_data in &mut render_storage.entire_render_datas {
         let vertex_shader_entrance = entire_render_data
-            .render_call
+            .settings
             .vertex_shader
             .load(device.clone())
             .unwrap()
             .entry_point("main")
             .unwrap();
         let fragment_shader_entrance = entire_render_data
-            .render_call
+            .settings
             .fragment_shader
             .load(device.clone())
             .unwrap()
@@ -825,7 +831,7 @@ fn window_size_dependent_setup(
         )
         .unwrap();
 
-        let depth_stencil_state = if entire_render_data.render_call.depth {
+        let depth_stencil_state = if entire_render_data.settings.depth {
             Some(DepthStencilState {
                 depth: Some(DepthState {
                     write_enable: true,
@@ -856,7 +862,7 @@ fn window_size_dependent_setup(
                     stages: stages.into_iter().collect(),
                     vertex_input_state: Some(vertex_input_state),
                     input_assembly_state: Some(InputAssemblyState {
-                        topology: entire_render_data.render_call.topology,
+                        topology: entire_render_data.settings.topology,
                         ..Default::default()
                     }),
                     viewport_state: Some(ViewportState {
@@ -873,7 +879,12 @@ fn window_size_dependent_setup(
                         .into(),
                         ..Default::default()
                     }),
-                    rasterization_state: Some(RasterizationState::default()),
+                    //rasterization_state: Some(RasterizationState::default()),
+                    rasterization_state: Some(RasterizationState {
+                        cull_mode: entire_render_data.settings.cull_mode,
+                        front_face: entire_render_data.settings.front_face,
+                        ..Default::default()
+                    }),
                     multisample_state: Some(MultisampleState::default()),
                     color_blend_state: Some(ColorBlendState::with_attachment_states(
                         subpass.num_color_attachments(),

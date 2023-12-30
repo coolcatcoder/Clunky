@@ -1,4 +1,6 @@
 use vulkano::pipeline::graphics::input_assembly::PrimitiveTopology;
+use vulkano::pipeline::graphics::rasterization::CullMode;
+use vulkano::pipeline::graphics::rasterization::FrontFace;
 use winit::event::Event;
 use winit::event::KeyboardInput;
 use winit::event::VirtualKeyCode;
@@ -60,11 +62,13 @@ pub const MENU: menus::Data = menus::Data {
                     image: None,
                 }),
             },
-            render_call: menu_rendering::RenderCall {
+            settings: menu_rendering::Settings {
                 vertex_shader: menu_rendering::VertexShader::Colour2D,
                 fragment_shader: menu_rendering::FragmentShader::Colour2D,
                 topology: PrimitiveTopology::TriangleStrip,
                 depth: true,
+                cull_mode: CullMode::default(),
+                front_face: FrontFace::default(),
             },
         }];
 
@@ -218,11 +222,13 @@ fn on_keyboard_input(
             VirtualKeyCode::Up => user_storage.zoom_held.0 = is_pressed(input.state),
             VirtualKeyCode::Down => user_storage.zoom_held.1 = is_pressed(input.state),
 
-            VirtualKeyCode::F => if is_pressed(input.state) {
-                println!("Switching to image example.");
-                render_storage.menu = menus::Menu::ImageExample;
-                (render_storage.menu.get_data().start)(user_storage, render_storage);
-            },
+            VirtualKeyCode::F => {
+                if is_pressed(input.state) {
+                    println!("Switching to image example.");
+                    render_storage.menu = menus::Menu::ImageExample;
+                    (render_storage.menu.get_data().start)(user_storage, render_storage);
+                }
+            }
             _ => (),
         }
     }

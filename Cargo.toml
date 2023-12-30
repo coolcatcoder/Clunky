@@ -7,6 +7,7 @@ edition = "2021"
 
 [dependencies]
 cgmath = "0.18.0"
+const_soft_float = "0.1.4"
 gltf = "1.4.0"
 noise = "0.8.2"
 png = "0.17.10"
@@ -15,3 +16,6 @@ vulkano = "0.34.0"
 vulkano-shaders = "0.34.0"
 vulkano-win = "0.34.0"
 winit = "0.28.6"
+
+[build-dependencies]
+gltf = "1.4.0"

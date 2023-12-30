@@ -16,8 +16,20 @@ layout(location = 1) out vec4 colour_out;
 layout(location = 2) out vec3 fragment_position;
 layout(location = 3) out vec3 camera_position;
 
+layout(location = 4) out float ambient_strength;
+layout(location = 5) out float specular_strength;
+
+layout(location = 6) out vec3 light_colour;
+layout(location = 7) out vec3 light_position;
+
 layout(set = 0, binding = 0) uniform CameraData3D {
     vec3 position;
+    
+    float ambient_strength;
+    float specular_strength;
+    vec3 light_colour;
+    vec3 light_position;
+
     mat4 camera_to_clip;
     mat4 world_to_camera;
 } camera;
@@ -28,9 +40,13 @@ void main() {
     temp = camera.world_to_camera * temp;
     gl_Position = camera.camera_to_clip * temp;
 
-    //normal_out = transpose(inverse(mat3(camera.world_to_camera))) * normal; // TODO: inversing matrices is expensive. Do on the cpu, store as part of the instance. Also is it really world_to_camera?
-    normal_out = transpose(inverse(mat3(model_to_world))) * normal;
+    normal_out = transpose(inverse(mat3(model_to_world))) * normal; // TODO: inversing matrices is expensive. Do on the cpu, store as part of the instance.
     colour_out = colour;
     fragment_position = vec3(model_to_world * vec4(position, 1.0));
     camera_position = camera.position;
+
+    ambient_strength = camera.ambient_strength;
+    specular_strength = camera.specular_strength;
+    light_colour = camera.light_colour;
+    light_position = camera.light_position;
 }
