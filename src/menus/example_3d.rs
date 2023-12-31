@@ -17,6 +17,7 @@ use winit::window::Fullscreen;
 use crate::buffer_contents;
 use crate::events;
 use crate::lost_code::is_pressed;
+use crate::math;
 use crate::menu_rendering;
 use crate::menu_rendering::BufferTypes;
 use crate::menu_rendering::EditFrequency;
@@ -152,13 +153,21 @@ pub const MENU: menus::Data = menus::Data {
                                                 light_colour: [1.0, 1.0, 1.0].into(),
                                                 light_position: [0.0, -5.0, 0.0].into(),
 
-                                                camera_to_clip: cgmath::perspective(
-                                                    Rad(std::f32::consts::FRAC_PI_2),
+                                                // camera_to_clip: cgmath::perspective(
+                                                //     Rad(std::f32::consts::FRAC_PI_2),
+                                                //     render_storage.other_aspect_ratio,
+                                                //     0.01,
+                                                //     100.0,
+                                                // )
+                                                // .into(),
+                                                camera_to_clip: math::Matrix4::from_perspective(
+                                                    math::Radians(std::f32::consts::FRAC_PI_2),
                                                     render_storage.other_aspect_ratio,
                                                     0.01,
                                                     100.0,
                                                 )
-                                                .into(),
+                                                .as_2d_array(),
+
                                                 world_to_camera: (view * scale).into(),
                                             }
                                         };
@@ -317,11 +326,27 @@ pub const MENU: menus::Data = menus::Data {
 
         uniform_buffer.buffer[0].position = user_storage.camera_3d_position.into();
 
+        // uniform_buffer.buffer[0].world_to_camera =
+        //     (Matrix4::from_angle_x(Deg(user_storage.camera_3d_rotation[0]))
+        //         * Matrix4::from_angle_y(Deg(user_storage.camera_3d_rotation[1]))
+        //         * Matrix4::from_translation(user_storage.camera_3d_position.into()))
+        //     .into();
+
         uniform_buffer.buffer[0].world_to_camera =
-            (Matrix4::from_angle_x(Deg(user_storage.camera_3d_rotation[0]))
-                * Matrix4::from_angle_y(Deg(user_storage.camera_3d_rotation[1]))
-                * Matrix4::from_translation(user_storage.camera_3d_position.into()))
-            .into();
+            math::Matrix4::from_scale(user_storage.camera_3d_scale)
+                .multiply(math::Matrix4::from_angle_x(
+                    math::Degrees(user_storage.camera_3d_rotation[0]).to_radians(),
+                ))
+                .multiply(math::Matrix4::from_angle_y(
+                    math::Degrees(user_storage.camera_3d_rotation[1]).to_radians(),
+                ))
+                .multiply(math::Matrix4::from_angle_z(
+                    math::Degrees(user_storage.camera_3d_rotation[2]).to_radians(),
+                ))
+                .multiply(math::Matrix4::from_translation(
+                    user_storage.camera_3d_position,
+                ))
+                .as_2d_array();
 
         uniform_buffer.buffer[0].camera_to_clip = cgmath::perspective(
             Rad(std::f32::consts::FRAC_PI_2),

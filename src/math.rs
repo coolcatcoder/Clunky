@@ -1,4 +1,4 @@
-// remember when doing matrix math transformations we do translate * rotate * scale
+// remember when doing matrix math transformations we do translate * rotate * scale unless you are doing world_to_camera, in which case it won't work, and you should try the reverse.
 // All rights go to cgmath, I've just slighty tweaked their stuff.
 
 use const_soft_float::soft_f32::SoftF32;
@@ -16,40 +16,14 @@ pub struct Matrix4 {
     pub w: [f32; 4],
 }
 
-// Replace with something faster when possible.
-// impl Mul<Matrix4> for Matrix4 {
-//     type Output = Matrix4;
-//     const fn mul(self, rhs: Matrix4) -> Self::Output {
-//         let lhs_array = [self.x, self.y, self.z, self.w];
-//         let rhs_array = [rhs.x, rhs.y, rhs.z, rhs.w];
-//         let mut final_array = [[0.0, 0.0, 0.0, 0.0],[0.0, 0.0, 0.0, 0.0],[0.0, 0.0, 0.0, 0.0],[0.0, 0.0, 0.0, 0.0]];
-//         let mut counter_inner = 0;
-//         let mut counter_outer = 0;
-
-//         for i in 0..lhs_array.len() {
-//             for j in 0..rhs_array[0].len() {
-//                 let mut product = 0.0;
-
-//                 for v in 0..rhs_array[i].len() {
-//                     product += lhs_array[i][v] * rhs_array[v][j];
-//                 }
-//                 final_array[counter_outer][counter_inner] = product;
-//                 counter_inner += 1;
-//             }
-//             counter_outer += 1;
-//         }
-
-//         Matrix4 {
-//             x: final_array[0],
-//             y: final_array[1],
-//             z: final_array[2],
-//             w: final_array[3],
-//         }
-//     }
-// }
-
 impl Matrix4 {
+    pub const fn as_2d_array(self) -> [[f32; 4]; 4] {
+        [self.x, self.y, self.z, self.w]
+    }
+
     pub const fn multiply(self, other: Matrix4) -> Matrix4 {
+        // Could this be simd oneday?
+        // Should this be inlined?
         let mut result = Matrix4 {
             x: [0.0; 4],
             y: [0.0; 4],
@@ -131,7 +105,6 @@ impl Matrix4 {
     #[must_use = "Method constructs a new matrix."]
     #[inline]
     pub const fn from_translation(translation: [f32; 3]) -> Matrix4 {
-        #[cfg_attr(rustfmt, rustfmt_skip)]
         Matrix4 {
             x: [1.0, 0.0, 0.0, 0.0],
             y: [0.0, 1.0, 0.0, 0.0],
@@ -143,7 +116,6 @@ impl Matrix4 {
     #[must_use = "Method constructs a new matrix."]
     #[inline]
     pub const fn from_scale(scale: [f32; 3]) -> Matrix4 {
-        #[cfg_attr(rustfmt, rustfmt_skip)]
         Matrix4 {
             x: [scale[0], 0.0, 0.0, 0.0],
             y: [0.0, scale[1], 0.0, 0.0],
@@ -156,12 +128,88 @@ impl Matrix4 {
         let theta_sin = SoftF32(theta.0).sin().to_f32();
         let theta_cos = SoftF32(theta.0).cos().to_f32();
 
-        #[cfg_attr(rustfmt, rustfmt_skip)]
         Matrix4 {
             x: [1.0, 0.0, 0.0, 0.0],
             y: [0.0, theta_cos, theta_sin, 0.0],
             z: [0.0, -theta_sin, theta_cos, 0.0],
             w: [0.0, 0.0, 0.0, 1.0],
+        }
+    }
+
+    pub const fn from_angle_y(theta: Radians) -> Matrix4 {
+        let theta_sin = SoftF32(theta.0).sin().to_f32();
+        let theta_cos = SoftF32(theta.0).cos().to_f32();
+
+        Matrix4 {
+            x: [theta_cos, 0.0, -theta_sin, 0.0],
+            y: [0.0, 1.0, 0.0, 0.0],
+            z: [theta_sin, 0.0, theta_cos, 0.0],
+            w: [0.0, 0.0, 0.0, 1.0],
+        }
+    }
+
+    pub const fn from_angle_z(theta: Radians) -> Matrix4 {
+        let theta_sin = SoftF32(theta.0).sin().to_f32();
+        let theta_cos = SoftF32(theta.0).cos().to_f32();
+
+        Matrix4 {
+            x: [theta_cos, theta_sin, 0.0, 0.0],
+            y: [-theta_sin, theta_cos, 0.0, 0.0],
+            z: [0.0, 0.0, 1.0, 0.0],
+            w: [0.0, 0.0, 0.0, 1.0],
+        }
+    }
+
+    // cannot be const, due to assert!() not be const sadly
+    pub fn from_perspective(fovy: Radians, aspect: f32, near: f32, far: f32) -> Matrix4 {
+        assert!(
+            fovy.0 > 0.0,
+            "The vertical field of view cannot be below zero, found: {:?}",
+            fovy.0
+        );
+        assert!(
+            fovy.0 < Degrees(180.0).to_radians().0,
+            "The vertical field of view cannot be greater than a half turn, found: {:?}",
+            fovy.0
+        );
+        assert!(
+            aspect.abs() != 0.0,
+            "The absolute aspect ratio cannot be zero, found: {:?}",
+            aspect.abs()
+        );
+        assert!(
+            near > 0.0,
+            "The near plane distance cannot be below zero, found: {:?}",
+            near
+        );
+        assert!(
+            far > 0.0,
+            "The far plane distance cannot be below zero, found: {:?}",
+            far
+        );
+        assert!(
+            far != near,
+            "The far plane and near plane are too close, found: far: {:?}, near: {:?}",
+            far,
+            near
+        );
+
+        Matrix4::from_perspective_no_checks(fovy, aspect, near, far)
+    }
+
+    pub const fn from_perspective_no_checks(
+        fovy: Radians,
+        aspect: f32,
+        near: f32,
+        far: f32,
+    ) -> Matrix4 {
+        let f = cot(fovy.0 / 2.0);
+
+        Matrix4 {
+            x: [f / aspect, 0.0, 0.0, 0.0],
+            y: [0.0, f, 0.0, 0.0],
+            z: [0.0, 0.0, (far + near) / (near - far), -1.0],
+            w: [0.0, 0.0, (2.0 * far * near) / (near - far), 0.0],
         }
     }
 }
@@ -181,23 +229,12 @@ impl Degrees {
     }
 }
 
-// #[repr(C)]
-// #[derive(Copy, Clone)]
-// pub struct Vector4 {
-//     pub x: f32,
-//     pub y: f32,
-//     pub z: f32,
-//     pub w: f32,
-// }
+#[inline]
+pub const fn cot(theta: f32) -> f32 {
+    1.0 / tan(theta)
+}
 
-// impl Vector4 { // Consider removing and just using a [f32; 4] for everything instead
-//     #[inline]
-//     pub const fn from_float_array(float_array: [f32; 4]) -> Vector4 {
-//         Vector4 {
-//             x: float_array[0],
-//             y: float_array[1],
-//             z: float_array[2],
-//             w: float_array[3],
-//         }
-//     }
-// }
+#[inline]
+pub const fn tan(theta: f32) -> f32 {
+    SoftF32(theta).sin().0 / SoftF32(theta).cos().0
+}
