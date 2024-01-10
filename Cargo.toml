@@ -17,5 +17,7 @@ vulkano-shaders = "0.34.0"
 vulkano-win = "0.34.0"
 winit = "0.28.6"
 
-[build-dependencies]
-gltf = "1.4.0"
+[build-dependencies.gltf]
+version = "1.4.0"
+features = ["extras", "names", "extensions"]
+

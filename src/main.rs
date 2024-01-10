@@ -1,4 +1,5 @@
 #![feature(const_fn_floating_point_arithmetic)] // Required for math for now.
+#![feature(test)]
 
 use std::{sync::Arc, time::Instant};
 use vulkano::{
@@ -62,17 +63,22 @@ use vulkano::device::DeviceOwned;
 
 mod buffer_contents;
 
-mod events;
-
 mod menus;
 
 mod lost_code;
 
 mod menu_rendering;
 
+#[allow(dead_code)]
 mod math;
 
 mod meshes;
+
+#[allow(dead_code)]
+mod physics;
+
+#[allow(dead_code)]
+mod random_generation;
 
 mod colour_3d_instanced_vertex_shader {
     vulkano_shaders::shader! {
@@ -292,7 +298,7 @@ fn main() {
         window,
     };
 
-    let mut user_storage = events::start(&mut render_storage);
+    let mut user_storage = menus::start(&mut render_storage);
 
     // start creating allocator for command buffer
     let command_buffer_allocator =
@@ -483,12 +489,12 @@ fn main() {
                 let mut substeps = 0;
 
                 while render_storage.fixed_time_passed < seconds_since_start {
-                    (render_storage.menu.get_data().fixed_update.1)(&mut user_storage, &mut render_storage);
-                    render_storage.fixed_time_passed += render_storage.menu.get_data().fixed_update.0;
+                    (render_storage.menu.get_data().fixed_update.function)(&mut user_storage, &mut render_storage);
+                    render_storage.fixed_time_passed += render_storage.menu.get_data().fixed_update.delta_time;
 
                     substeps += 1;
 
-                    if substeps > events::MAX_SUBSTEPS {
+                    if substeps > render_storage.menu.get_data().fixed_update.max_substeps {
                         println!(
                             "Too many substeps per frame. Entered performance sinkhole. Substeps: {}",
                             substeps
@@ -744,7 +750,7 @@ fn window_size_dependent_setup(
     memory_allocator: Arc<StandardMemoryAllocator>,
     images: &[Arc<Image>],
     render_pass: Arc<RenderPass>,
-    user_storage: &mut events::UserStorage,
+    user_storage: &mut menus::UserStorage,
     render_storage: &mut RenderStorage,
 ) -> (Vec<Arc<GraphicsPipeline>>, Vec<Arc<Framebuffer>>) {
     let device = memory_allocator.device().clone();

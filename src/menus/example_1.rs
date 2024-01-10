@@ -7,7 +7,6 @@ use winit::event::VirtualKeyCode;
 use winit::event::WindowEvent;
 
 use crate::buffer_contents;
-use crate::events;
 use crate::lost_code::is_pressed;
 use crate::menu_rendering;
 use crate::menus;
@@ -129,71 +128,76 @@ pub const MENU: menus::Data = menus::Data {
         render_storage.force_run_window_dependent_setup = true;
     },
     update: |_user_storage, _render_storage, _delta_time, _average_fps| {},
-    fixed_update: (0.04, |user_storage, render_storage| {
-        let entire_render_data = &mut render_storage.entire_render_datas[0];
+    fixed_update: menus::FixedUpdate {
+        delta_time: 0.04,
+        max_substeps: 150,
+        function: |user_storage, render_storage| {
+            let entire_render_data = &mut render_storage.entire_render_datas[0];
 
-        let vertex_buffer = match &mut entire_render_data.render_buffers.vertex_buffer {
-            menu_rendering::VertexBuffer::Colour(ref mut vertex_buffer) => {
-                if let menu_rendering::BufferTypes::FrequentAccessRenderBuffer(
-                    ref mut vertex_buffer,
-                ) = vertex_buffer
-                {
-                    vertex_buffer
-                } else {
-                    panic!()
+            let vertex_buffer = match &mut entire_render_data.render_buffers.vertex_buffer {
+                menu_rendering::VertexBuffer::Colour(ref mut vertex_buffer) => {
+                    if let menu_rendering::BufferTypes::FrequentAccessRenderBuffer(
+                        ref mut vertex_buffer,
+                    ) = vertex_buffer
+                    {
+                        vertex_buffer
+                    } else {
+                        panic!()
+                    }
                 }
-            }
-            _ => panic!(),
-        };
+                _ => panic!(),
+            };
 
-        vertex_buffer.buffer[6].position[1] += 0.5 * MENU.fixed_update.0;
-        vertex_buffer.buffer[6].position[1] %= 1.0;
+            vertex_buffer.buffer[6].position[1] += 0.5 * MENU.fixed_update.delta_time;
+            vertex_buffer.buffer[6].position[1] %= 1.0;
 
-        let motion = match user_storage.wasd_held {
-            (true, false, false, false) => (0.0, -1.0),
-            (false, false, true, false) => (0.0, 1.0),
-            (false, false, false, true) => (1.0, 0.0),
-            (false, true, false, false) => (-1.0, 0.0),
+            let motion = match user_storage.wasd_held {
+                (true, false, false, false) => (0.0, -1.0),
+                (false, false, true, false) => (0.0, 1.0),
+                (false, false, false, true) => (1.0, 0.0),
+                (false, true, false, false) => (-1.0, 0.0),
 
-            (true, true, false, false) => (-0.7, -0.7),
-            (true, false, false, true) => (0.7, -0.7),
+                (true, true, false, false) => (-0.7, -0.7),
+                (true, false, false, true) => (0.7, -0.7),
 
-            (false, true, true, false) => (-0.7, 0.7),
-            (false, false, true, true) => (0.7, 0.7),
+                (false, true, true, false) => (-0.7, 0.7),
+                (false, false, true, true) => (0.7, 0.7),
 
-            _ => (0.0, 0.0),
-        };
+                _ => (0.0, 0.0),
+            };
 
-        let zoom_motion = match user_storage.zoom_held {
-            (true, false) => -1.0,
-            (false, true) => 1.0,
-            _ => 0.0,
-        };
+            let zoom_motion = match user_storage.zoom_held {
+                (true, false) => -1.0,
+                (false, true) => 1.0,
+                _ => 0.0,
+            };
 
-        let Some(uniform_buffer) = &mut entire_render_data.render_buffers.shader_accessible_buffers
-        else {
-            panic!()
-        };
-        let Some(ref mut uniform_buffer) = uniform_buffer.uniform_buffer else {
-            panic!()
-        };
-        let menu_rendering::UniformBuffer::CameraData2D(uniform_buffer) = uniform_buffer else {
-            panic!();
-        };
-        let menu_rendering::BufferTypes::FrequentAccessRenderBuffer(uniform_buffer) =
-            uniform_buffer
-        else {
-            panic!()
-        };
+            let Some(uniform_buffer) =
+                &mut entire_render_data.render_buffers.shader_accessible_buffers
+            else {
+                panic!()
+            };
+            let Some(ref mut uniform_buffer) = uniform_buffer.uniform_buffer else {
+                panic!()
+            };
+            let menu_rendering::UniformBuffer::CameraData2D(uniform_buffer) = uniform_buffer else {
+                panic!();
+            };
+            let menu_rendering::BufferTypes::FrequentAccessRenderBuffer(uniform_buffer) =
+                uniform_buffer
+            else {
+                panic!()
+            };
 
-        let speed = 1.0 * MENU.fixed_update.0;
-        let zoom_speed = 1.0 * MENU.fixed_update.0;
+            let speed = 1.0 * MENU.fixed_update.delta_time;
+            let zoom_speed = 1.0 * MENU.fixed_update.delta_time;
 
-        uniform_buffer.buffer[0].position[0] += motion.0 * speed;
-        uniform_buffer.buffer[0].position[1] += motion.1 * speed;
-        uniform_buffer.buffer[0].scale += zoom_motion * zoom_speed;
-        uniform_buffer.buffer[0].aspect_ratio = render_storage.aspect_ratio;
-    }),
+            uniform_buffer.buffer[0].position[0] += motion.0 * speed;
+            uniform_buffer.buffer[0].position[1] += motion.1 * speed;
+            uniform_buffer.buffer[0].scale += zoom_motion * zoom_speed;
+            uniform_buffer.buffer[0].aspect_ratio = render_storage.aspect_ratio;
+        },
+    },
     handle_events: |user_storage, render_storage, event| match event {
         Event::WindowEvent {
             event: WindowEvent::KeyboardInput { input, .. },
@@ -209,7 +213,7 @@ pub const MENU: menus::Data = menus::Data {
 };
 
 fn on_keyboard_input(
-    user_storage: &mut events::UserStorage,
+    user_storage: &mut menus::UserStorage,
     render_storage: &mut crate::RenderStorage,
     input: KeyboardInput,
 ) {

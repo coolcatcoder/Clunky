@@ -2,6 +2,48 @@
 // All rights go to cgmath, I've just slighty tweaked their stuff.
 
 use const_soft_float::soft_f32::SoftF32;
+use std::ops;
+
+pub trait Number:
+    Copy
+    + Clone
+    + std::fmt::Debug
+    + ops::Add<Output = Self>
+    + ops::AddAssign
+    + ops::Sub<Output = Self>
+    + ops::Mul<Output = Self>
+    + ops::Div<Output = Self>
+    + ops::Rem<Output = Self>
+    + PartialOrd
+{
+    const ZERO: Self;
+    fn abs(self) -> Self;
+    fn sqrt(self) -> Self;
+}
+
+impl Number for f32 {
+    const ZERO: Self = 0.0;
+    #[inline]
+    fn abs(self) -> Self {
+        self.abs()
+    }
+    #[inline]
+    fn sqrt(self) -> Self {
+        self.sqrt()
+    }
+}
+
+impl Number for usize {
+    const ZERO: Self = 0;
+    #[inline]
+    fn abs(self) -> Self {
+        self
+    }
+    #[inline]
+    fn sqrt(self) -> Self {
+        todo!()
+    }
+}
 
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -17,6 +59,15 @@ pub struct Matrix4 {
 }
 
 impl Matrix4 {
+    pub const IDENTITY: Matrix4 = Matrix4 {
+        x: [1.0, 0.0, 0.0, 0.0],
+        y: [0.0, 1.0, 0.0, 0.0],
+        z: [0.0, 0.0, 1.0, 0.0],
+        w: [0.0, 0.0, 0.0, 1.0],
+    };
+
+    pub const IDENTITY_AS_2D_ARRAY: [[f32; 4]; 4] = Matrix4::IDENTITY.as_2d_array();
+
     pub const fn as_2d_array(self) -> [[f32; 4]; 4] {
         [self.x, self.y, self.z, self.w]
     }
@@ -237,4 +288,60 @@ pub const fn cot(theta: f32) -> f32 {
 #[inline]
 pub const fn tan(theta: f32) -> f32 {
     SoftF32(theta).sin().0 / SoftF32(theta).cos().0
+}
+
+#[inline]
+pub fn get_squared_magnitude_3d<T: Number>(vector: [T; 3]) -> T {
+    vector[0] * vector[0] + vector[1] * vector[1] + vector[2] * vector[2]
+}
+
+#[inline]
+pub fn get_magnitude_3d<T: Number>(vector: [T; 3]) -> T {
+    get_squared_magnitude_3d(vector).sqrt()
+}
+
+#[inline]
+pub fn normalise_3d<T: Number>(vector: [T; 3]) -> [T; 3] {
+    let magnitude = get_magnitude_3d(vector);
+
+    [
+        vector[0] / magnitude,
+        vector[1] / magnitude,
+        vector[2] / magnitude,
+    ]
+}
+
+#[inline]
+pub fn add_3d<T: Number>(lhs: [T; 3], rhs: [T; 3]) -> [T; 3] {
+    [lhs[0] + rhs[0], lhs[1] + rhs[1], lhs[2] + rhs[2]]
+}
+
+#[inline]
+pub fn sub_3d<T: Number>(lhs: [T; 3], rhs: [T; 3]) -> [T; 3] {
+    [lhs[0] - rhs[0], lhs[1] - rhs[1], lhs[2] - rhs[2]]
+}
+
+#[inline]
+pub fn mul_3d<T: Number>(lhs: [T; 3], rhs: [T; 3]) -> [T; 3] {
+    [lhs[0] * rhs[0], lhs[1] * rhs[1], lhs[2] * rhs[2]]
+}
+
+#[inline]
+pub fn div_3d<T: Number>(lhs: [T; 3], rhs: [T; 3]) -> [T; 3] {
+    [lhs[0] / rhs[0], lhs[1] / rhs[1], lhs[2] / rhs[2]]
+}
+
+#[inline]
+pub fn mul_3d_by_1d<T: Number>(lhs: [T; 3], rhs: T) -> [T; 3] {
+    [lhs[0] * rhs, lhs[1] * rhs, lhs[2] * rhs]
+}
+
+#[inline]
+pub fn index_from_position_2d<T: Number>(position: [T; 2], width: T) -> T {
+    position[1] * width + position[0]
+}
+
+#[inline]
+pub fn position_from_index_2d<T: Number>(index: T, width: T) -> [T; 2] {
+    [index % width, index / width]
 }

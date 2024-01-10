@@ -1,7 +1,23 @@
-use cgmath::Deg;
-use cgmath::Matrix4;
+/*
+TODO:
+
+Island shapes.
+
+Plant generation.
+
+Better player movement.
+
+Rain.
+
+Crafting.
+
+Depths have huge thick islands.
+*/
 use cgmath::Rad;
-use cgmath::SquareMatrix;
+use rand::distributions::Distribution;
+use rand::distributions::Uniform;
+use rand::rngs::ThreadRng;
+use rand::Rng;
 use vulkano::buffer::BufferUsage;
 use vulkano::pipeline::graphics::input_assembly::PrimitiveTopology;
 use vulkano::pipeline::graphics::rasterization::CullMode;
@@ -15,7 +31,6 @@ use winit::event::WindowEvent;
 use winit::window::Fullscreen;
 
 use crate::buffer_contents;
-use crate::events;
 use crate::lost_code::is_pressed;
 use crate::math;
 use crate::menu_rendering;
@@ -28,6 +43,297 @@ use crate::menu_rendering::UniformBuffer;
 use crate::menu_rendering::VertexBuffer;
 use crate::menus;
 use crate::meshes;
+use crate::physics;
+use crate::random_generation;
+
+const STEP_HEIGHT: f32 = 0.25;
+
+pub struct Example3DStorage {
+    pub camera_3d_position: [f32; 3],
+    pub camera_3d_rotation: [f32; 3],
+    pub camera_3d_scale: [f32; 3],
+
+    pub particle: physics::physics_3d::verlet::Particle<f32>,
+
+    pub island_storage: IslandStorage,
+
+    pub try_jump: bool,
+    pub grounded: bool,
+
+    pub altitude: Altitude,
+
+    rain: Vec<physics::physics_3d::verlet::Particle<f32>>,
+}
+
+fn new_rain_particle(
+    rng: &mut ThreadRng,
+    x_range: Uniform<f32>,
+    z_range: Uniform<f32>,
+    vertical_range: Uniform<f32>,
+) -> physics::physics_3d::verlet::Particle<f32> {
+    physics::physics_3d::verlet::Particle::from_position([
+        x_range.sample(rng),
+        vertical_range.sample(rng),
+        z_range.sample(rng),
+    ])
+}
+
+#[derive(PartialEq, Clone, Copy, Debug)]
+pub enum Altitude {
+    AboveAll,
+
+    SkyTop,
+    SkyMiddle,
+    SkyBottom,
+
+    BelowAll,
+}
+
+impl Altitude {
+    fn get_altitude(y: f32) -> Altitude {
+        if y < -1000.0 {
+            Altitude::AboveAll
+        } else if y < -750.0 {
+            Altitude::SkyTop
+        } else if y < -250.0 {
+            Altitude::SkyMiddle
+        } else if y < -0.0 {
+            Altitude::SkyBottom
+        } else {
+            Altitude::BelowAll
+        }
+    }
+
+    const fn to_u8(&self) -> u8 {
+        match self {
+            Altitude::AboveAll => 0,
+
+            Altitude::SkyTop => 1,
+            Altitude::SkyMiddle => 2,
+            Altitude::SkyBottom => 3,
+
+            Altitude::BelowAll => 4,
+        }
+    }
+
+    const fn from_u8(index: u8) -> Altitude {
+        match index {
+            0 => Altitude::AboveAll,
+
+            1 => Altitude::SkyTop,
+            2 => Altitude::SkyMiddle,
+            3 => Altitude::SkyBottom,
+
+            4 => Altitude::BelowAll,
+            _ => panic!("Index does not map to an altitude."),
+        }
+    }
+}
+
+pub struct IslandStorage {
+    sky_top: Layer,
+    sky_middle: Layer,
+    sky_bottom: Layer,
+
+    current_aabbs: Vec<physics::physics_3d::aabb::AabbCentredOrigin<f32>>,
+}
+
+impl IslandStorage {
+    fn altitude_to_layer(&self, altitude: Altitude) -> &Layer {
+        match altitude {
+            Altitude::AboveAll => {
+                panic!("Currently this altitude does not have a layer, this may change.")
+            }
+            Altitude::SkyTop => &self.sky_top,
+            Altitude::SkyMiddle => &self.sky_middle,
+            Altitude::SkyBottom => &self.sky_bottom,
+            Altitude::BelowAll => {
+                panic!("Currently this altitude does not have a layer, this may change.")
+            }
+        }
+    }
+
+    fn update_altitude_and_get_instances(
+        &mut self,
+        altitude: Altitude,
+    ) -> Vec<buffer_contents::Colour3DInstance> {
+        let altitude_index = altitude.to_u8();
+
+        let mut instances = vec![];
+        self.current_aabbs = vec![];
+
+        if altitude_index != 0 {
+            if altitude_index != 1 {
+                let layer = self.altitude_to_layer(Altitude::from_u8(altitude_index - 1));
+
+                instances.append(&mut layer.instances.clone());
+                self.current_aabbs.append(&mut layer.aabbs.clone());
+            }
+
+            if altitude_index != 4 {
+                let layer = self.altitude_to_layer(altitude);
+
+                instances.append(&mut layer.instances.clone());
+                self.current_aabbs.append(&mut layer.aabbs.clone());
+            }
+        }
+
+        if altitude_index != 3 && altitude_index != 4 {
+            let layer = self.altitude_to_layer(Altitude::from_u8(altitude_index + 1));
+
+            instances.append(&mut layer.instances.clone());
+            self.current_aabbs.append(&mut layer.aabbs.clone());
+        }
+
+        instances
+    }
+}
+
+pub struct Layer {
+    instances: Vec<buffer_contents::Colour3DInstance>,
+    aabbs: Vec<physics::physics_3d::aabb::AabbCentredOrigin<f32>>,
+}
+
+pub fn get_starting_storage() -> Example3DStorage {
+    Example3DStorage {
+        camera_3d_position: [0.0, 0.0, 0.0],
+        camera_3d_rotation: [0.0, 0.0, 0.0],
+        camera_3d_scale: [1.0, 1.0, 1.0],
+
+        particle: physics::physics_3d::verlet::Particle::from_position([0.0, -1050.0, 0.0]),
+        rain: create_starting_rain(),
+
+        island_storage: IslandStorage {
+            sky_top: temp_gen_islands(-1000.0..-750.0, [1.0, 0.0, 0.0, 1.0]),
+            sky_middle: Layer {
+                instances: vec![],
+                aabbs: vec![],
+            },
+            sky_bottom: Layer {
+                instances: vec![],
+                aabbs: vec![],
+            },
+
+            current_aabbs: vec![],
+        },
+
+        try_jump: false,
+        grounded: false,
+
+        altitude: Altitude::AboveAll,
+    }
+}
+
+fn create_starting_rain() -> Vec<physics::physics_3d::verlet::Particle<f32>> {
+    let mut rain = vec![];
+
+    let mut rng = rand::thread_rng();
+    let horizontal_range = Uniform::from(-2000.0..2000.0);
+    let vertical_range = Uniform::from(-2500.0..-1100.0);
+
+    for _ in 0..1 {
+        rain.push(new_rain_particle(
+            &mut rng,
+            horizontal_range,
+            horizontal_range,
+            vertical_range,
+        ));
+    }
+
+    rain
+}
+
+#[derive(Clone, Copy, Debug)]
+enum TempIslandTiles {
+    Rock,
+    Cliff,
+    Nothing,
+}
+
+impl TempIslandTiles {
+    fn to_colour(&self) -> [f32; 4] {
+        match self {
+            TempIslandTiles::Rock => [0.5, 0.5, 0.5, 1.0],
+            TempIslandTiles::Cliff => [0.25, 0.25, 0.25, 1.0],
+            _ => panic!(),
+        }
+    }
+}
+
+impl random_generation::wave_function_collapse::Cell for TempIslandTiles {}
+
+fn get_possibilities(
+    cells: &Vec<
+        random_generation::wave_function_collapse::CellStateStorePossibilities<TempIslandTiles>,
+    >,
+    cell_index: usize,
+) -> Vec<TempIslandTiles> {
+    vec![
+        TempIslandTiles::Rock,
+        TempIslandTiles::Cliff,
+        TempIslandTiles::Nothing,
+    ]
+}
+
+fn pick_possibility(
+    cells: &Vec<
+        random_generation::wave_function_collapse::CellStateStorePossibilities<TempIslandTiles>,
+    >,
+    possibilities: &Vec<TempIslandTiles>,
+    cell_index: usize,
+) -> TempIslandTiles {
+    possibilities[rand::thread_rng().gen_range(0..possibilities.len())]
+}
+
+fn temp_gen_islands(vertical_range: std::ops::Range<f32>, debug_colour: [f32; 4]) -> Layer {
+    let offset = [-50.0, -900.0, -50.0];
+
+    let grid_size = [100, 100];
+
+    let mut layer = Layer {
+        instances: vec![],
+        aabbs: vec![],
+    };
+
+    let test_island =
+        random_generation::wave_function_collapse::generate_2d_assumes_only_4_nearest_tiles_matter_and_starting_position_is_not_on_edge(
+            grid_size,
+            [5, 5],
+            vec![
+                TempIslandTiles::Rock,
+                TempIslandTiles::Cliff,
+                TempIslandTiles::Nothing,
+            ],
+            get_possibilities,
+            pick_possibility,
+        );
+
+    for cell_index in 0..test_island.len() {
+        let position_x_z = math::position_from_index_2d(cell_index, grid_size[0]);
+        let position = [
+            offset[0] + position_x_z[0] as f32,
+            offset[1],
+            offset[2] + position_x_z[1] as f32,
+        ];
+
+        if let TempIslandTiles::Nothing = test_island[cell_index] {
+            continue;
+        } else {
+            layer.instances.push(buffer_contents::Colour3DInstance::new(
+                test_island[cell_index].to_colour(),
+                math::Matrix4::from_translation(position),
+            ));
+            layer
+                .aabbs
+                .push(physics::physics_3d::aabb::AabbCentredOrigin {
+                    position,
+                    half_size: [0.5, 0.5, 0.5],
+                });
+        }
+    }
+
+    layer
+}
 
 pub const MENU: menus::Data = menus::Data {
     start: |user_storage, render_storage| {
@@ -57,7 +363,12 @@ pub const MENU: menus::Data = menus::Data {
                     ))),
                     instance_buffer: Some(InstanceBuffer::Colour3D(
                         BufferTypes::FrequentAccessRenderBuffer(FrequentAccessRenderBuffer {
-                            buffer: Vec::from(meshes::test_scene::CUBE_COLOUR_3D_INSTANCES),
+                            buffer: user_storage
+                                .example_3d_storage
+                                .island_storage
+                                .update_altitude_and_get_instances(
+                                    user_storage.example_3d_storage.altitude,
+                                ),
                         }),
                     )),
                     shader_accessible_buffers: Some(menu_rendering::ShaderAccessibleBuffers {
@@ -65,31 +376,20 @@ pub const MENU: menus::Data = menus::Data {
                             menu_rendering::BufferTypes::FrequentAccessRenderBuffer(
                                 menu_rendering::FrequentAccessRenderBuffer {
                                     buffer: vec![
-                                        {
-                                            let view = Matrix4::from_angle_z(Deg(90.0));
-
-                                            //let scale = Matrix4::from_scale(0.01);
-                                            let scale = Matrix4::identity();
-
-                                            crate::colour_3d_instanced_vertex_shader::CameraData3D {
-                                                position: user_storage.camera_3d_position.into(),
-
-                                                ambient_strength: 0.1,
-                                                specular_strength: 0.5.into(),
-                                                light_colour: [1.0, 1.0, 1.0].into(),
-                                                light_position: [0.0, -5.0, 0.0].into(),
-
-                                                camera_to_clip: cgmath::perspective(
-                                                    Rad(std::f32::consts::FRAC_PI_2),
-                                                    render_storage.other_aspect_ratio,
-                                                    0.01,
-                                                    100.0,
-                                                )
+                                        crate::colour_3d_instanced_vertex_shader::CameraData3D {
+                                            position: user_storage
+                                                .example_3d_storage
+                                                .camera_3d_position
                                                 .into(),
-                                                world_to_camera: (view * scale).into(),
-                                            }
-                                        };
-                                        1
+
+                                            ambient_strength: 0.3,
+                                            specular_strength: 0.5.into(),
+                                            light_colour: [1.0, 1.0, 1.0].into(),
+                                            light_position: [0.0, -5.0, 0.0].into(),
+
+                                            camera_to_clip: math::Matrix4::IDENTITY_AS_2D_ARRAY,
+                                            world_to_camera: math::Matrix4::IDENTITY_AS_2D_ARRAY,
+                                        },
                                     ],
                                 },
                             ),
@@ -131,7 +431,8 @@ pub const MENU: menus::Data = menus::Data {
                     ))),
                     instance_buffer: Some(InstanceBuffer::Colour3D(
                         BufferTypes::FrequentAccessRenderBuffer(FrequentAccessRenderBuffer {
-                            buffer: Vec::from(meshes::test_scene::SPHERE_COLOUR_3D_INSTANCES),
+                            //buffer: Vec::from(meshes::test_scene::SPHERE_COLOUR_3D_INSTANCES),
+                            buffer: Vec::from(meshes::FNAF_SCENE_SPHERE_COLOUR_3D_INSTANCES),
                         }),
                     )),
                     shader_accessible_buffers: Some(menu_rendering::ShaderAccessibleBuffers {
@@ -139,39 +440,20 @@ pub const MENU: menus::Data = menus::Data {
                             menu_rendering::BufferTypes::FrequentAccessRenderBuffer(
                                 menu_rendering::FrequentAccessRenderBuffer {
                                     buffer: vec![
-                                        {
-                                            let view = Matrix4::from_angle_z(Deg(90.0));
+                                        crate::colour_3d_instanced_vertex_shader::CameraData3D {
+                                            position: user_storage
+                                                .example_3d_storage
+                                                .camera_3d_position
+                                                .into(),
 
-                                            //let scale = Matrix4::from_scale(0.01);
-                                            let scale = Matrix4::identity();
+                                            ambient_strength: 0.3,
+                                            specular_strength: 0.5.into(),
+                                            light_colour: [1.0, 1.0, 1.0].into(),
+                                            light_position: [0.0, -5.0, 0.0].into(),
 
-                                            crate::colour_3d_instanced_vertex_shader::CameraData3D {
-                                                position: user_storage.camera_3d_position.into(),
-
-                                                ambient_strength: 0.1,
-                                                specular_strength: 0.5.into(),
-                                                light_colour: [1.0, 1.0, 1.0].into(),
-                                                light_position: [0.0, -5.0, 0.0].into(),
-
-                                                // camera_to_clip: cgmath::perspective(
-                                                //     Rad(std::f32::consts::FRAC_PI_2),
-                                                //     render_storage.other_aspect_ratio,
-                                                //     0.01,
-                                                //     100.0,
-                                                // )
-                                                // .into(),
-                                                camera_to_clip: math::Matrix4::from_perspective(
-                                                    math::Radians(std::f32::consts::FRAC_PI_2),
-                                                    render_storage.other_aspect_ratio,
-                                                    0.01,
-                                                    100.0,
-                                                )
-                                                .as_2d_array(),
-
-                                                world_to_camera: (view * scale).into(),
-                                            }
-                                        };
-                                        1
+                                            camera_to_clip: math::Matrix4::IDENTITY_AS_2D_ARRAY,
+                                            world_to_camera: math::Matrix4::IDENTITY_AS_2D_ARRAY,
+                                        },
                                     ],
                                 },
                             ),
@@ -251,133 +533,285 @@ pub const MENU: menus::Data = menus::Data {
         render_storage.force_run_window_dependent_setup = true;
     },
     update: |_user_storage, _render_storage, _delta_time, _average_fps| {},
-    fixed_update: (0.04, |user_storage, render_storage| {
-        let entire_render_data_0 = &mut render_storage.entire_render_datas[0];
+    fixed_update: menus::FixedUpdate {
+        delta_time: 0.04,
+        max_substeps: 150,
+        function: |user_storage, render_storage| {
+            //user_storage.camera_3d_rotation[2] += 10.0 *MENU.fixed_update.0;
+            //user_storage.camera_3d_rotation[2] %= 360.0;
 
-        // let Some(instance_buffer) = &mut entire_render_data.render_buffers.instance_buffer else {
-        //     panic!()
-        // };
-        // let InstanceBuffer::Colour3D(instance_buffer) = instance_buffer else {
-        //     panic!()
-        // };
-        // let BufferTypes::FrequentAccessRenderBuffer(instance_buffer) = instance_buffer else {
-        //     panic!()
-        // };
+            let entire_render_data_0 = &mut render_storage.entire_render_datas[0];
 
-        // instance_buffer.buffer[0] = buffer_contents::Colour3DInstance {
-        //     model_to_world_0: translation.x.into(),
-        //     model_to_world_1: translation.y.into(),
-        //     model_to_world_2: translation.z.into(),
-        //     model_to_world_3: translation.w.into(),
-        //     colour: [1.0, 0.0, 0.0, 1.0],
-        // }
+            let Some(uniform_buffer) = &mut entire_render_data_0
+                .render_buffers
+                .shader_accessible_buffers
+            else {
+                panic!()
+            };
+            let Some(uniform_buffer) = &mut uniform_buffer.uniform_buffer else {
+                panic!()
+            };
+            let UniformBuffer::CameraData3D(uniform_buffer) = uniform_buffer else {
+                panic!()
+            };
+            let BufferTypes::FrequentAccessRenderBuffer(uniform_buffer) = uniform_buffer else {
+                panic!()
+            };
 
-        let Some(uniform_buffer) = &mut entire_render_data_0
-            .render_buffers
-            .shader_accessible_buffers
-        else {
-            panic!()
-        };
-        let Some(uniform_buffer) = &mut uniform_buffer.uniform_buffer else {
-            panic!()
-        };
-        let UniformBuffer::CameraData3D(uniform_buffer) = uniform_buffer else {
-            panic!()
-        };
-        let BufferTypes::FrequentAccessRenderBuffer(uniform_buffer) = uniform_buffer else {
-            panic!()
-        };
+            let motion = match user_storage.wasd_held {
+                (true, false, false, false) => (0.0, -1.0),
+                (false, false, true, false) => (0.0, 1.0),
+                (false, false, false, true) => (1.0, 0.0),
+                (false, true, false, false) => (-1.0, 0.0),
 
-        let motion = match user_storage.wasd_held {
-            (true, false, false, false) => (0.0, -1.0),
-            (false, false, true, false) => (0.0, 1.0),
-            (false, false, false, true) => (1.0, 0.0),
-            (false, true, false, false) => (-1.0, 0.0),
+                (true, true, false, false) => (-0.7, -0.7),
+                (true, false, false, true) => (0.7, -0.7),
 
-            (true, true, false, false) => (-0.7, -0.7),
-            (true, false, false, true) => (0.7, -0.7),
+                (false, true, true, false) => (-0.7, 0.7),
+                (false, false, true, true) => (0.7, 0.7),
 
-            (false, true, true, false) => (-0.7, 0.7),
-            (false, false, true, true) => (0.7, 0.7),
+                _ => (0.0, 0.0),
+            };
 
-            _ => (0.0, 0.0),
-        };
+            let speed = match user_storage.sprinting {
+                true => 50.0,
+                false => 20.0,
+            };
 
-        let speed = match user_storage.sprinting {
-            true => 3.0,
-            false => 1.0,
-        };
+            let real_motion = (motion.0 * speed, motion.1 * speed);
 
-        let real_motion = (
-            -motion.0 * speed * MENU.fixed_update.0,
-            -motion.1 * speed * MENU.fixed_update.0,
-        );
+            let y_rotation_cos =
+                (user_storage.example_3d_storage.camera_3d_rotation[1].to_radians()).cos();
+            let y_rotation_sin =
+                (user_storage.example_3d_storage.camera_3d_rotation[1].to_radians()).sin();
 
-        let y_rotation_cos = (user_storage.camera_3d_rotation[1].to_radians()).cos();
-        let y_rotation_sin = (user_storage.camera_3d_rotation[1].to_radians()).sin();
+            let real_motion = (
+                real_motion.0 * y_rotation_cos - real_motion.1 * y_rotation_sin,
+                real_motion.1 * y_rotation_cos + real_motion.0 * y_rotation_sin,
+            );
 
-        let real_motion = (
-            real_motion.0 * y_rotation_cos - real_motion.1 * y_rotation_sin,
-            real_motion.1 * y_rotation_cos + real_motion.0 * y_rotation_sin,
-        );
+            user_storage.example_3d_storage.particle.accelerate([
+                real_motion.0,
+                50.0,
+                real_motion.1,
+            ]);
 
-        user_storage.camera_3d_position[0] += real_motion.0;
-        user_storage.camera_3d_position[2] += real_motion.1;
+            let mut displacement = user_storage
+                .example_3d_storage
+                .particle
+                .calculate_displacement();
 
-        uniform_buffer.buffer[0].position = user_storage.camera_3d_position.into();
+            let horizontal_dampening = if user_storage.example_3d_storage.grounded {
+                0.8
+            } else {
+                0.9
+            };
 
-        // uniform_buffer.buffer[0].world_to_camera =
-        //     (Matrix4::from_angle_x(Deg(user_storage.camera_3d_rotation[0]))
-        //         * Matrix4::from_angle_y(Deg(user_storage.camera_3d_rotation[1]))
-        //         * Matrix4::from_translation(user_storage.camera_3d_position.into()))
-        //     .into();
+            displacement[0] = displacement[0] * horizontal_dampening;
+            displacement[1] = displacement[1] * 1.0;
+            displacement[2] = displacement[2] * horizontal_dampening;
 
-        uniform_buffer.buffer[0].world_to_camera =
-            math::Matrix4::from_scale(user_storage.camera_3d_scale)
-                .multiply(math::Matrix4::from_angle_x(
-                    math::Degrees(user_storage.camera_3d_rotation[0]).to_radians(),
-                ))
-                .multiply(math::Matrix4::from_angle_y(
-                    math::Degrees(user_storage.camera_3d_rotation[1]).to_radians(),
-                ))
-                .multiply(math::Matrix4::from_angle_z(
-                    math::Degrees(user_storage.camera_3d_rotation[2]).to_radians(),
-                ))
-                .multiply(math::Matrix4::from_translation(
-                    user_storage.camera_3d_position,
-                ))
-                .as_2d_array();
+            user_storage
+                .example_3d_storage
+                .particle
+                .update(MENU.fixed_update.delta_time, displacement);
 
-        uniform_buffer.buffer[0].camera_to_clip = cgmath::perspective(
-            Rad(std::f32::consts::FRAC_PI_2),
-            render_storage.other_aspect_ratio,
-            0.01,
-            100.0,
-        )
-        .into();
+            let previous_player_aabb = physics::physics_3d::aabb::AabbCentredOrigin {
+                position: user_storage.example_3d_storage.particle.previous_position,
+                half_size: [0.5, 1.0, 0.5],
+            };
 
-        let temp_uniform_copy = uniform_buffer.buffer[0]; // This is temp because having 2 uniform buffers in this case is not requires, and probably costs us quite a bit of performance and memory. Fix asap with reusable buffers or give up and have good performance only available to those who want to do everything manually.
+            let player_aabb = physics::physics_3d::aabb::AabbCentredOrigin {
+                position: user_storage.example_3d_storage.particle.position,
+                half_size: [0.5, 1.0, 0.5],
+            };
 
-        let entire_render_data_1 = &mut render_storage.entire_render_datas[1];
+            user_storage.example_3d_storage.grounded = false;
 
-        let Some(uniform_buffer) = &mut entire_render_data_1
-            .render_buffers
-            .shader_accessible_buffers
-        else {
-            panic!()
-        };
-        let Some(uniform_buffer) = &mut uniform_buffer.uniform_buffer else {
-            panic!()
-        };
-        let UniformBuffer::CameraData3D(uniform_buffer) = uniform_buffer else {
-            panic!()
-        };
-        let BufferTypes::FrequentAccessRenderBuffer(uniform_buffer) = uniform_buffer else {
-            panic!()
-        };
+            for aabb in &user_storage.example_3d_storage.island_storage.current_aabbs {
+                if aabb.is_intersected_by_aabb(player_aabb) {
+                    let previous_collision_axis = aabb.get_collision_axis(previous_player_aabb);
 
-        uniform_buffer.buffer[0] = temp_uniform_copy;
-    }),
+                    if previous_collision_axis[0] {
+                        if ((player_aabb.position[1] + player_aabb.half_size[1])
+                            - (aabb.position[1] - aabb.half_size[1]))
+                            .abs()
+                            <= STEP_HEIGHT
+                        {
+                            user_storage.example_3d_storage.particle.position[1] =
+                                aabb.position[1] - aabb.half_size[1];
+                        } else {
+                            user_storage.example_3d_storage.particle.position[0] =
+                                user_storage.example_3d_storage.particle.previous_position[0];
+                        }
+                    }
+
+                    if previous_collision_axis[2] {
+                        if ((player_aabb.position[1] + player_aabb.half_size[1])
+                            - (aabb.position[1] - aabb.half_size[1]))
+                            .abs()
+                            <= STEP_HEIGHT
+                        {
+                            user_storage.example_3d_storage.particle.position[1] =
+                                aabb.position[1] - aabb.half_size[1];
+                        } else {
+                            user_storage.example_3d_storage.particle.position[2] =
+                                user_storage.example_3d_storage.particle.previous_position[2];
+                        }
+                    }
+
+                    if previous_collision_axis[1] {
+                        user_storage.example_3d_storage.particle.position[1] =
+                            user_storage.example_3d_storage.particle.previous_position[1];
+
+                        if previous_player_aabb.position[1] + previous_player_aabb.half_size[1]
+                            <= aabb.position[1] - aabb.half_size[1]
+                        {
+                            user_storage.example_3d_storage.grounded = true;
+                            if user_storage.example_3d_storage.try_jump {
+                                user_storage.example_3d_storage.particle.acceleration[1] -= 1000.0;
+                                user_storage.example_3d_storage.try_jump = false;
+                            }
+                        }
+                    }
+                }
+            }
+
+            user_storage.example_3d_storage.try_jump = false;
+
+            let altitude =
+                Altitude::get_altitude(user_storage.example_3d_storage.particle.position[1]);
+
+            if altitude != user_storage.example_3d_storage.altitude {
+                user_storage.example_3d_storage.altitude = altitude;
+
+                let Some(instance_buffer) =
+                    &mut entire_render_data_0.render_buffers.instance_buffer
+                else {
+                    panic!()
+                };
+                let InstanceBuffer::Colour3D(instance_buffer) = instance_buffer else {
+                    panic!()
+                };
+                let BufferTypes::FrequentAccessRenderBuffer(instance_buffer) = instance_buffer
+                else {
+                    panic!()
+                };
+
+                instance_buffer.buffer = user_storage
+                    .example_3d_storage
+                    .island_storage
+                    .update_altitude_and_get_instances(altitude);
+            }
+
+            user_storage.example_3d_storage.camera_3d_position =
+                user_storage.example_3d_storage.particle.position;
+
+            user_storage.example_3d_storage.camera_3d_position[1] -= 1.0;
+
+            uniform_buffer.buffer[0].position =
+                user_storage.example_3d_storage.camera_3d_position.into();
+
+            // uniform_buffer.buffer[0].world_to_camera =
+            //     (Matrix4::from_angle_x(Deg(user_storage.camera_3d_rotation[0]))
+            //         * Matrix4::from_angle_y(Deg(user_storage.camera_3d_rotation[1]))
+            //         * Matrix4::from_translation(user_storage.camera_3d_position.into()))
+            //     .into();
+
+            uniform_buffer.buffer[0].world_to_camera =
+                math::Matrix4::from_scale(user_storage.example_3d_storage.camera_3d_scale)
+                    .multiply(math::Matrix4::from_angle_x(
+                        math::Degrees(user_storage.example_3d_storage.camera_3d_rotation[0])
+                            .to_radians(),
+                    ))
+                    .multiply(math::Matrix4::from_angle_y(
+                        math::Degrees(user_storage.example_3d_storage.camera_3d_rotation[1])
+                            .to_radians(),
+                    ))
+                    .multiply(math::Matrix4::from_angle_z(
+                        math::Degrees(user_storage.example_3d_storage.camera_3d_rotation[2])
+                            .to_radians(),
+                    ))
+                    .multiply(math::Matrix4::from_translation([
+                        -user_storage.example_3d_storage.camera_3d_position[0],
+                        -user_storage.example_3d_storage.camera_3d_position[1],
+                        -user_storage.example_3d_storage.camera_3d_position[2],
+                    ]))
+                    .as_2d_array();
+
+            uniform_buffer.buffer[0].camera_to_clip = cgmath::perspective(
+                Rad(std::f32::consts::FRAC_PI_2),
+                render_storage.other_aspect_ratio,
+                0.01,
+                1000.0,
+            )
+            .into();
+
+            let temp_uniform_copy = uniform_buffer.buffer[0]; // This is temp because having 2 uniform buffers in this case is not requires, and probably costs us quite a bit of performance and memory. Fix asap with reusable buffers or give up and have good performance only available to those who want to do everything manually.
+
+            let entire_render_data_1 = &mut render_storage.entire_render_datas[1];
+
+            let Some(uniform_buffer) = &mut entire_render_data_1
+                .render_buffers
+                .shader_accessible_buffers
+            else {
+                panic!()
+            };
+            let Some(uniform_buffer) = &mut uniform_buffer.uniform_buffer else {
+                panic!()
+            };
+            let UniformBuffer::CameraData3D(uniform_buffer) = uniform_buffer else {
+                panic!()
+            };
+            let BufferTypes::FrequentAccessRenderBuffer(uniform_buffer) = uniform_buffer else {
+                panic!()
+            };
+
+            uniform_buffer.buffer[0] = temp_uniform_copy;
+
+            let Some(instance_buffer) = &mut entire_render_data_1.render_buffers.instance_buffer
+            else {
+                panic!()
+            };
+            let InstanceBuffer::Colour3D(instance_buffer) = instance_buffer else {
+                panic!()
+            };
+            let BufferTypes::FrequentAccessRenderBuffer(instance_buffer) = instance_buffer else {
+                panic!()
+            };
+
+            instance_buffer.buffer = vec![];
+
+            let mut rng = rand::thread_rng();
+            let x_range = Uniform::from(
+                -200.0 + user_storage.example_3d_storage.particle.position[0]
+                    ..200.0 + user_storage.example_3d_storage.particle.position[0],
+            );
+            let z_range = Uniform::from(
+                -200.0 + user_storage.example_3d_storage.particle.position[2]
+                    ..200.0 + user_storage.example_3d_storage.particle.position[2],
+            );
+            let vertical_range = Uniform::from(-2500.0..-1100.0);
+
+            for particle in &mut user_storage.example_3d_storage.rain {
+                particle.accelerate([0.0, 50.0, 0.0]);
+                let displacement = particle.calculate_displacement();
+                particle.update(MENU.fixed_update.delta_time, displacement);
+
+                if Altitude::get_altitude(particle.position[1]) == Altitude::BelowAll {
+                    *particle = new_rain_particle(&mut rng, x_range, z_range, vertical_range);
+                }
+
+                instance_buffer
+                    .buffer
+                    .push(buffer_contents::Colour3DInstance::new(
+                        [0.0, 0.0, 0.0, 1.0],
+                        math::Matrix4::from_translation(particle.position)
+                            .multiply(math::Matrix4::from_scale([2.0, 2.0, 2.0])),
+                    ));
+            }
+        },
+    },
     handle_events: |user_storage, render_storage, event| match event {
         Event::WindowEvent {
             event: WindowEvent::KeyboardInput { input, .. },
@@ -394,8 +828,14 @@ pub const MENU: menus::Data = menus::Data {
             }
 
             match axis {
-                0 => user_storage.camera_3d_rotation[1] += value as f32 * user_storage.sensitivity,
-                1 => user_storage.camera_3d_rotation[0] -= value as f32 * user_storage.sensitivity,
+                0 => {
+                    user_storage.example_3d_storage.camera_3d_rotation[1] +=
+                        value as f32 * user_storage.sensitivity
+                }
+                1 => {
+                    user_storage.example_3d_storage.camera_3d_rotation[0] -=
+                        value as f32 * user_storage.sensitivity
+                }
                 _ => (),
             }
 
@@ -417,7 +857,7 @@ pub const MENU: menus::Data = menus::Data {
 };
 
 fn on_keyboard_input(
-    user_storage: &mut events::UserStorage,
+    user_storage: &mut menus::UserStorage,
     render_storage: &mut crate::RenderStorage,
     input: KeyboardInput,
 ) {
@@ -445,6 +885,12 @@ fn on_keyboard_input(
             VirtualKeyCode::F => {
                 if is_pressed(input.state) {
                     user_storage.sprinting = !user_storage.sprinting;
+                }
+            }
+
+            VirtualKeyCode::Space => {
+                if is_pressed(input.state) {
+                    user_storage.example_3d_storage.try_jump = true;
                 }
             }
             _ => (),

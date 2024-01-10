@@ -41,6 +41,11 @@ pub const SPHERE_COLOUR_3D_INSTANCES: &[buffer_contents::Colour3DInstance] = &[
         Matrix4::from_translation([-20.0, -5.0, 20.0])
             .multiply(Matrix4::from_scale([7.0, 7.0, 7.0])),
     ),
+    buffer_contents::Colour3DInstance::new(
+        [0.0, 1.0, 0.0, 1.0],
+        Matrix4::from_translation([20.0, 1.0, -20.0])
+            .multiply(Matrix4::from_scale([25.0, 2.0, 30.0])),
+    ),
 ];
 
 /*
