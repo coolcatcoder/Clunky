@@ -16,6 +16,7 @@ Island spacing, size, and how to get from one to another.
 Depths have huge thick islands.
 */
 use cgmath::Rad;
+use rand::distributions::Bernoulli;
 use rand::distributions::Distribution;
 use rand::distributions::Uniform;
 use rand::rngs::ThreadRng;
@@ -212,12 +213,8 @@ pub fn get_starting_storage() -> Example3DStorage {
 
         island_storage: IslandStorage {
             sky_top: temp_gen_islands(-1000.0..-750.0, [1.0, 0.0, 0.0, 1.0]),
-            sky_middle: generate_islands_circle_technique(),
-            sky_bottom: Layer {
-                box_instances: vec![],
-                sphere_instances: vec![],
-                aabbs: vec![],
-            },
+            sky_middle: generate_islands_circle_technique(30, -750.0..-250.0, 1.0, 1.0..50.0, 0.5..1.0, 0.5..2.0, 50, [0.0, 1.0, 0.0, 1.0]),
+            sky_bottom: generate_islands_circle_technique(10, -250.0..-0.0, 0.75, 10.0..100.0, 5.0..10.0, 0.3..3.0, 20, [0.5, 0.5, 0.5, 1.0]),
 
             current_aabbs: vec![],
         },
@@ -346,7 +343,7 @@ fn temp_gen_islands(vertical_range: std::ops::Range<f32>, debug_colour: [f32; 4]
     layer
 }
 
-fn generate_islands_circle_technique() -> Layer {
+fn generate_islands_circle_technique(quantity: u32, vertical_position: std::ops::Range<f32>, squish: f32, x_scale: std::ops::Range<f32>, y_scale: std::ops::Range<f32>, z_scale_compared_to_x: std::ops::Range<f32>, max_pieces: u16, colour: [f32; 4]) -> Layer {
     let mut layer = Layer {
         box_instances: vec![],
         sphere_instances: vec![],
@@ -355,17 +352,20 @@ fn generate_islands_circle_technique() -> Layer {
 
     let mut rng = rand::thread_rng();
 
-    let horizontal_position_range = Uniform::from(-500.0..500.0);
-    let vertical_position_range = Uniform::from(-750.0..-250.0);
+    let horizontal_position_range = Uniform::from(-1000.0..1000.0);
+    let vertical_position_range = Uniform::from(vertical_position);
 
-    let horizontal_scale_range = Uniform::from(1.0..50.0);
-    let vertical_scale_range = Uniform::from(0.5..5.0);
+    let x_scale_range = Uniform::from(x_scale);
+    let no_bias_bool = Bernoulli::new(0.5).unwrap();
+    let z_scale_gain = Uniform::from(1.0..z_scale_compared_to_x.end);
+    let z_scale_lose = Uniform::from(z_scale_compared_to_x.start..1.0);
+    let vertical_scale_range = Uniform::from(y_scale);
 
-    let island_pieces_range = Uniform::from(1..50);
+    let island_pieces_range = Uniform::from(1..max_pieces);
 
     let rotation_range = Uniform::from(0.0..360.0);
 
-    for _ in 0..30 {
+    for _ in 0..quantity {
         let island_pieces = island_pieces_range.sample(&mut rng);
 
         let mut previous_position = [
@@ -374,32 +374,48 @@ fn generate_islands_circle_technique() -> Layer {
             horizontal_position_range.sample(&mut rng),
         ];
 
+        let x_scale = x_scale_range.sample(&mut rng);
+
+        let z_scale = if no_bias_bool.sample(&mut rng) {
+            z_scale_gain.sample(&mut rng)
+        } else {
+            z_scale_lose.sample(&mut rng)
+        };
+
         let mut previous_scale = [
-            horizontal_scale_range.sample(&mut rng),
+            x_scale,
             vertical_scale_range.sample(&mut rng),
-            horizontal_scale_range.sample(&mut rng),
+            x_scale * z_scale,
         ];
 
         for _ in 0..island_pieces {
             let rotation: f32 = rotation_range.sample(&mut rng);
             let offset = math::rotate_2d(
-                [(previous_scale[0] + previous_scale[2]) * 0.5, 0.0],
+                [(previous_scale[0] + previous_scale[2]) * squish, 0.0], // 1.0 is on the edge for squish
                 rotation.to_radians(),
             );
 
             previous_position[0] += offset[0];
             previous_position[2] += offset[1];
 
+            let x_scale = x_scale_range.sample(&mut rng);
+
+            let z_scale = if no_bias_bool.sample(&mut rng) {
+                z_scale_gain.sample(&mut rng)
+            } else {
+                z_scale_lose.sample(&mut rng)
+            };
+
             previous_scale = [
-                horizontal_scale_range.sample(&mut rng),
+                x_scale,
                 vertical_scale_range.sample(&mut rng),
-                horizontal_scale_range.sample(&mut rng),
+                x_scale * z_scale,
             ];
 
             layer
                 .sphere_instances
                 .push(buffer_contents::Colour3DInstance::new(
-                    [0.0, 1.0, 0.0, 1.0],
+                    colour,
                     math::Matrix4::from_translation(previous_position)
                         .multiply(math::Matrix4::from_scale(previous_scale)),
                 ));
@@ -423,10 +439,7 @@ pub const MENU: menus::Data = menus::Data {
             .update_altitude_and_get_instances(user_storage.example_3d_storage.altitude);
 
         let uniform_buffer = crate::colour_3d_instanced_vertex_shader::CameraData3D {
-            position: user_storage
-                .example_3d_storage
-                .camera_3d_position
-                .into(),
+            position: user_storage.example_3d_storage.camera_3d_position.into(),
 
             ambient_strength: 0.3,
             specular_strength: 0.5.into(),
@@ -470,9 +483,7 @@ pub const MENU: menus::Data = menus::Data {
                         uniform_buffer: Some(menu_rendering::UniformBuffer::CameraData3D(
                             menu_rendering::BufferTypes::FrequentAccessRenderBuffer(
                                 menu_rendering::FrequentAccessRenderBuffer {
-                                    buffer: vec![
-                                        uniform_buffer,
-                                    ],
+                                    buffer: vec![uniform_buffer],
                                 },
                             ),
                         )),
@@ -521,9 +532,7 @@ pub const MENU: menus::Data = menus::Data {
                         uniform_buffer: Some(menu_rendering::UniformBuffer::CameraData3D(
                             menu_rendering::BufferTypes::FrequentAccessRenderBuffer(
                                 menu_rendering::FrequentAccessRenderBuffer {
-                                    buffer: vec![
-                                        uniform_buffer,
-                                    ],
+                                    buffer: vec![uniform_buffer],
                                 },
                             ),
                         )),
@@ -649,10 +658,14 @@ pub const MENU: menus::Data = menus::Data {
                 _ => (0.0, 0.0),
             };
 
-            let speed = match user_storage.sprinting {
-                true => 50.0,
-                false => 20.0,
+            let mut speed = match user_storage.sprinting {
+                true => 100.0,
+                false => 50.0,
             };
+
+            if user_storage.example_3d_storage.jump_held || user_storage.example_3d_storage.grounded {
+                speed *= 0.5;
+            }
 
             let real_motion = (motion.0 * speed, motion.1 * speed);
 
@@ -680,11 +693,11 @@ pub const MENU: menus::Data = menus::Data {
             let horizontal_dampening = if user_storage.example_3d_storage.grounded {
                 0.8
             } else {
-                0.9
+                0.95
             };
 
             displacement[0] = displacement[0] * horizontal_dampening;
-            displacement[1] = displacement[1] * 0.9;
+            displacement[1] = displacement[1] * 0.98;
             displacement[2] = displacement[2] * horizontal_dampening;
 
             user_storage
@@ -708,17 +721,20 @@ pub const MENU: menus::Data = menus::Data {
                 if aabb.is_intersected_by_aabb(player_aabb) {
                     let previous_collision_axis = aabb.get_collision_axis(previous_player_aabb);
 
+                    let mut step = false;
+
                     if previous_collision_axis[0] {
                         if ((player_aabb.position[1] + player_aabb.half_size[1])
                             - (aabb.position[1] - aabb.half_size[1]))
                             .abs()
                             <= STEP_HEIGHT
                         {
-                            player_aabb.position[1] =
-                                aabb.position[1] - aabb.half_size[1];
+                            println!("step x");
+                            step = true;
+                            player_aabb.position[1] = aabb.position[1] - aabb.half_size[1];
                         } else {
-                            player_aabb.position[0] =
-                                user_storage.example_3d_storage.particle.previous_position[0]; // Would this need to be previous aabb if it was mut? TODO
+                            player_aabb.position[0] = previous_player_aabb.position[0] - player_aabb.half_size[1] - 0.1;
+                            // Would this need to be previous aabb if it was mut? TODO
                         }
                     }
 
@@ -728,17 +744,16 @@ pub const MENU: menus::Data = menus::Data {
                             .abs()
                             <= STEP_HEIGHT
                         {
-                            player_aabb.position[1] =
-                                aabb.position[1] - aabb.half_size[1];
+                            println!("step z");
+                            step = true;
+                            player_aabb.position[1] = aabb.position[1] - aabb.half_size[1] - player_aabb.half_size[1] - 0.1;
                         } else {
-                            player_aabb.position[2] =
-                                user_storage.example_3d_storage.particle.previous_position[2];
+                            player_aabb.position[2] = previous_player_aabb.position[2];
                         }
                     }
 
-                    if previous_collision_axis[1] {
-                        player_aabb.position[1] =
-                            user_storage.example_3d_storage.particle.previous_position[1];
+                    if previous_collision_axis[1] && !step {
+                        player_aabb.position[1] = previous_player_aabb.position[1];
 
                         if previous_player_aabb.position[1] + previous_player_aabb.half_size[1]
                             <= aabb.position[1] - aabb.half_size[1]
@@ -756,10 +771,18 @@ pub const MENU: menus::Data = menus::Data {
                         .particle
                         .accelerate([0.0, -1000.0, 0.0]);
                 } else {
-                    user_storage
-                        .example_3d_storage
-                        .particle
-                        .accelerate([0.0, -50.0, 0.0]);
+                    if user_storage.wasd_held.0 || user_storage.wasd_held.1 || user_storage.wasd_held.2 || user_storage.wasd_held.3 {
+                        user_storage
+                            .example_3d_storage
+                            .particle
+                            .accelerate([0.0, -50.0, 0.0]);
+                    }
+                    else {
+                        user_storage
+                            .example_3d_storage
+                            .particle
+                            .accelerate([0.0, -300.0, 0.0]);
+                    }
                 }
             }
 
