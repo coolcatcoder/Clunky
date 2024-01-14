@@ -1362,6 +1362,7 @@ dependencies = [
  "noise",
  "png",
  "rand 0.8.5",
+ "smallvec",
  "vulkano",
  "vulkano-shaders",
  "vulkano-win",

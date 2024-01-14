@@ -1,4 +1,5 @@
 use crate::math;
+extern crate test;
 
 pub trait Cell: Copy + Clone {}
 
@@ -186,4 +187,73 @@ where
     }
 
     unwrapped_cells
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::Rng;
+    use test::Bencher;
+
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    enum TestTiles {
+        Tile1,
+        Tile2,
+        Tile3,
+    }
+
+    impl Cell for TestTiles {}
+
+    fn get_possibilities_stored(
+        _cells: &Vec<CellStateStorePossibilities<TestTiles>>,
+        _cell_index: usize,
+    ) -> Vec<TestTiles> {
+        vec![TestTiles::Tile1, TestTiles::Tile2, TestTiles::Tile3]
+    }
+
+    fn get_possibilities(_cells: &Vec<CellState<TestTiles>>, _cell_index: usize) -> Vec<TestTiles> {
+        vec![TestTiles::Tile1, TestTiles::Tile2, TestTiles::Tile3]
+    }
+
+    fn pick_possibility_stored(
+        _cells: &Vec<CellStateStorePossibilities<TestTiles>>,
+        possibilities: &Vec<TestTiles>,
+        _cell_index: usize,
+    ) -> TestTiles {
+        possibilities[rand::thread_rng().gen_range(0..possibilities.len())]
+    }
+
+    fn pick_possibility(
+        _cells: &Vec<CellState<TestTiles>>,
+        possibilities: Vec<TestTiles>,
+        _cell_index: usize,
+    ) -> TestTiles {
+        possibilities[rand::thread_rng().gen_range(0..possibilities.len())]
+    }
+
+    #[bench]
+    fn bench_100_by_100_generate_2d_assumes_only_4_nearest_tiles_matter_and_starting_position_is_not_on_edge(
+        b: &mut Bencher,
+    ) {
+        b.iter(|| {
+            return generate_2d_assumes_only_4_nearest_tiles_matter_and_starting_position_is_not_on_edge([100,100], [50,50], vec![
+                TestTiles::Tile1,
+                TestTiles::Tile2,
+                TestTiles::Tile3,
+            ], get_possibilities_stored, pick_possibility_stored);
+        })
+    }
+
+    ///#[bench] DON'T
+    fn bench_100_by_100_generate_2d_unoptimized_with_no_assumptions(b: &mut Bencher) {
+        b.iter(|| {
+            return generate_2d_unoptimized_with_no_assumptions(
+                [100, 100],
+                [50, 50],
+                vec![TestTiles::Tile1, TestTiles::Tile2, TestTiles::Tile3],
+                get_possibilities,
+                pick_possibility,
+            );
+        })
+    }
 }

@@ -18,7 +18,12 @@ pub trait Number:
 {
     const ZERO: Self;
     fn abs(self) -> Self;
+}
+
+pub trait Float: Number {
     fn sqrt(self) -> Self;
+    fn sin(self) -> Self;
+    fn cos(self) -> Self;
 }
 
 impl Number for f32 {
@@ -27,9 +32,22 @@ impl Number for f32 {
     fn abs(self) -> Self {
         self.abs()
     }
+}
+
+impl Float for f32 {
     #[inline]
     fn sqrt(self) -> Self {
         self.sqrt()
+    }
+
+    #[inline]
+    fn sin(self) -> Self {
+        self.sin()
+    }
+
+    #[inline]
+    fn cos(self) -> Self {
+        self.cos()
     }
 }
 
@@ -38,10 +56,6 @@ impl Number for usize {
     #[inline]
     fn abs(self) -> Self {
         self
-    }
-    #[inline]
-    fn sqrt(self) -> Self {
-        todo!()
     }
 }
 
@@ -296,12 +310,12 @@ pub fn get_squared_magnitude_3d<T: Number>(vector: [T; 3]) -> T {
 }
 
 #[inline]
-pub fn get_magnitude_3d<T: Number>(vector: [T; 3]) -> T {
+pub fn get_magnitude_3d<T: Float>(vector: [T; 3]) -> T {
     get_squared_magnitude_3d(vector).sqrt()
 }
 
 #[inline]
-pub fn normalise_3d<T: Number>(vector: [T; 3]) -> [T; 3] {
+pub fn normalise_3d<T: Float>(vector: [T; 3]) -> [T; 3] {
     let magnitude = get_magnitude_3d(vector);
 
     [
@@ -344,4 +358,21 @@ pub fn index_from_position_2d<T: Number>(position: [T; 2], width: T) -> T {
 #[inline]
 pub fn position_from_index_2d<T: Number>(index: T, width: T) -> [T; 2] {
     [index % width, index / width]
+}
+
+#[inline]
+pub fn remap<T: Number>(value: T, original_range: ops::Range<T>, new_range: ops::Range<T>) -> T {
+    new_range.start
+        + (value - original_range.start) * (new_range.end - new_range.start)
+            / (original_range.end - original_range.start)
+}
+
+pub fn rotate_2d<T: Float>(position: [T; 2], theta: T) -> [T; 2] {
+    // TODO: Make clear this is radians.
+    let theta_cos = theta.cos();
+    let theta_sin = theta.sin();
+    [
+        position[0] * theta_cos - position[1] * theta_sin,
+        position[1] * theta_cos + position[0] * theta_sin,
+    ]
 }
