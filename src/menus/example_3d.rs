@@ -213,8 +213,8 @@ pub fn get_starting_storage() -> Example3DStorage {
 
         island_storage: IslandStorage {
             sky_top: temp_gen_islands(-1000.0..-750.0, [1.0, 0.0, 0.0, 1.0]),
-            sky_middle: generate_islands_circle_technique(30, -750.0..-250.0, 1.0, 1.0..50.0, 0.5..1.0, 0.5..2.0, 50, [0.0, 1.0, 0.0, 1.0]),
-            sky_bottom: generate_islands_circle_technique(10, -250.0..-0.0, 0.75, 10.0..100.0, 5.0..10.0, 0.3..3.0, 20, [0.5, 0.5, 0.5, 1.0]),
+            sky_middle: generate_islands_circle_technique(30, -750.0..-250.0, 1.0, 1.0..50.0, 0.5..1.0, 0.5..2.0, 50, [0.0, 1.0, 0.0, 1.0], sky_middle_get_overall_island_type, sky_middle_create_per_piece_type),
+            sky_bottom: generate_islands_circle_technique(10, -250.0..-0.0, 0.75, 10.0..100.0, 5.0..10.0, 0.3..3.0, 20, [0.5, 0.5, 0.5, 1.0], sky_bottom_get_overall_island_type, sky_bottom_create_per_piece_type),
 
             current_aabbs: vec![],
         },
@@ -343,7 +343,7 @@ fn temp_gen_islands(vertical_range: std::ops::Range<f32>, debug_colour: [f32; 4]
     layer
 }
 
-fn generate_islands_circle_technique(quantity: u32, vertical_position: std::ops::Range<f32>, squish: f32, x_scale: std::ops::Range<f32>, y_scale: std::ops::Range<f32>, z_scale_compared_to_x: std::ops::Range<f32>, max_pieces: u16, colour: [f32; 4]) -> Layer {
+fn generate_islands_circle_technique<T: Copy>(quantity: u32, vertical_position: std::ops::Range<f32>, squish: f32, x_scale: std::ops::Range<f32>, y_scale: std::ops::Range<f32>, z_scale_compared_to_x: std::ops::Range<f32>, max_pieces: u16, colour: [f32; 4], get_overall_island_type: fn(&mut Layer, &mut ThreadRng) -> T, create_per_piece_type: fn(&mut Layer, &mut ThreadRng, [f32; 3], [f32; 3], T)) -> Layer {
     let mut layer = Layer {
         box_instances: vec![],
         sphere_instances: vec![],
@@ -388,6 +388,8 @@ fn generate_islands_circle_technique(quantity: u32, vertical_position: std::ops:
             x_scale * z_scale,
         ];
 
+        let island_type = get_overall_island_type(&mut layer, &mut rng);
+
         for _ in 0..island_pieces {
             let rotation: f32 = rotation_range.sample(&mut rng);
             let offset = math::rotate_2d(
@@ -425,10 +427,90 @@ fn generate_islands_circle_technique(quantity: u32, vertical_position: std::ops:
                     position: previous_position,
                     half_size: previous_scale,
                 });
+
+            create_per_piece_type(&mut layer, &mut rng, previous_position, previous_scale, island_type);
         }
     }
 
     layer
+}
+
+#[derive(Clone, Copy)]
+enum SkyMiddleIslandTypes {
+    TallForest,
+    SmallForest,
+    Plains,
+}
+
+fn sky_middle_get_overall_island_type(layer: &mut Layer, rng: &mut ThreadRng) -> SkyMiddleIslandTypes {
+    match rng.gen_range(0..10) {
+        0|1 => SkyMiddleIslandTypes::TallForest,
+        2|3|4 => SkyMiddleIslandTypes::SmallForest,
+        5|6|7|8|9 => SkyMiddleIslandTypes::Plains,
+        _ => unreachable!()
+    }
+}
+
+fn sky_middle_create_per_piece_type(layer: &mut Layer, rng: &mut ThreadRng, position: [f32; 3], scale: [f32; 3], overall_island_type: SkyMiddleIslandTypes) {
+    match overall_island_type {
+        SkyMiddleIslandTypes::TallForest => {
+            if rng.gen() {
+                return
+            }
+
+            let trunk_thickness = rng.gen_range(1.0..3.0);
+            let tree_scale = [
+                trunk_thickness,
+                rng.gen_range(30.0..50.0),
+                trunk_thickness,
+            ];
+            let tree_position = [
+                position[0],
+                position[1] - tree_scale[1]*0.5,
+                position[2],
+            ];
+
+            layer.box_instances.push(buffer_contents::Colour3DInstance::new([1.0, 0.0, 0.0, 1.0], math::Matrix4::from_translation(tree_position).multiply(math::Matrix4::from_scale(tree_scale))));
+        }
+
+        SkyMiddleIslandTypes::SmallForest => {
+            if rng.gen() {
+                return
+            }
+
+            let trunk_thickness = rng.gen_range(0.5..1.5);
+            let tree_scale = [
+                trunk_thickness,
+                rng.gen_range(10.0..30.0),
+                trunk_thickness,
+            ];
+            let tree_position = [
+                position[0],
+                position[1] - tree_scale[1]*0.5,
+                position[2],
+            ];
+
+            layer.box_instances.push(buffer_contents::Colour3DInstance::new([1.0, 0.0, 0.0, 1.0], math::Matrix4::from_translation(tree_position).multiply(math::Matrix4::from_scale(tree_scale))));
+        }
+
+        SkyMiddleIslandTypes::Plains => {
+
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum SkyBottomIslandTypes {
+    RubbledPlains,
+    Lake,
+}
+
+fn sky_bottom_get_overall_island_type(layer: &mut Layer, rng: &mut ThreadRng) -> SkyBottomIslandTypes {
+    SkyBottomIslandTypes::RubbledPlains
+}
+
+fn sky_bottom_create_per_piece_type(layer: &mut Layer, rng: &mut ThreadRng, position: [f32; 3], scale: [f32; 3], overall_island_type: SkyBottomIslandTypes) {
+    
 }
 
 pub const MENU: menus::Data = menus::Data {
