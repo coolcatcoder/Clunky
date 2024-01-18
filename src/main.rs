@@ -177,10 +177,6 @@ fn main() {
 
     let surface = Surface::from_window(instance.clone(), window.clone()).unwrap();
 
-    // let surface = WindowBuilder::new()
-    //     .build_vk_surface(&event_loop, instance.clone())
-    //     .unwrap();
-
     let device_extensions = DeviceExtensions {
         khr_swapchain: true,
         ..DeviceExtensions::empty()
