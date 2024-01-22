@@ -5,7 +5,7 @@ use crate::buffer_contents;
 use crate::math::Degrees;
 use crate::math::Matrix4;
 
-pub const CUBE_COLOUR_3D_INSTANCES: &[buffer_contents::Colour3DInstance] = &[
+pub const _CUBE_COLOUR_3D_INSTANCES: &[buffer_contents::Colour3DInstance] = &[
     buffer_contents::Colour3DInstance::new(
         // Simple red cube.
         [1.0, 0.0, 0.0, 1.0],
@@ -26,12 +26,12 @@ pub const CUBE_COLOUR_3D_INSTANCES: &[buffer_contents::Colour3DInstance] = &[
         // Transparent blue rotated rectangle
         [0.0, 1.0, 1.0, 0.75],
         Matrix4::from_translation([3.5, -1.0, -2.5])
-            .multiply(Matrix4::from_angle_x(Degrees(45.0).to_radians()))
+            .multiply(Matrix4::from_angle_x_const(Degrees(45.0).to_radians()))
             .multiply(Matrix4::from_scale([0.5, 3.5, 2.6])),
     ),
 ];
 
-pub const SPHERE_COLOUR_3D_INSTANCES: &[buffer_contents::Colour3DInstance] = &[
+pub const _SPHERE_COLOUR_3D_INSTANCES: &[buffer_contents::Colour3DInstance] = &[
     buffer_contents::Colour3DInstance::new(
         [0.0, 1.0, 0.0, 1.0],
         Matrix4::from_scale([10.0, 0.5, 10.0]),

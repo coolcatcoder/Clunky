@@ -1,8 +1,13 @@
 // remember when doing matrix math transformations we do translate * rotate * scale unless you are doing world_to_camera, in which case it won't work, and you should try the reverse.
 // All rights go to cgmath, I've just slighty tweaked their stuff.
 
+// TODO:
+// split functions into const and non-const where applicable
+// Sort out the whole messy generic and non-generic stuff. Once const traits become stable, we must use them!
+
 use const_soft_float::soft_f32::SoftF32;
 use std::ops;
+extern crate test;
 
 pub trait Number:
     Copy
@@ -18,12 +23,15 @@ pub trait Number:
 {
     const ZERO: Self;
     fn abs(self) -> Self;
+    fn to_usize(self) -> usize; // TODO: all number should be able to convert to all other numbers, but this will take a few minutes, and I'm lazy
+    fn to_isize(self) -> isize;
 }
 
 pub trait Float: Number {
     fn sqrt(self) -> Self;
     fn sin(self) -> Self;
     fn cos(self) -> Self;
+    fn to_radians(self) -> Self;
 }
 
 impl Number for f32 {
@@ -31,6 +39,15 @@ impl Number for f32 {
     #[inline]
     fn abs(self) -> Self {
         self.abs()
+    }
+
+    #[inline]
+    fn to_usize(self) -> usize {
+        self as usize
+    }
+    #[inline]
+    fn to_isize(self) -> isize {
+        self as isize
     }
 }
 
@@ -49,6 +66,11 @@ impl Float for f32 {
     fn cos(self) -> Self {
         self.cos()
     }
+
+    #[inline]
+    fn to_radians(self) -> Self {
+        self.to_radians()
+    }
 }
 
 impl Number for usize {
@@ -56,6 +78,16 @@ impl Number for usize {
     #[inline]
     fn abs(self) -> Self {
         self
+    }
+
+    #[inline]
+    fn to_usize(self) -> usize {
+        self
+    }
+
+    #[inline]
+    fn to_isize(self) -> isize {
+        self as isize
     }
 }
 
@@ -189,7 +221,7 @@ impl Matrix4 {
         }
     }
 
-    pub const fn from_angle_x(theta: Radians) -> Matrix4 {
+    pub const fn from_angle_x_const(theta: Radians<f32>) -> Matrix4 {
         let theta_sin = SoftF32(theta.0).sin().to_f32();
         let theta_cos = SoftF32(theta.0).cos().to_f32();
 
@@ -201,7 +233,19 @@ impl Matrix4 {
         }
     }
 
-    pub const fn from_angle_y(theta: Radians) -> Matrix4 {
+    pub fn from_angle_x(theta: Radians<f32>) -> Matrix4 {
+        let theta_sin = theta.0.sin();
+        let theta_cos = theta.0.cos();
+
+        Matrix4 {
+            x: [1.0, 0.0, 0.0, 0.0],
+            y: [0.0, theta_cos, theta_sin, 0.0],
+            z: [0.0, -theta_sin, theta_cos, 0.0],
+            w: [0.0, 0.0, 0.0, 1.0],
+        }
+    }
+
+    pub const fn from_angle_y_const(theta: Radians<f32>) -> Matrix4 {
         let theta_sin = SoftF32(theta.0).sin().to_f32();
         let theta_cos = SoftF32(theta.0).cos().to_f32();
 
@@ -213,7 +257,19 @@ impl Matrix4 {
         }
     }
 
-    pub const fn from_angle_z(theta: Radians) -> Matrix4 {
+    pub fn from_angle_y(theta: Radians<f32>) -> Matrix4 {
+        let theta_sin = theta.0.sin();
+        let theta_cos = theta.0.cos();
+
+        Matrix4 {
+            x: [theta_cos, 0.0, -theta_sin, 0.0],
+            y: [0.0, 1.0, 0.0, 0.0],
+            z: [theta_sin, 0.0, theta_cos, 0.0],
+            w: [0.0, 0.0, 0.0, 1.0],
+        }
+    }
+
+    pub const fn from_angle_z_const(theta: Radians<f32>) -> Matrix4 {
         let theta_sin = SoftF32(theta.0).sin().to_f32();
         let theta_cos = SoftF32(theta.0).cos().to_f32();
 
@@ -225,8 +281,20 @@ impl Matrix4 {
         }
     }
 
+    pub fn from_angle_z(theta: Radians<f32>) -> Matrix4 {
+        let theta_sin = theta.0.sin();
+        let theta_cos = theta.0.cos();
+
+        Matrix4 {
+            x: [theta_cos, theta_sin, 0.0, 0.0],
+            y: [-theta_sin, theta_cos, 0.0, 0.0],
+            z: [0.0, 0.0, 1.0, 0.0],
+            w: [0.0, 0.0, 0.0, 1.0],
+        }
+    }
+
     // cannot be const, due to assert!() not be const sadly
-    pub fn from_perspective(fovy: Radians, aspect: f32, near: f32, far: f32) -> Matrix4 {
+    pub fn from_perspective(fovy: Radians<f32>, aspect: f32, near: f32, far: f32) -> Matrix4 {
         assert!(
             fovy.0 > 0.0,
             "The vertical field of view cannot be below zero, found: {:?}",
@@ -262,8 +330,8 @@ impl Matrix4 {
         Matrix4::from_perspective_no_checks(fovy, aspect, near, far)
     }
 
-    pub const fn from_perspective_no_checks(
-        fovy: Radians,
+    pub fn from_perspective_no_checks(
+        fovy: Radians<f32>,
         aspect: f32,
         near: f32,
         far: f32,
@@ -281,26 +349,33 @@ impl Matrix4 {
 
 #[repr(C)]
 #[derive(Copy, Clone)]
-pub struct Radians(pub f32);
+pub struct Radians<T: Float>(pub T);
 
 #[repr(C)]
 #[derive(Copy, Clone)]
-pub struct Degrees(pub f32);
+pub struct Degrees<T: Float>(pub T);
 
-impl Degrees {
+impl<T: Float> Degrees<T> {
     #[inline]
-    pub const fn to_radians(&self) -> Radians {
+    pub fn to_radians_test(&self) -> Radians<T> {
+        Radians(self.0.to_radians())
+    }
+}
+
+impl Degrees<f32> {
+    #[inline]
+    pub const fn to_radians(&self) -> Radians<f32> {
         Radians(self.0 * std::f32::consts::PI / 180.0)
     }
 }
 
 #[inline]
-pub const fn cot(theta: f32) -> f32 {
-    1.0 / tan(theta)
+pub fn cot(theta: f32) -> f32 {
+    1.0 / theta.tan()
 }
 
 #[inline]
-pub const fn tan(theta: f32) -> f32 {
+pub const fn tan_const(theta: f32) -> f32 {
     SoftF32(theta).sin().0 / SoftF32(theta).cos().0
 }
 
@@ -361,6 +436,21 @@ pub fn position_from_index_2d<T: Number>(index: T, width: T) -> [T; 2] {
 }
 
 #[inline]
+pub fn index_from_position_3d<T: Number>(position: [T; 3], width: T, height: T) -> T {
+    position[2] * width * height + position[1] * width + position[0]
+}
+
+#[inline]
+pub fn position_from_index_3d<T: Number>(index: T, width: T, height: T) -> [T; 3] {
+    let remaining = index % (width * height);
+    [
+        remaining % width,
+        remaining / width,
+        index / (width * height),
+    ]
+}
+
+#[inline]
 pub fn remap<T: Number>(value: T, original_range: ops::Range<T>, new_range: ops::Range<T>) -> T {
     new_range.start
         + (value - original_range.start) * (new_range.end - new_range.start)
@@ -375,4 +465,30 @@ pub fn rotate_2d<T: Float>(position: [T; 2], theta: T) -> [T; 2] {
         position[0] * theta_cos - position[1] * theta_sin,
         position[1] * theta_cos + position[0] * theta_sin,
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use test::Bencher;
+
+    #[bench]
+    fn bench_from_angle_x(b: &mut Bencher) {
+        b.iter(|| return Matrix4::from_angle_x(Degrees(test::black_box(90.0)).to_radians()))
+    }
+
+    #[bench]
+    fn bench_from_angle_x_const(b: &mut Bencher) {
+        b.iter(|| return Matrix4::from_angle_x_const(Degrees(test::black_box(90.0)).to_radians()))
+    }
+
+    #[bench]
+    fn bench_to_radians(b: &mut Bencher) {
+        b.iter(|| return test::black_box(Degrees(90.0)).to_radians())
+    }
+
+    #[bench]
+    fn bench_to_radians_test(b: &mut Bencher) {
+        b.iter(|| return test::black_box(Degrees(90.0)).to_radians_test())
+    }
 }

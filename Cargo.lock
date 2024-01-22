@@ -1360,6 +1360,7 @@ dependencies = [
  "const_soft_float",
  "gltf",
  "noise",
+ "num-traits",
  "png",
  "rand 0.8.5",
  "smallvec",

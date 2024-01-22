@@ -1,3 +1,5 @@
+// TODO: Is passing user_storage and render_storage as &mut really a good idea? Side effects are mandatory in this garbage code.
+
 #![feature(const_fn_floating_point_arithmetic)] // Required for math for now.
 #![feature(test)]
 
@@ -80,6 +82,7 @@ mod physics;
 #[allow(dead_code)]
 mod random_generation;
 
+// TODO: Store shaders in a shader module, don't make them clutter up main.rs
 mod colour_3d_instanced_vertex_shader {
     vulkano_shaders::shader! {
         ty: "vertex",
@@ -91,6 +94,20 @@ mod colour_3d_instanced_fragment_shader {
     vulkano_shaders::shader! {
         ty: "fragment",
         path: "src/shaders/colour_3d_instanced_shaders/fragment_shader.frag",
+    }
+}
+
+mod uv_3d_instanced_vertex_shader {
+    vulkano_shaders::shader! {
+        ty: "vertex",
+        path: "src/shaders/uv_3d_instanced_shaders/vertex_shader.vert",
+    }
+}
+
+mod uv_3d_instanced_fragment_shader {
+    vulkano_shaders::shader! {
+        ty: "fragment",
+        path: "src/shaders/uv_3d_instanced_shaders/fragment_shader.frag",
     }
 }
 
@@ -164,7 +181,7 @@ mod fragment_shader_test {
     }
 }
 
-const DEPTH_FORMAT: Format = Format::D16_UNORM; // TODO: work out what this should be
+const DEPTH_FORMAT: Format = Format::D32_SFLOAT; //Format::D16_UNORM; // TODO: work out what this should be
 
 fn main() {
     if meshes::DEBUG_VIEWER {
@@ -575,6 +592,9 @@ fn main() {
                 (render_storage.menu.get_data().on_draw)(
                     &mut user_storage,
                     &mut render_storage,
+                    &sprites,
+                    &sampler,
+                    &pipelines,
                     &mut builder,
                 );
 
@@ -783,8 +803,12 @@ fn window_size_dependent_setup(
         })
         .collect::<Vec<_>>();
 
-    let mut pipelines =
-        (render_storage.menu.get_data().create_pipelines)(user_storage, render_storage);
+    let mut pipelines = (render_storage.menu.get_data().create_pipelines)(
+        extent,
+        render_pass.clone(),
+        user_storage,
+        render_storage,
+    );
 
     for entire_render_data in &mut render_storage.entire_render_datas {
         let vertex_shader_entrance = entire_render_data

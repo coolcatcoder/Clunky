@@ -213,8 +213,30 @@ pub fn get_starting_storage() -> Example3DStorage {
 
         island_storage: IslandStorage {
             sky_top: temp_gen_islands(-1000.0..-750.0, [1.0, 0.0, 0.0, 1.0]),
-            sky_middle: generate_islands_circle_technique(30, -750.0..-250.0, 1.0, 1.0..50.0, 0.5..1.0, 0.5..2.0, 50, [0.0, 1.0, 0.0, 1.0], sky_middle_get_overall_island_type, sky_middle_create_per_piece_type),
-            sky_bottom: generate_islands_circle_technique(10, -250.0..-0.0, 0.75, 10.0..100.0, 5.0..10.0, 0.3..3.0, 20, [0.5, 0.5, 0.5, 1.0], sky_bottom_get_overall_island_type, sky_bottom_create_per_piece_type),
+            sky_middle: generate_islands_circle_technique(
+                30,
+                -750.0..-250.0,
+                1.0,
+                1.0..50.0,
+                0.5..1.0,
+                0.5..2.0,
+                50,
+                [0.0, 1.0, 0.0, 1.0],
+                sky_middle_get_overall_island_type,
+                sky_middle_create_per_piece_type,
+            ),
+            sky_bottom: generate_islands_circle_technique(
+                10,
+                -250.0..-0.0,
+                0.75,
+                10.0..100.0,
+                5.0..10.0,
+                0.3..3.0,
+                20,
+                [0.5, 0.5, 0.5, 1.0],
+                sky_bottom_get_overall_island_type,
+                sky_bottom_create_per_piece_type,
+            ),
 
             current_aabbs: vec![],
         },
@@ -246,12 +268,12 @@ impl TempIslandTiles {
 impl random_generation::wave_function_collapse::Cell for TempIslandTiles {}
 
 fn get_possibilities(
-    cells: &Vec<
+    _cells: &Vec<
         random_generation::wave_function_collapse::CellStateStorePossibilities<TempIslandTiles>,
     >,
     cell_index: usize,
 ) -> Vec<TempIslandTiles> {
-    let cell_position = math::position_from_index_2d(cell_index, 100);
+    let _cell_position = math::position_from_index_2d(cell_index, 100);
 
     // if cell_position[0] != 0 {
     //     if let random_generation::wave_function_collapse::CellStateStorePossibilities::Decided(island_tile) = cells[cell_index-1] {
@@ -265,11 +287,11 @@ fn get_possibilities(
 }
 
 fn pick_possibility(
-    cells: &Vec<
+    _cells: &Vec<
         random_generation::wave_function_collapse::CellStateStorePossibilities<TempIslandTiles>,
     >,
     possibilities: &Vec<TempIslandTiles>,
-    cell_index: usize,
+    _cell_index: usize,
 ) -> TempIslandTiles {
     // let mut actual_possibilities = Vec::with_capacity(possibilities.len());
     // let mut rng = rand::thread_rng();
@@ -290,7 +312,7 @@ fn pick_possibility(
     possibilities[rand::thread_rng().gen_range(0..possibilities.len())]
 }
 
-fn temp_gen_islands(vertical_range: std::ops::Range<f32>, debug_colour: [f32; 4]) -> Layer {
+fn temp_gen_islands(_vertical_range: std::ops::Range<f32>, _debug_colour: [f32; 4]) -> Layer {
     let offset = [-50.0, -900.0, -50.0];
 
     let grid_size = [100, 100];
@@ -343,7 +365,18 @@ fn temp_gen_islands(vertical_range: std::ops::Range<f32>, debug_colour: [f32; 4]
     layer
 }
 
-fn generate_islands_circle_technique<T: Copy>(quantity: u32, vertical_position: std::ops::Range<f32>, squish: f32, x_scale: std::ops::Range<f32>, y_scale: std::ops::Range<f32>, z_scale_compared_to_x: std::ops::Range<f32>, max_pieces: u16, colour: [f32; 4], get_overall_island_type: fn(&mut Layer, &mut ThreadRng) -> T, create_per_piece_type: fn(&mut Layer, &mut ThreadRng, [f32; 3], [f32; 3], T)) -> Layer {
+fn generate_islands_circle_technique<T: Copy>(
+    quantity: u32,
+    vertical_position: std::ops::Range<f32>,
+    squish: f32,
+    x_scale: std::ops::Range<f32>,
+    y_scale: std::ops::Range<f32>,
+    z_scale_compared_to_x: std::ops::Range<f32>,
+    max_pieces: u16,
+    colour: [f32; 4],
+    get_overall_island_type: fn(&mut Layer, &mut ThreadRng) -> T,
+    create_per_piece_type: fn(&mut Layer, &mut ThreadRng, [f32; 3], [f32; 3], T),
+) -> Layer {
     let mut layer = Layer {
         box_instances: vec![],
         sphere_instances: vec![],
@@ -428,7 +461,13 @@ fn generate_islands_circle_technique<T: Copy>(quantity: u32, vertical_position: 
                     half_size: previous_scale,
                 });
 
-            create_per_piece_type(&mut layer, &mut rng, previous_position, previous_scale, island_type);
+            create_per_piece_type(
+                &mut layer,
+                &mut rng,
+                previous_position,
+                previous_scale,
+                island_type,
+            );
         }
     }
 
@@ -442,75 +481,86 @@ enum SkyMiddleIslandTypes {
     Plains,
 }
 
-fn sky_middle_get_overall_island_type(layer: &mut Layer, rng: &mut ThreadRng) -> SkyMiddleIslandTypes {
+fn sky_middle_get_overall_island_type(
+    _layer: &mut Layer,
+    rng: &mut ThreadRng,
+) -> SkyMiddleIslandTypes {
     match rng.gen_range(0..10) {
-        0|1 => SkyMiddleIslandTypes::TallForest,
-        2|3|4 => SkyMiddleIslandTypes::SmallForest,
-        5|6|7|8|9 => SkyMiddleIslandTypes::Plains,
-        _ => unreachable!()
+        0 | 1 => SkyMiddleIslandTypes::TallForest,
+        2 | 3 | 4 => SkyMiddleIslandTypes::SmallForest,
+        5 | 6 | 7 | 8 | 9 => SkyMiddleIslandTypes::Plains,
+        _ => unreachable!(),
     }
 }
 
-fn sky_middle_create_per_piece_type(layer: &mut Layer, rng: &mut ThreadRng, position: [f32; 3], scale: [f32; 3], overall_island_type: SkyMiddleIslandTypes) {
+fn sky_middle_create_per_piece_type(
+    layer: &mut Layer,
+    rng: &mut ThreadRng,
+    position: [f32; 3],
+    _scale: [f32; 3],
+    overall_island_type: SkyMiddleIslandTypes,
+) {
     match overall_island_type {
         SkyMiddleIslandTypes::TallForest => {
             if rng.gen() {
-                return
+                return;
             }
 
             let trunk_thickness = rng.gen_range(1.0..3.0);
-            let tree_scale = [
-                trunk_thickness,
-                rng.gen_range(30.0..50.0),
-                trunk_thickness,
-            ];
-            let tree_position = [
-                position[0],
-                position[1] - tree_scale[1]*0.5,
-                position[2],
-            ];
+            let tree_scale = [trunk_thickness, rng.gen_range(30.0..50.0), trunk_thickness];
+            let tree_position = [position[0], position[1] - tree_scale[1] * 0.5, position[2]];
 
-            layer.box_instances.push(buffer_contents::Colour3DInstance::new([1.0, 0.0, 0.0, 1.0], math::Matrix4::from_translation(tree_position).multiply(math::Matrix4::from_scale(tree_scale))));
+            layer
+                .box_instances
+                .push(buffer_contents::Colour3DInstance::new(
+                    [1.0, 0.0, 0.0, 1.0],
+                    math::Matrix4::from_translation(tree_position)
+                        .multiply(math::Matrix4::from_scale(tree_scale)),
+                ));
         }
 
         SkyMiddleIslandTypes::SmallForest => {
             if rng.gen() {
-                return
+                return;
             }
 
             let trunk_thickness = rng.gen_range(0.5..1.5);
-            let tree_scale = [
-                trunk_thickness,
-                rng.gen_range(10.0..30.0),
-                trunk_thickness,
-            ];
-            let tree_position = [
-                position[0],
-                position[1] - tree_scale[1]*0.5,
-                position[2],
-            ];
+            let tree_scale = [trunk_thickness, rng.gen_range(10.0..30.0), trunk_thickness];
+            let tree_position = [position[0], position[1] - tree_scale[1] * 0.5, position[2]];
 
-            layer.box_instances.push(buffer_contents::Colour3DInstance::new([1.0, 0.0, 0.0, 1.0], math::Matrix4::from_translation(tree_position).multiply(math::Matrix4::from_scale(tree_scale))));
+            layer
+                .box_instances
+                .push(buffer_contents::Colour3DInstance::new(
+                    [1.0, 0.0, 0.0, 1.0],
+                    math::Matrix4::from_translation(tree_position)
+                        .multiply(math::Matrix4::from_scale(tree_scale)),
+                ));
         }
 
-        SkyMiddleIslandTypes::Plains => {
-
-        }
+        SkyMiddleIslandTypes::Plains => {}
     }
 }
 
 #[derive(Clone, Copy)]
 enum SkyBottomIslandTypes {
     RubbledPlains,
-    Lake,
+    _Lake,
 }
 
-fn sky_bottom_get_overall_island_type(layer: &mut Layer, rng: &mut ThreadRng) -> SkyBottomIslandTypes {
+fn sky_bottom_get_overall_island_type(
+    _layer: &mut Layer,
+    _rng: &mut ThreadRng,
+) -> SkyBottomIslandTypes {
     SkyBottomIslandTypes::RubbledPlains
 }
 
-fn sky_bottom_create_per_piece_type(layer: &mut Layer, rng: &mut ThreadRng, position: [f32; 3], scale: [f32; 3], overall_island_type: SkyBottomIslandTypes) {
-    
+fn sky_bottom_create_per_piece_type(
+    _layer: &mut Layer,
+    _rng: &mut ThreadRng,
+    _position: [f32; 3],
+    _scale: [f32; 3],
+    _overall_island_type: SkyBottomIslandTypes,
+) {
 }
 
 pub const MENU: menus::Data = menus::Data {
@@ -745,7 +795,8 @@ pub const MENU: menus::Data = menus::Data {
                 false => 50.0,
             };
 
-            if user_storage.example_3d_storage.jump_held || user_storage.example_3d_storage.grounded {
+            if user_storage.example_3d_storage.jump_held || user_storage.example_3d_storage.grounded
+            {
                 speed *= 0.5;
             }
 
@@ -787,7 +838,7 @@ pub const MENU: menus::Data = menus::Data {
                 .particle
                 .update(MENU.fixed_update.delta_time, displacement);
 
-            let mut previous_player_aabb = physics::physics_3d::aabb::AabbCentredOrigin {
+            let previous_player_aabb = physics::physics_3d::aabb::AabbCentredOrigin {
                 position: user_storage.example_3d_storage.particle.previous_position,
                 half_size: [0.5, 1.0, 0.5],
             }; // don't know if this needs to be mut, it might? Test and find out. TODO
@@ -795,7 +846,7 @@ pub const MENU: menus::Data = menus::Data {
             let mut player_aabb = physics::physics_3d::aabb::AabbCentredOrigin {
                 position: user_storage.example_3d_storage.particle.position,
                 half_size: [0.5, 1.0, 0.5],
-            }; // this is mutable so that future aabbs don't detect false collision, incase a previous collision moved it out of the way of a future collision aswell
+            }; // this is mutable so that future aabbs don't detect false collision, incase a previous collision moved it out of the way of a future collision aswell. This might be wrong. TODO
 
             user_storage.example_3d_storage.grounded = false;
 
@@ -815,7 +866,8 @@ pub const MENU: menus::Data = menus::Data {
                             step = true;
                             player_aabb.position[1] = aabb.position[1] - aabb.half_size[1];
                         } else {
-                            player_aabb.position[0] = previous_player_aabb.position[0] - player_aabb.half_size[1] - 0.1;
+                            player_aabb.position[0] =
+                                previous_player_aabb.position[0] - player_aabb.half_size[1] - 0.1;
                             // Would this need to be previous aabb if it was mut? TODO
                         }
                     }
@@ -828,7 +880,10 @@ pub const MENU: menus::Data = menus::Data {
                         {
                             println!("step z");
                             step = true;
-                            player_aabb.position[1] = aabb.position[1] - aabb.half_size[1] - player_aabb.half_size[1] - 0.1;
+                            player_aabb.position[1] = aabb.position[1]
+                                - aabb.half_size[1]
+                                - player_aabb.half_size[1]
+                                - 0.1;
                         } else {
                             player_aabb.position[2] = previous_player_aabb.position[2];
                         }
@@ -853,13 +908,16 @@ pub const MENU: menus::Data = menus::Data {
                         .particle
                         .accelerate([0.0, -1000.0, 0.0]);
                 } else {
-                    if user_storage.wasd_held.0 || user_storage.wasd_held.1 || user_storage.wasd_held.2 || user_storage.wasd_held.3 {
+                    if user_storage.wasd_held.0
+                        || user_storage.wasd_held.1
+                        || user_storage.wasd_held.2
+                        || user_storage.wasd_held.3
+                    {
                         user_storage
                             .example_3d_storage
                             .particle
                             .accelerate([0.0, -50.0, 0.0]);
-                    }
-                    else {
+                    } else {
                         user_storage
                             .example_3d_storage
                             .particle
@@ -1023,8 +1081,8 @@ pub const MENU: menus::Data = menus::Data {
         }
         _ => {}
     },
-    create_pipelines: |_user_storage, _render_storage| vec![],
-    on_draw: |_user_storage, _render_storage, _builder| {},
+    create_pipelines: |_extent, _render_pass, _user_storage, _render_storage| vec![],
+    on_draw: |_user_storage, _render_storage, _sprites, _sampler, _pipelines, _builder| {},
     end: |_user_storage, _render_storage| {},
 };
 

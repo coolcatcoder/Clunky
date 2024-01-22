@@ -19,6 +19,12 @@ use vulkano::{
 
 use crate::buffer_contents;
 
+// Experimental draw call container
+
+pub trait DrawCallContainer {
+    // TODO
+}
+
 pub enum EditFrequency {
     Rarely,
     Often,
@@ -121,6 +127,7 @@ where
 }
 
 pub struct RenderBuffer<T>
+//TODO bad name
 where
     T: BufferContents + Copy,
 {

@@ -164,8 +164,8 @@ pub const MENU: menus::Data = menus::Data {
         }
         _ => {}
     },
-    create_pipelines: |_user_storage, _render_storage| vec![],
-    on_draw: |_user_storage, _render_storage, _builder| {},
+    create_pipelines: |_extent, _render_pass, _user_storage, _render_storage| vec![],
+    on_draw: |_user_storage, _render_storage, _sprites, _sampler, _pipelines, _builder| {},
     end: |_user_storage, _render_storage| {},
 };
 
