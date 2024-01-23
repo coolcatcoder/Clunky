@@ -49,12 +49,13 @@ where
 
 // Solvers are always way too set in stone for my liking currently. Same with the VerletBody struct.
 
-#[derive(Clone, Copy)]
+//#[derive(Clone, Copy)]
 pub enum VerletBody<T>
 where
     T: math::Float,
 {
-    AxisAlignedBox(AxisAlignedBox<T>),
+    SimpleBox(SimpleBox<T>),
+    ImmovableSimpleBox(ImmovableSimpleBox<T>)
 }
 
 impl<T> VerletBody<T>
@@ -68,24 +69,68 @@ where
         delta_time: T,
     ) -> [T; 3] {
         match self {
-            VerletBody::AxisAlignedBox(axis_aligned_box) => {
-                axis_aligned_box.update_and_get_position(gravity, dampening, delta_time)
+            VerletBody::SimpleBox(simple_box) => {
+                simple_box.update_and_get_position(gravity, dampening, delta_time)
             }
+            VerletBody::ImmovableSimpleBox(immovable_simple_box) => {
+                immovable_simple_box.update_and_get_position(gravity, dampening, delta_time)
+            }
+        }
+    }
+
+    // terribly named, but very useful. TODO: Replace with proper lhs and rhs bitwise values for checking how objects can interact.
+    pub fn collide_with_others(&mut self) -> bool {
+        match self {
+            VerletBody::SimpleBox(_) => true,
+            VerletBody::ImmovableSimpleBox(_) => false,
+        }
+    }
+
+    // This function is insanely expensive, no clue why.
+    #[inline]
+    pub fn collide(&mut self, other: &mut VerletBody<T>) {
+        match (self, other) {
+            // simple box
+            (VerletBody::SimpleBox(lhs_simple_box), VerletBody::SimpleBox(rhs_simple_box)) => {
+                // TODO: Mess with ref mut and mut and all that, and you will gain and lose 70x performance, somehow.
+                if lhs_simple_box.aabb.is_intersected_by_aabb(rhs_simple_box.aabb) {
+                    lhs_simple_box.particle.position = lhs_simple_box.particle.previous_position; // these lines in particular are slow
+                    rhs_simple_box.particle.position = rhs_simple_box.particle.previous_position;
+                }
+            }
+            (VerletBody::SimpleBox(lhs_simple_box), VerletBody::ImmovableSimpleBox(rhs_immovable_simple_box)) => {
+                if lhs_simple_box.aabb.is_intersected_by_aabb(rhs_immovable_simple_box.aabb) {
+                    let collision_axis = rhs_immovable_simple_box.aabb.get_collision_axis_with_direction(super::aabb::AabbCentredOrigin {
+                        position: lhs_simple_box.particle.previous_position,
+                        half_size: lhs_simple_box.aabb.half_size,
+                    });
+
+                    println!("collision axis: {:?}", collision_axis);
+
+                    lhs_simple_box.particle.position = lhs_simple_box.particle.previous_position;
+
+                    //println!("Collision!");
+                }
+            }
+
+            // immovable simple box (This cannot happen, as immovable simple boxes don't check to see if they have collided with others.)
+            (VerletBody::ImmovableSimpleBox(_), VerletBody::SimpleBox(_)) => unreachable!(),
+            (VerletBody::ImmovableSimpleBox(_), VerletBody::ImmovableSimpleBox(_)) => unreachable!(),
         }
     }
 }
 
 // Horrifically bad name.
-#[derive(Clone, Copy)]
-pub struct AxisAlignedBox<T>
+//#[derive(Clone, Copy)]
+pub struct SimpleBox<T>
 where
     T: math::Float,
 {
-    particle: Particle<T>, // Do we even want to store particles with collision data?
-    aabb: crate::physics::physics_3d::aabb::AabbCentredOrigin<T>,
+    pub particle: Particle<T>, // Do we even want to store particles with collision data?
+    pub aabb: crate::physics::physics_3d::aabb::AabbCentredOrigin<T>,
 }
 
-impl<T> AxisAlignedBox<T>
+impl<T> SimpleBox<T>
 where
     T: math::Float,
 {
@@ -104,6 +149,27 @@ where
         self.aabb.position = self.particle.position;
 
         self.particle.position
+    }
+}
+
+pub struct ImmovableSimpleBox<T>
+where
+    T: math::Float,
+{
+    pub aabb: crate::physics::physics_3d::aabb::AabbCentredOrigin<T>,
+}
+
+impl<T> ImmovableSimpleBox<T>
+where
+    T: math::Float,
+{
+    pub fn update_and_get_position(
+        &mut self,
+        _gravity: [T; 3],
+        _dampening: [T; 3],
+        _delta_time: T,
+    ) -> [T; 3] {
+        self.aabb.position
     }
 }
 
@@ -159,7 +225,7 @@ where
                 verlet_body.update_and_get_position(self.gravity, self.dampening, delta_time);
 
             let corrected_position = [
-                verlet_body_position[0] - self.grid_origin[0],
+                verlet_body_position[0] - self.grid_origin[0], // + or - ????
                 verlet_body_position[1] - self.grid_origin[1],
                 verlet_body_position[2] - self.grid_origin[2],
             ];
@@ -192,6 +258,8 @@ where
                 || outside_side[4]
                 || outside_side[5]
             {
+                //println!("corrected position: {:?}", corrected_position); // Very useful debug!
+                // Perhaps have this per verlet body?
                 match self.outside_of_grid_bounds_behaviour {
                     OutsideOfGridBoundsBehaviour::DeleteParticle => {
                         todo!();
@@ -238,7 +306,7 @@ where
                 math::position_from_index_3d(cell_index, self.grid_size[0], self.grid_size[1]);
 
             // Debating how much I like performance. I don't want to write by hand 26 different cell lets. This will do:
-            let mut neighbours = Vec::with_capacity(26);
+            let mut neighbours = Vec::with_capacity(27); // 27 cause this includes the center cell.
 
             for x in -1..=1 {
                 for y in -1..=1 {
@@ -273,11 +341,38 @@ where
             }
 
             for lhs_verlet_body_index in cell {
+                if !self.verlet_bodies[*lhs_verlet_body_index].collide_with_others() {
+                    continue;
+                }
+
                 for neighbour in &neighbours {
                     for rhs_verlet_body_index in *neighbour {
-                        todo!()
+                        if lhs_verlet_body_index == rhs_verlet_body_index {
+                            continue
+                        }
+
+                        // This code is simple and elgant. By splitting at the largest index, it allows us to safely and &mutably yoink the verlet bodies.
+                        if lhs_verlet_body_index > rhs_verlet_body_index {
+                            let (lhs_verlet_bodies, rhs_verlet_bodies) = self.verlet_bodies.split_at_mut(*lhs_verlet_body_index);
+                            rhs_verlet_bodies[0].collide(&mut lhs_verlet_bodies[*rhs_verlet_body_index]);
+                            //collide_test(&mut rhs_verlet_bodies[0], &mut lhs_verlet_bodies[*rhs_verlet_body_index]);
+                            //test::black_box(lhs_verlet_bodies);
+                            //test::black_box(rhs_verlet_bodies);
+                            //test::black_box(&mut rhs_verlet_bodies[0]);
+                            //test::black_box(&mut lhs_verlet_bodies[*rhs_verlet_body_index]);
+                        } else {
+                            let (lhs_verlet_bodies, rhs_verlet_bodies) = self.verlet_bodies.split_at_mut(*rhs_verlet_body_index);
+                            lhs_verlet_bodies[*lhs_verlet_body_index].collide(&mut rhs_verlet_bodies[0]);
+                            //collide_test(&mut lhs_verlet_bodies[*lhs_verlet_body_index], &mut rhs_verlet_bodies[0]);
+                            //test::black_box(lhs_verlet_bodies);
+                            //test::black_box(rhs_verlet_bodies);
+                            //test::black_box(&mut lhs_verlet_bodies[*lhs_verlet_body_index]);
+                            //test::black_box(&mut rhs_verlet_bodies[0]);
+                        }
                     }
                 }
+
+                // cell is already part of the neighbours, so we don't have to worry about it.
             }
         }
 
@@ -301,27 +396,33 @@ pub enum OutsideOfGridBoundsBehaviour<T: math::Number> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::thread_rng;
+    use rand::Rng;
     use test::Bencher;
 
     #[bench]
     fn bench_single_threaded_solver_1000_particles(b: &mut Bencher) {
+        let mut verlet_bodies = Vec::with_capacity(1000);
+        let mut rng = thread_rng();
+
+        for _ in 0..1000 {
+            verlet_bodies.push(VerletBody::SimpleBox(SimpleBox {
+                particle: Particle::from_position([0.0, 0.0, 0.0]),
+                aabb: crate::physics::physics_3d::aabb::AabbCentredOrigin {
+                    position: [rng.gen_range(-50.0..50.0), rng.gen_range(-50.0..50.0), rng.gen_range(-50.0..50.0)],
+                    half_size: [0.5, 0.5, 0.5]
+                }
+            }));
+        }
+
         let mut solver = SingleThreadedSolver::new(
             [0.0, 50.0, 0.0],
             [0.8, 1.0, 0.8],
             [10, 10, 10],
-            [-5.0, -5.0, -5.0],
-            [1, 1, 1],
+            [-50.0, -50.0, -50.0],
+            [10, 10, 10],
             OutsideOfGridBoundsBehaviour::ContinueUpdating,
-            vec![
-                VerletBody::AxisAlignedBox(AxisAlignedBox {
-                    particle: Particle::from_position([0.0, 0.0, 0.0]),
-                    aabb: crate::physics::physics_3d::aabb::AabbCentredOrigin {
-                        position: [0.0, 0.0, 0.0],
-                        half_size: [0.5, 0.5, 0.5]
-                    }
-                });
-                1000
-            ],
+            verlet_bodies,
         );
         b.iter(|| {
             solver.update(0.04);

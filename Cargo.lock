@@ -222,6 +222,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "clunky"
+version = "0.1.0"
+dependencies = [
+ "cgmath",
+ "const_soft_float",
+ "gltf",
+ "noise",
+ "num-traits",
+ "png",
+ "rand 0.8.5",
+ "smallvec",
+ "vulkano",
+ "vulkano-shaders",
+ "vulkano-win",
+ "winit",
+]
+
+[[package]]
 name = "cmake"
 version = "0.1.50"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1350,24 +1368,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "81086c28be67a8759cd80cbb3c8f7b520e0874605fc5eb74d5a1c9c2d1878e79"
 dependencies = [
  "xml-rs",
-]
-
-[[package]]
-name = "vulkan_fun"
-version = "0.1.0"
-dependencies = [
- "cgmath",
- "const_soft_float",
- "gltf",
- "noise",
- "num-traits",
- "png",
- "rand 0.8.5",
- "smallvec",
- "vulkano",
- "vulkano-shaders",
- "vulkano-win",
- "winit",
 ]
 
 [[package]]

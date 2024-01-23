@@ -20,11 +20,13 @@ pub trait Number:
     + ops::Div<Output = Self>
     + ops::Rem<Output = Self>
     + PartialOrd
+    + std::fmt::Debug
 {
     const ZERO: Self;
     fn abs(self) -> Self;
     fn to_usize(self) -> usize; // TODO: all number should be able to convert to all other numbers, but this will take a few minutes, and I'm lazy
     fn to_isize(self) -> isize;
+    fn is_sign_positive(self) -> bool;
 }
 
 pub trait Float: Number {
@@ -48,6 +50,10 @@ impl Number for f32 {
     #[inline]
     fn to_isize(self) -> isize {
         self as isize
+    }
+    #[inline]
+    fn is_sign_positive(self) -> bool {
+        self.is_sign_positive()
     }
 }
 
@@ -88,6 +94,11 @@ impl Number for usize {
     #[inline]
     fn to_isize(self) -> isize {
         self as isize
+    }
+
+    #[inline]
+    fn is_sign_positive(self) -> bool {
+        true
     }
 }
 

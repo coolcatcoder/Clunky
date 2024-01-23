@@ -115,6 +115,8 @@ pub struct OtherExample3DStorage {
     uniform_buffer: crate::colour_3d_instanced_vertex_shader::CameraData3D,
     //box_pipeline: Arc<GraphicsPipeline>,
     //sphere_pipeline: Arc<GraphicsPipeline>, TODO: I just can't work out how to do this. I can't init this, because I don't have the stuff until later. I could do Option<> but that is messy and is terrible.
+
+    verlet_solver: physics::physics_3d::verlet::SingleThreadedSolver<f32>,
 }
 
 #[derive(PartialEq, Clone, Copy, Debug)]
@@ -469,6 +471,22 @@ pub fn get_starting_storage(render_storage: &mut crate::RenderStorage) -> OtherE
             camera_to_clip: math::Matrix4::IDENTITY_AS_2D_ARRAY,
             world_to_camera: math::Matrix4::IDENTITY_AS_2D_ARRAY,
         },
+
+        verlet_solver: physics::physics_3d::verlet::SingleThreadedSolver::new(
+            [0.0, 50.0, 0.0],
+            [0.8, 1.0, 0.8],
+            [2, 15, 2],
+            [-1000.0, -2000.0, -1000.0],
+            [1000, 300, 1000],
+            physics::physics_3d::verlet::OutsideOfGridBoundsBehaviour::ContinueUpdating,
+            vec![physics::physics_3d::verlet::VerletBody::SimpleBox(physics::physics_3d::verlet::SimpleBox {
+                particle: physics::physics_3d::verlet::Particle::from_position([0.0, -1050.0, 0.0]),
+                aabb: physics::physics_3d::aabb::AabbCentredOrigin {
+                    position: [0.0, -1050.0, 0.0],
+                    half_size: [0.5, 1.0, 0.5],
+                },
+            })],
+        ),
     }
 }
 
@@ -852,6 +870,12 @@ pub const MENU: menus::Data = menus::Data {
             .moon_wax_tree_instance_buffer = moon_wax_tree_instances;
 
         render_storage.force_run_window_dependent_setup = true;
+
+        for aabb in &user_storage.other_example_3d_storage.island_storage.sky_top.aabbs {
+            user_storage.other_example_3d_storage.verlet_solver.verlet_bodies.push(physics::physics_3d::verlet::VerletBody::ImmovableSimpleBox(physics::physics_3d::verlet::ImmovableSimpleBox {
+                aabb:*aabb
+            }));
+        }
     },
     update: |_user_storage, _render_storage, _delta_time, _average_fps| {},
     fixed_update: menus::FixedUpdate {
@@ -926,6 +950,8 @@ pub const MENU: menus::Data = menus::Data {
                 .other_example_3d_storage
                 .particle
                 .update(MENU.fixed_update.delta_time, displacement);
+
+            user_storage.other_example_3d_storage.verlet_solver.update(MENU.fixed_update.delta_time);
 
             let previous_player_aabb = physics::physics_3d::aabb::AabbCentredOrigin {
                 position: user_storage
@@ -1055,6 +1081,12 @@ pub const MENU: menus::Data = menus::Data {
 
             user_storage.other_example_3d_storage.camera_3d_position =
                 user_storage.other_example_3d_storage.particle.position;
+
+            if let physics::physics_3d::verlet::VerletBody::SimpleBox(simple_box) = &user_storage.other_example_3d_storage.verlet_solver.verlet_bodies[0] {
+                user_storage.other_example_3d_storage.camera_3d_position = simple_box.particle.position;
+            } else {
+                panic!();
+            }
 
             user_storage.other_example_3d_storage.camera_3d_position[1] -= 1.0;
 

@@ -79,6 +79,50 @@ where
             (self.position[2] - other.position[2]).abs() > self.half_size[2] + other.half_size[2],
         ]
     }
+
+    /// Works out on what axis and in what direction a collision occured.
+    /// 
+    /// This function has only been tested by calling it on a non-moving aabb, while previous_other was the previous aabb of a moving aabb.
+    pub fn get_collision_axis_with_direction(&self, previous_other: AabbCentredOrigin<T>) -> [CollisionEnum; 3] {
+        // Run this on previous position instead, so you can see what axis wasn't intersecting before the collision.
+        let mut collisions = [CollisionEnum::None; 3];
+
+        let x_difference = self.position[0] - previous_other.position[0];
+        if x_difference.abs() > self.half_size[0] + previous_other.half_size[0] {
+            if x_difference.is_sign_positive() {
+                collisions[0] = CollisionEnum::Positive;
+            } else {
+                collisions[0] = CollisionEnum::Negative;
+            }
+        }
+
+        let y_difference = self.position[1] - previous_other.position[1];
+        if y_difference.abs() > self.half_size[1] + previous_other.half_size[1] {
+            if y_difference.is_sign_positive() {
+                collisions[1] = CollisionEnum::Positive;
+            } else {
+                collisions[1] = CollisionEnum::Negative;
+            }
+        }
+
+        let z_difference = self.position[2] - previous_other.position[2];
+        if z_difference.abs() > self.half_size[2] + previous_other.half_size[2] {
+            if z_difference.is_sign_positive() {
+                collisions[2] = CollisionEnum::Positive;
+            } else {
+                collisions[2] = CollisionEnum::Negative;
+            }
+        }
+
+        collisions
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum CollisionEnum {
+    None,
+    Positive,
+    Negative,
 }
 
 pub struct AabbMinMax<T>

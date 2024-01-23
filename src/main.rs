@@ -3,6 +3,9 @@
 #![feature(const_fn_floating_point_arithmetic)] // Required for math for now.
 #![feature(test)]
 
+#![doc = include_str!("../README.md")]
+#![warn(missing_docs)]
+
 use std::{sync::Arc, time::Instant};
 use vulkano::{
     buffer::{
@@ -981,18 +984,24 @@ fn update_buffers(render_storage: &mut RenderStorage) {
     }
 }
 
-#[deprecated] // TODO: work out why this exists??? This certainly ain't going to be used by main. This feels like it was inteded for user storage?
-pub struct Camera {
-    pub scale: f32,
-    pub position: (f32, f32),
-}
-
+/// Stores all rendering related stuff.
+/// 
+/// Generally as a user, you will not need to add and remove fields from this struct, nor instantiate it, but it is completely allowed and intended for you to interact with this struct (in the form of render_storage) from user code.
 pub struct RenderStorage {
     // TODO: Perhaps removing or refining what belongs in this struct.
-    pub aspect_ratio: f32, // TODO: sort out these 2 different aspect ratios. Very messy.
+
+    /// One of the aspect ratios. I don't know which currently. TODO: Fix this mess.
+    pub aspect_ratio: f32,
+    /// One of the aspect ratios. I don't know which currently. TODO: Fix this mess.
     pub other_aspect_ratio: f32,
-    pub frame_count: usize, // This will overflow after 2 years, assuming 60 fps.
+
+    /// How many frames there have been since the event loop started running.
+    /// 
+    /// This will overflow after 2 years, assuming 60 fps.
+    pub frame_count: usize,
+    /// An Instant created when render_storage was created.
     pub starting_time: Instant,
+
     pub window_size: [u32; 2],
 
     pub menu: menus::Menu,
