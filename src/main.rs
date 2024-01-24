@@ -4,7 +4,7 @@
 #![feature(test)]
 
 #![doc = include_str!("../README.md")]
-#![warn(missing_docs)]
+//#![warn(missing_docs)] // Uncomment this when you want to do some documenting. Otherwise leave commented.
 
 use std::{sync::Arc, time::Instant};
 use vulkano::{
@@ -66,41 +66,41 @@ use vulkano::image::Image;
 
 use vulkano::device::DeviceOwned;
 
-mod buffer_contents;
+pub mod buffer_contents;
 
-mod menus;
+pub mod menus;
 
-mod lost_code;
+pub mod lost_code;
 
-mod menu_rendering;
-
-#[allow(dead_code)]
-mod math;
-
-mod meshes;
+pub mod menu_rendering;
 
 #[allow(dead_code)]
-mod physics;
+pub mod math;
+
+pub mod meshes;
 
 #[allow(dead_code)]
-mod random_generation;
+pub mod physics;
+
+#[allow(dead_code)]
+pub mod random_generation;
 
 // TODO: Store shaders in a shader module, don't make them clutter up main.rs
-mod colour_3d_instanced_vertex_shader {
+pub mod colour_3d_instanced_vertex_shader {
     vulkano_shaders::shader! {
         ty: "vertex",
         path: "src/shaders/colour_3d_instanced_shaders/vertex_shader.vert",
     }
 }
 
-mod colour_3d_instanced_fragment_shader {
+pub mod colour_3d_instanced_fragment_shader {
     vulkano_shaders::shader! {
         ty: "fragment",
         path: "src/shaders/colour_3d_instanced_shaders/fragment_shader.frag",
     }
 }
 
-mod uv_3d_instanced_vertex_shader {
+pub mod uv_3d_instanced_vertex_shader {
     vulkano_shaders::shader! {
         ty: "vertex",
         path: "src/shaders/uv_3d_instanced_shaders/vertex_shader.vert",
@@ -422,7 +422,7 @@ fn main() {
         render_pass.clone(),
         &mut user_storage,
         &mut render_storage,
-    );
+    ); // TODO: Can we please have some sort of temp struct for user code that gets set sometime around here, and then gets passed into the start perhaps, and then is gone? Idk. I have a bad feeling this will end with me turning everything into a lib. Which will be quite annoying.
 
     render_storage.descriptor_set_allocator =
         StandardDescriptorSetAllocator::new(device.clone(), Default::default());
@@ -791,6 +791,7 @@ fn window_size_dependent_setup(
     )
     .unwrap();
 
+    // TODO: Work out what the hell is going on with frame buffers, and how we can make them accessible to user code.
     let framebuffers = images
         .iter()
         .map(|image| {
@@ -987,6 +988,8 @@ fn update_buffers(render_storage: &mut RenderStorage) {
 /// Stores all rendering related stuff.
 /// 
 /// Generally as a user, you will not need to add and remove fields from this struct, nor instantiate it, but it is completely allowed and intended for you to interact with this struct (in the form of render_storage) from user code.
+///
+/// It is currently very arbitrary, what belongs in this struct, and what gets passed in with menu methods.
 pub struct RenderStorage {
     // TODO: Perhaps removing or refining what belongs in this struct.
 
@@ -1002,10 +1005,17 @@ pub struct RenderStorage {
     /// An Instant created when render_storage was created.
     pub starting_time: Instant,
 
+    /// The size of the window in unknown units, as reported by the swap chain.
+    /// 
+    /// May be renamed to window_extent eventually.
     pub window_size: [u32; 2],
 
+    /// What menu should be run.
+    /// 
+    /// When you set this, you should call the end function of the old menu before you call the start function of the new menu, but this is optional as they are your menus, and you decide how to run them.
     pub menu: menus::Menu,
 
+    /// This forces main.rs to run window size dependent setup.
     pub force_run_window_dependent_setup: bool,
     pub entire_render_datas: Vec<menu_rendering::EntireRenderData>, // Plural of data, must be datas, I'm so sorry.
 

@@ -4,14 +4,23 @@ use vulkano::{buffer::BufferContents, pipeline::graphics::vertex_input::Vertex};
 
 #[derive(BufferContents, Vertex, Copy, Clone, Debug)]
 #[repr(C)]
+/// A poorly named 2d instance, that renders using uv coordinates in a texture.
+/// 
+/// TODO: Look into whether using matrix math to premultiply values is better here.
 pub struct UvInstance {
     #[format(R32G32B32_SFLOAT)]
+    /// The offset that will be added to the vertices' positions, with [2] being depth.
+    /// Perhaps should be renamed to "offset".
     pub position_offset: [f32; 3],
 
     #[format(R32G32_SFLOAT)]
+    /// The scale applied to the vertices' positions.
     pub scale: [f32; 2],
 
     #[format(R32G32_SFLOAT)]
+    /// The uv coordinates in the texture that should be considered the centre, in some way.
+    /// It is not fully known what was meant by this, but it should be fine to use this for just general uv shenanigans.
+    /// This whole instance type is going to disappear soon.
     pub uv_centre: [f32; 2],
 }
 

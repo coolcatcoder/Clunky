@@ -49,7 +49,7 @@ where
 
 // Solvers are always way too set in stone for my liking currently. Same with the VerletBody struct.
 
-//#[derive(Clone, Copy)]
+/// This should not exist. This will be replaced with a trait accessible from usercode, so they can specify what bodies they want.
 pub enum VerletBody<T>
 where
     T: math::Float,
@@ -105,7 +105,7 @@ where
                         half_size: lhs_simple_box.aabb.half_size,
                     });
 
-                    println!("collision axis: {:?}", collision_axis);
+                    //println!("collision axis: {:?}", collision_axis);
 
                     lhs_simple_box.particle.position = lhs_simple_box.particle.previous_position;
 

@@ -1,3 +1,5 @@
+// TODO: Rename this to axis_aligned_shapes.rs perhaps? I want to have more than just aabb in here.
+
 use crate::math::Number;
 extern crate test;
 

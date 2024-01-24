@@ -1082,11 +1082,11 @@ pub const MENU: menus::Data = menus::Data {
             user_storage.other_example_3d_storage.camera_3d_position =
                 user_storage.other_example_3d_storage.particle.position;
 
-            if let physics::physics_3d::verlet::VerletBody::SimpleBox(simple_box) = &user_storage.other_example_3d_storage.verlet_solver.verlet_bodies[0] {
-                user_storage.other_example_3d_storage.camera_3d_position = simple_box.particle.position;
-            } else {
-                panic!();
-            }
+            // if let physics::physics_3d::verlet::VerletBody::SimpleBox(simple_box) = &user_storage.other_example_3d_storage.verlet_solver.verlet_bodies[0] {
+            //     user_storage.other_example_3d_storage.camera_3d_position = simple_box.particle.position;
+            // } else {
+            //     panic!();
+            // }
 
             user_storage.other_example_3d_storage.camera_3d_position[1] -= 1.0;
 

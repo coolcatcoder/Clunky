@@ -25,3 +25,21 @@ We don't have any specific discord server, but [my discord server](https://disco
 
 ## Contributing:
 This is a real mess, and I hardly know how to use github, so any and all contribution is welcome, I would love to turn this into a proper open source project with many people contributing one day. Note that there are a lot of issues, yet very few will be in github issues, because I'm lazy and also the only one who knows that Clunky exists, so creating issues just wastes time I could be spending fixing problems.
+
+## License
+
+Licensed under either of
+
+ * Apache License, Version 2.0
+   ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
+ * MIT license
+   ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
+
+at your option.
+
+## Contribution Agreement
+
+Unless you explicitly state otherwise, any contribution intentionally submitted
+for inclusion in the work by you, as defined in the Apache-2.0 license, shall be
+dual licensed as above, without any additional terms or conditions.
+
