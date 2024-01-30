@@ -48,6 +48,7 @@ use crate::menus;
 use crate::meshes;
 use crate::physics;
 use crate::random_generation;
+use crate::shaders;
 
 const STEP_HEIGHT: f32 = 0.75;
 
@@ -570,7 +571,7 @@ pub const MENU: menus::Data = menus::Data {
             .island_storage
             .update_altitude_and_get_instances(user_storage.example_3d_storage.altitude);
 
-        let uniform_buffer = crate::colour_3d_instanced_vertex_shader::CameraData3D {
+        let uniform_buffer = shaders::colour_3d_instanced_vertex_shader::CameraData3D {
             position: user_storage.example_3d_storage.camera_3d_position.into(),
 
             ambient_strength: 0.3,

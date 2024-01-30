@@ -2,7 +2,6 @@
 
 #![feature(const_fn_floating_point_arithmetic)] // Required for math for now.
 #![feature(test)]
-
 #![doc = include_str!("../README.md")]
 //#![warn(missing_docs)] // Uncomment this when you want to do some documenting. Otherwise leave commented.
 
@@ -85,62 +84,9 @@ pub mod physics;
 #[allow(dead_code)]
 pub mod random_generation;
 
-// TODO: Store shaders in a shader module, don't make them clutter up main.rs
-pub mod colour_3d_instanced_vertex_shader {
-    vulkano_shaders::shader! {
-        ty: "vertex",
-        path: "src/shaders/colour_3d_instanced_shaders/vertex_shader.vert",
-    }
-}
+pub mod rendering;
 
-pub mod colour_3d_instanced_fragment_shader {
-    vulkano_shaders::shader! {
-        ty: "fragment",
-        path: "src/shaders/colour_3d_instanced_shaders/fragment_shader.frag",
-    }
-}
-
-pub mod uv_3d_instanced_vertex_shader {
-    vulkano_shaders::shader! {
-        ty: "vertex",
-        path: "src/shaders/uv_3d_instanced_shaders/vertex_shader.vert",
-    }
-}
-
-mod uv_3d_instanced_fragment_shader {
-    vulkano_shaders::shader! {
-        ty: "fragment",
-        path: "src/shaders/uv_3d_instanced_shaders/fragment_shader.frag",
-    }
-}
-
-mod colour_2d_vertex_shader {
-    vulkano_shaders::shader! {
-        ty: "vertex",
-        path: "src/shaders/colour_2d_shaders/vertex_shader.vert",
-    }
-}
-
-mod colour_2d_fragment_shader {
-    vulkano_shaders::shader! {
-        ty: "fragment",
-        path: "src/shaders/colour_2d_shaders/fragment_shader.frag",
-    }
-}
-
-mod uv_2d_vertex_shader {
-    vulkano_shaders::shader! {
-        ty: "vertex",
-        path: "src/shaders/uv_2d_shaders/vertex_shader.vert",
-    }
-}
-
-mod uv_2d_fragment_shader {
-    vulkano_shaders::shader! {
-        ty: "fragment",
-        path: "src/shaders/uv_2d_shaders/fragment_shader.frag",
-    }
-}
+pub mod shaders;
 
 mod vertex_shader_map {
     vulkano_shaders::shader! {
@@ -282,7 +228,7 @@ fn main() {
     };
     // end of initialization
 
-    let memory_allocator = Arc::new(StandardMemoryAllocator::new_default(device.clone())); // TODO: Store in render storage.
+    let memory_allocator = Arc::new(StandardMemoryAllocator::new_default(device.clone()));
 
     let mut render_storage = RenderStorage {
         aspect_ratio: 0.0,
@@ -986,32 +932,31 @@ fn update_buffers(render_storage: &mut RenderStorage) {
 }
 
 /// Stores all rendering related stuff.
-/// 
+///
 /// Generally as a user, you will not need to add and remove fields from this struct, nor instantiate it, but it is completely allowed and intended for you to interact with this struct (in the form of render_storage) from user code.
 ///
 /// It is currently very arbitrary, what belongs in this struct, and what gets passed in with menu methods.
 pub struct RenderStorage {
     // TODO: Perhaps removing or refining what belongs in this struct.
-
     /// One of the aspect ratios. I don't know which currently. TODO: Fix this mess.
     pub aspect_ratio: f32,
     /// One of the aspect ratios. I don't know which currently. TODO: Fix this mess.
     pub other_aspect_ratio: f32,
 
     /// How many frames there have been since the event loop started running.
-    /// 
+    ///
     /// This will overflow after 2 years, assuming 60 fps.
     pub frame_count: usize,
     /// An Instant created when render_storage was created.
     pub starting_time: Instant,
 
     /// The size of the window in unknown units, as reported by the swap chain.
-    /// 
+    ///
     /// May be renamed to window_extent eventually.
     pub window_size: [u32; 2],
 
     /// What menu should be run.
-    /// 
+    ///
     /// When you set this, you should call the end function of the old menu before you call the start function of the new menu, but this is optional as they are your menus, and you decide how to run them.
     pub menu: menus::Menu,
 

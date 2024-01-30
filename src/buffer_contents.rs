@@ -5,7 +5,7 @@ use vulkano::{buffer::BufferContents, pipeline::graphics::vertex_input::Vertex};
 #[derive(BufferContents, Vertex, Copy, Clone, Debug)]
 #[repr(C)]
 /// A poorly named 2d instance, that renders using uv coordinates in a texture.
-/// 
+///
 /// TODO: Look into whether using matrix math to premultiply values is better here.
 pub struct UvInstance {
     #[format(R32G32B32_SFLOAT)]

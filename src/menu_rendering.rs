@@ -17,7 +17,7 @@ use vulkano::{
     Validated, VulkanError,
 };
 
-use crate::buffer_contents;
+use crate::{buffer_contents, shaders};
 
 // Experimental draw call container
 
@@ -50,10 +50,10 @@ pub enum VertexShader {
 impl VertexShader {
     pub fn load(&self, device: Arc<Device>) -> Result<Arc<ShaderModule>, Validated<VulkanError>> {
         match *self {
-            VertexShader::Colour2D => crate::colour_2d_vertex_shader::load(device),
-            VertexShader::Uv2D => crate::uv_2d_vertex_shader::load(device),
+            VertexShader::Colour2D => shaders::colour_2d_vertex_shader::load(device),
+            VertexShader::Uv2D => shaders::uv_2d_vertex_shader::load(device),
             VertexShader::Colour3DInstanced => {
-                crate::colour_3d_instanced_vertex_shader::load(device)
+                shaders::colour_3d_instanced_vertex_shader::load(device)
             }
         }
     }
@@ -67,10 +67,10 @@ pub enum FragmentShader {
 impl FragmentShader {
     pub fn load(&self, device: Arc<Device>) -> Result<Arc<ShaderModule>, Validated<VulkanError>> {
         match *self {
-            FragmentShader::Colour2D => crate::colour_2d_fragment_shader::load(device),
-            FragmentShader::Uv2D => crate::uv_2d_fragment_shader::load(device),
+            FragmentShader::Colour2D => shaders::colour_2d_fragment_shader::load(device),
+            FragmentShader::Uv2D => shaders::uv_2d_fragment_shader::load(device),
             FragmentShader::Colour3DInstanced => {
-                crate::colour_3d_instanced_fragment_shader::load(device)
+                shaders::colour_3d_instanced_fragment_shader::load(device)
             }
         }
     }
@@ -394,8 +394,8 @@ macro_rules! instance_buffer_generic_caller {
 pub(crate) use instance_buffer_generic_caller;
 
 pub enum UniformBuffer {
-    CameraData2D(BufferTypes<crate::colour_2d_vertex_shader::CameraData2D>),
-    CameraData3D(BufferTypes<crate::colour_3d_instanced_vertex_shader::CameraData3D>),
+    CameraData2D(BufferTypes<shaders::colour_2d_vertex_shader::CameraData2D>),
+    CameraData3D(BufferTypes<shaders::colour_3d_instanced_vertex_shader::CameraData3D>),
 }
 
 pub struct RenderBuffers {

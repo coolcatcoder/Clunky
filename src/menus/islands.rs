@@ -79,6 +79,7 @@ use crate::menus;
 use crate::meshes;
 use crate::physics;
 use crate::random_generation;
+use crate::shaders;
 
 const STEP_HEIGHT: f32 = 0.75;
 
@@ -112,11 +113,10 @@ pub struct OtherExample3DStorage {
     simple_grass_index_buffer: Subbuffer<[u32]>,
     simple_grass_instance_buffer: Vec<buffer_contents::Colour3DInstance>,
 
-    uniform_buffer: crate::colour_3d_instanced_vertex_shader::CameraData3D,
+    uniform_buffer: shaders::colour_3d_instanced_vertex_shader::CameraData3D,
     //box_pipeline: Arc<GraphicsPipeline>,
     //sphere_pipeline: Arc<GraphicsPipeline>, TODO: I just can't work out how to do this. I can't init this, because I don't have the stuff until later. I could do Option<> but that is messy and is terrible.
-
-    verlet_solver: physics::physics_3d::verlet::SingleThreadedSolver<f32>,
+    verlet_solver: physics::physics_3d::verlet::CpuSolver<f32, physics::physics_3d::verlet::bodies::CommonBody<f32>>,
 }
 
 #[derive(PartialEq, Clone, Copy, Debug)]
@@ -460,7 +460,7 @@ pub fn get_starting_storage(render_storage: &mut crate::RenderStorage) -> OtherE
         .unwrap(),
         simple_grass_instance_buffer: vec![],
 
-        uniform_buffer: crate::colour_3d_instanced_vertex_shader::CameraData3D {
+        uniform_buffer: shaders::colour_3d_instanced_vertex_shader::CameraData3D {
             position: [0.0, 0.0, 0.0],
 
             ambient_strength: 0.3,
@@ -472,20 +472,24 @@ pub fn get_starting_storage(render_storage: &mut crate::RenderStorage) -> OtherE
             world_to_camera: math::Matrix4::IDENTITY_AS_2D_ARRAY,
         },
 
-        verlet_solver: physics::physics_3d::verlet::SingleThreadedSolver::new(
+        verlet_solver: physics::physics_3d::verlet::CpuSolver::new(
             [0.0, 50.0, 0.0],
             [0.8, 1.0, 0.8],
             [2, 15, 2],
             [-1000.0, -2000.0, -1000.0],
             [1000, 300, 1000],
             physics::physics_3d::verlet::OutsideOfGridBoundsBehaviour::ContinueUpdating,
-            vec![physics::physics_3d::verlet::VerletBody::SimpleBox(physics::physics_3d::verlet::SimpleBox {
-                particle: physics::physics_3d::verlet::Particle::from_position([0.0, -1050.0, 0.0]),
-                aabb: physics::physics_3d::aabb::AabbCentredOrigin {
-                    position: [0.0, -1050.0, 0.0],
-                    half_size: [0.5, 1.0, 0.5],
+            vec![physics::physics_3d::verlet::bodies::CommonBody::Box(
+                physics::physics_3d::verlet::bodies::Box {
+                    particle: physics::physics_3d::verlet::Particle::from_position([
+                        0.0, -1050.0, 0.0,
+                    ]),
+                    aabb: physics::physics_3d::aabb::AabbCentredOrigin {
+                        position: [0.0, -1050.0, 0.0],
+                        half_size: [0.5, 1.0, 0.5],
+                    },
                 },
-            })],
+            )],
         ),
     }
 }
@@ -871,10 +875,19 @@ pub const MENU: menus::Data = menus::Data {
 
         render_storage.force_run_window_dependent_setup = true;
 
-        for aabb in &user_storage.other_example_3d_storage.island_storage.sky_top.aabbs {
-            user_storage.other_example_3d_storage.verlet_solver.verlet_bodies.push(physics::physics_3d::verlet::VerletBody::ImmovableSimpleBox(physics::physics_3d::verlet::ImmovableSimpleBox {
-                aabb:*aabb
-            }));
+        for aabb in &user_storage
+            .other_example_3d_storage
+            .island_storage
+            .sky_top
+            .aabbs
+        {
+            user_storage
+                .other_example_3d_storage
+                .verlet_solver
+                .bodies
+                .push(physics::physics_3d::verlet::bodies::CommonBody::ImmovableBox(
+                    physics::physics_3d::verlet::bodies::ImmovableBox { aabb: *aabb },
+                ));
         }
     },
     update: |_user_storage, _render_storage, _delta_time, _average_fps| {},
@@ -951,7 +964,10 @@ pub const MENU: menus::Data = menus::Data {
                 .particle
                 .update(MENU.fixed_update.delta_time, displacement);
 
-            user_storage.other_example_3d_storage.verlet_solver.update(MENU.fixed_update.delta_time);
+            user_storage
+                .other_example_3d_storage
+                .verlet_solver
+                .update(MENU.fixed_update.delta_time);
 
             let previous_player_aabb = physics::physics_3d::aabb::AabbCentredOrigin {
                 position: user_storage
@@ -1310,14 +1326,15 @@ fn get_colour_pipeline(
     extent: [u32; 3],
     render_pass: Arc<RenderPass>,
 ) -> Arc<GraphicsPipeline> {
-    let vertex_shader_entrance = crate::colour_3d_instanced_vertex_shader::load(device.clone())
+    let vertex_shader_entrance = shaders::colour_3d_instanced_vertex_shader::load(device.clone())
         .unwrap()
         .entry_point("main")
         .unwrap();
-    let fragment_shader_entrance = crate::colour_3d_instanced_fragment_shader::load(device.clone())
-        .unwrap()
-        .entry_point("main")
-        .unwrap();
+    let fragment_shader_entrance =
+        shaders::colour_3d_instanced_fragment_shader::load(device.clone())
+            .unwrap()
+            .entry_point("main")
+            .unwrap();
 
     let vertex_input_state = [
         buffer_contents::Basic3DVertex::per_vertex(),
@@ -1398,11 +1415,11 @@ fn get_uv_pipeline(
     extent: [u32; 3],
     render_pass: Arc<RenderPass>,
 ) -> Arc<GraphicsPipeline> {
-    let vertex_shader_entrance = crate::uv_3d_instanced_vertex_shader::load(device.clone())
+    let vertex_shader_entrance = shaders::uv_3d_instanced_vertex_shader::load(device.clone())
         .unwrap()
         .entry_point("main")
         .unwrap();
-    let fragment_shader_entrance = crate::uv_3d_instanced_fragment_shader::load(device.clone())
+    let fragment_shader_entrance = shaders::uv_3d_instanced_fragment_shader::load(device.clone())
         .unwrap()
         .entry_point("main")
         .unwrap();

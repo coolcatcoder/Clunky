@@ -73,6 +73,7 @@ where
         true
     }
 
+    /// See [AabbCentredOrigin::get_collision_axis_with_direction] for more info. Both are garbage with documentation.
     pub fn get_collision_axis(&self, other: AabbCentredOrigin<T>) -> [bool; 3] {
         // Run this on previous position instead, so you can see what axis wasn't intersecting before the collision.
         [
@@ -83,9 +84,12 @@ where
     }
 
     /// Works out on what axis and in what direction a collision occured.
-    /// 
+    ///
     /// This function has only been tested by calling it on a non-moving aabb, while previous_other was the previous aabb of a moving aabb.
-    pub fn get_collision_axis_with_direction(&self, previous_other: AabbCentredOrigin<T>) -> [CollisionEnum; 3] {
+    pub fn get_collision_axis_with_direction(
+        &self,
+        previous_other: AabbCentredOrigin<T>,
+    ) -> [CollisionEnum; 3] {
         // Run this on previous position instead, so you can see what axis wasn't intersecting before the collision.
         let mut collisions = [CollisionEnum::None; 3];
 

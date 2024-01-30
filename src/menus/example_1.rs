@@ -10,6 +10,7 @@ use crate::buffer_contents;
 use crate::lost_code::is_pressed;
 use crate::menu_rendering;
 use crate::menus;
+use crate::shaders;
 
 pub const MENU: menus::Data = menus::Data {
     start: |_user_storage, render_storage| {
@@ -48,7 +49,7 @@ pub const MENU: menus::Data = menus::Data {
                         menu_rendering::BufferTypes::FrequentAccessRenderBuffer(
                             menu_rendering::FrequentAccessRenderBuffer {
                                 buffer: vec![
-                                    crate::colour_2d_vertex_shader::CameraData2D {
+                                    shaders::colour_2d_vertex_shader::CameraData2D {
                                         aspect_ratio: render_storage.aspect_ratio,
                                         position: [0.0, 0.0],
                                         scale: 1.0,

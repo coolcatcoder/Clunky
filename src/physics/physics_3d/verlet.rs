@@ -1,5 +1,11 @@
+use rayon::prelude::*;
+
 use crate::math;
+
+use self::bodies::Body;
 extern crate test;
+
+pub mod bodies;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Particle<T>
@@ -47,139 +53,16 @@ where
     }
 }
 
-// Solvers are always way too set in stone for my liking currently. Same with the VerletBody struct.
+// Solvers are always way too set in stone for my liking currently.
 
-/// This should not exist. This will be replaced with a trait accessible from usercode, so they can specify what bodies they want.
-pub enum VerletBody<T>
+pub struct CpuSolver<T, B>
 where
     T: math::Float,
-{
-    SimpleBox(SimpleBox<T>),
-    ImmovableSimpleBox(ImmovableSimpleBox<T>)
-}
-
-impl<T> VerletBody<T>
-where
-    T: math::Float,
-{
-    pub fn update_and_get_position(
-        &mut self,
-        gravity: [T; 3],
-        dampening: [T; 3],
-        delta_time: T,
-    ) -> [T; 3] {
-        match self {
-            VerletBody::SimpleBox(simple_box) => {
-                simple_box.update_and_get_position(gravity, dampening, delta_time)
-            }
-            VerletBody::ImmovableSimpleBox(immovable_simple_box) => {
-                immovable_simple_box.update_and_get_position(gravity, dampening, delta_time)
-            }
-        }
-    }
-
-    // terribly named, but very useful. TODO: Replace with proper lhs and rhs bitwise values for checking how objects can interact.
-    pub fn collide_with_others(&mut self) -> bool {
-        match self {
-            VerletBody::SimpleBox(_) => true,
-            VerletBody::ImmovableSimpleBox(_) => false,
-        }
-    }
-
-    // This function is insanely expensive, no clue why.
-    #[inline]
-    pub fn collide(&mut self, other: &mut VerletBody<T>) {
-        match (self, other) {
-            // simple box
-            (VerletBody::SimpleBox(lhs_simple_box), VerletBody::SimpleBox(rhs_simple_box)) => {
-                // TODO: Mess with ref mut and mut and all that, and you will gain and lose 70x performance, somehow.
-                if lhs_simple_box.aabb.is_intersected_by_aabb(rhs_simple_box.aabb) {
-                    lhs_simple_box.particle.position = lhs_simple_box.particle.previous_position; // these lines in particular are slow
-                    rhs_simple_box.particle.position = rhs_simple_box.particle.previous_position;
-                }
-            }
-            (VerletBody::SimpleBox(lhs_simple_box), VerletBody::ImmovableSimpleBox(rhs_immovable_simple_box)) => {
-                if lhs_simple_box.aabb.is_intersected_by_aabb(rhs_immovable_simple_box.aabb) {
-                    let collision_axis = rhs_immovable_simple_box.aabb.get_collision_axis_with_direction(super::aabb::AabbCentredOrigin {
-                        position: lhs_simple_box.particle.previous_position,
-                        half_size: lhs_simple_box.aabb.half_size,
-                    });
-
-                    //println!("collision axis: {:?}", collision_axis);
-
-                    lhs_simple_box.particle.position = lhs_simple_box.particle.previous_position;
-
-                    //println!("Collision!");
-                }
-            }
-
-            // immovable simple box (This cannot happen, as immovable simple boxes don't check to see if they have collided with others.)
-            (VerletBody::ImmovableSimpleBox(_), VerletBody::SimpleBox(_)) => unreachable!(),
-            (VerletBody::ImmovableSimpleBox(_), VerletBody::ImmovableSimpleBox(_)) => unreachable!(),
-        }
-    }
-}
-
-// Horrifically bad name.
-//#[derive(Clone, Copy)]
-pub struct SimpleBox<T>
-where
-    T: math::Float,
-{
-    pub particle: Particle<T>, // Do we even want to store particles with collision data?
-    pub aabb: crate::physics::physics_3d::aabb::AabbCentredOrigin<T>,
-}
-
-impl<T> SimpleBox<T>
-where
-    T: math::Float,
-{
-    pub fn update_and_get_position(
-        &mut self,
-        gravity: [T; 3],
-        dampening: [T; 3],
-        delta_time: T,
-    ) -> [T; 3] {
-        self.particle.accelerate(gravity);
-        self.particle.update(
-            delta_time,
-            math::mul_3d(self.particle.calculate_displacement(), dampening),
-        );
-
-        self.aabb.position = self.particle.position;
-
-        self.particle.position
-    }
-}
-
-pub struct ImmovableSimpleBox<T>
-where
-    T: math::Float,
-{
-    pub aabb: crate::physics::physics_3d::aabb::AabbCentredOrigin<T>,
-}
-
-impl<T> ImmovableSimpleBox<T>
-where
-    T: math::Float,
-{
-    pub fn update_and_get_position(
-        &mut self,
-        _gravity: [T; 3],
-        _dampening: [T; 3],
-        _delta_time: T,
-    ) -> [T; 3] {
-        self.aabb.position
-    }
-}
-
-pub struct SingleThreadedSolver<T>
-where
-    T: math::Float,
+    B: Body<T>,
 {
     pub gravity: [T; 3],
     pub dampening: [T; 3], // Where 1.0 is no dampening. Perhaps displacement_kept is a better name?
-    pub verlet_bodies: Vec<VerletBody<T>>,
+    pub bodies: Vec<B>,
     pub grid_size: [usize; 3], // This is in cell size units. This should probably be clarified.
     pub cell_size: [usize; 3], // TODO: asap work out how the usize vs isize nonsense will work, as we want this to work for negatives. Perhaps we can plus some sort of offset for the particle?
     pub grid_origin: [T; 3], // Remember that the origin is the bottom left corner of the grid, I think.
@@ -187,9 +70,10 @@ where
     pub outside_of_grid_bounds_behaviour: OutsideOfGridBoundsBehaviour<T>,
 }
 
-impl<T> SingleThreadedSolver<T>
+impl<T, B> CpuSolver<T, B>
 where
     T: math::Float,
+    B: Body<T>,
 {
     pub fn new(
         gravity: [T; 3],
@@ -198,12 +82,12 @@ where
         grid_origin: [T; 3],
         cell_size: [usize; 3],
         outside_of_grid_bounds_behaviour: OutsideOfGridBoundsBehaviour<T>,
-        verlet_bodies: Vec<VerletBody<T>>,
-    ) -> SingleThreadedSolver<T> {
-        SingleThreadedSolver {
+        bodies: Vec<B>,
+    ) -> CpuSolver<T, B> {
+        CpuSolver {
             gravity,
             dampening,
-            verlet_bodies,
+            bodies,
             grid_size,
             cell_size,
             grid_origin,
@@ -217,9 +101,9 @@ where
         let real_grid_height = self.grid_size[1] * self.cell_size[1];
         let real_grid_length = self.grid_size[2] * self.cell_size[2];
 
-        for (verlet_body_index, verlet_body) in (0..self.verlet_bodies.len())
+        for (verlet_body_index, verlet_body) in (0..self.bodies.len())
             .into_iter()
-            .zip(&mut self.verlet_bodies)
+            .zip(&mut self.bodies)
         {
             let verlet_body_position =
                 verlet_body.update_and_get_position(self.gravity, self.dampening, delta_time);
@@ -243,11 +127,11 @@ where
             ];
 
             let outside_side = [
-                corrected_position_as_isize[0] as usize > real_grid_width,
+                corrected_position_as_isize[0] as usize > real_grid_width - 1,
                 corrected_position_as_isize[0] < 0,
-                corrected_position_as_isize[1] as usize > real_grid_height,
+                corrected_position_as_isize[1] as usize > real_grid_height - 1,
                 corrected_position_as_isize[1] < 0,
-                corrected_position_as_isize[2] as usize > real_grid_length,
+                corrected_position_as_isize[2] as usize > real_grid_length - 1,
                 corrected_position_as_isize[2] < 0,
             ];
 
@@ -297,9 +181,16 @@ where
                 self.grid_size[1],
             );
 
-            self.grid[grid_cell_index].push(verlet_body_index);
+            //self.grid[grid_cell_index].push(verlet_body_index); // got a panic here, so something must be terribly wrong. Update I think I fixed it with my -1 to everything on ouside side. Remove this once we are certain it is all good.
+            self.grid.get_mut(grid_cell_index).unwrap_or_else(|| {
+                println!("verlet_body_position: {:?}", verlet_body_position);
+                println!("corrected_position_as_isize: {:?}", corrected_position_as_isize);
+                println!("grid_cell_position: {:?}", grid_cell_position);
+                panic!()
+            }).push(verlet_body_index);
         }
 
+        // TODO: How the hell can we multithread this?
         for cell_index in 0..self.grid.len() {
             let cell = &self.grid[cell_index];
             let cell_position =
@@ -341,28 +232,32 @@ where
             }
 
             for lhs_verlet_body_index in cell {
-                if !self.verlet_bodies[*lhs_verlet_body_index].collide_with_others() {
+                if !self.bodies[*lhs_verlet_body_index].collide_with_others() {
                     continue;
                 }
 
                 for neighbour in &neighbours {
                     for rhs_verlet_body_index in *neighbour {
                         if lhs_verlet_body_index == rhs_verlet_body_index {
-                            continue
+                            continue;
                         }
 
                         // This code is simple and elgant. By splitting at the largest index, it allows us to safely and &mutably yoink the verlet bodies.
                         if lhs_verlet_body_index > rhs_verlet_body_index {
-                            let (lhs_verlet_bodies, rhs_verlet_bodies) = self.verlet_bodies.split_at_mut(*lhs_verlet_body_index);
-                            rhs_verlet_bodies[0].collide(&mut lhs_verlet_bodies[*rhs_verlet_body_index]);
+                            let (lhs_verlet_bodies, rhs_verlet_bodies) =
+                                self.bodies.split_at_mut(*lhs_verlet_body_index);
+                            rhs_verlet_bodies[0]
+                                .collide(&mut lhs_verlet_bodies[*rhs_verlet_body_index], *rhs_verlet_body_index);
                             //collide_test(&mut rhs_verlet_bodies[0], &mut lhs_verlet_bodies[*rhs_verlet_body_index]);
                             //test::black_box(lhs_verlet_bodies);
                             //test::black_box(rhs_verlet_bodies);
                             //test::black_box(&mut rhs_verlet_bodies[0]);
                             //test::black_box(&mut lhs_verlet_bodies[*rhs_verlet_body_index]);
                         } else {
-                            let (lhs_verlet_bodies, rhs_verlet_bodies) = self.verlet_bodies.split_at_mut(*rhs_verlet_body_index);
-                            lhs_verlet_bodies[*lhs_verlet_body_index].collide(&mut rhs_verlet_bodies[0]);
+                            let (lhs_verlet_bodies, rhs_verlet_bodies) =
+                                self.bodies.split_at_mut(*rhs_verlet_body_index);
+                            lhs_verlet_bodies[*lhs_verlet_body_index]
+                                .collide(&mut rhs_verlet_bodies[0], *rhs_verlet_body_index);
                             //collide_test(&mut lhs_verlet_bodies[*lhs_verlet_body_index], &mut rhs_verlet_bodies[0]);
                             //test::black_box(lhs_verlet_bodies);
                             //test::black_box(rhs_verlet_bodies);
@@ -395,6 +290,9 @@ pub enum OutsideOfGridBoundsBehaviour<T: math::Number> {
 
 #[cfg(test)]
 mod tests {
+    use self::bodies::Box;
+    use self::bodies::CommonBody;
+
     use super::*;
     use rand::thread_rng;
     use rand::Rng;
@@ -406,16 +304,20 @@ mod tests {
         let mut rng = thread_rng();
 
         for _ in 0..1000 {
-            verlet_bodies.push(VerletBody::SimpleBox(SimpleBox {
+            verlet_bodies.push(CommonBody::Box(Box {
                 particle: Particle::from_position([0.0, 0.0, 0.0]),
                 aabb: crate::physics::physics_3d::aabb::AabbCentredOrigin {
-                    position: [rng.gen_range(-50.0..50.0), rng.gen_range(-50.0..50.0), rng.gen_range(-50.0..50.0)],
-                    half_size: [0.5, 0.5, 0.5]
-                }
+                    position: [
+                        rng.gen_range(-50.0..50.0),
+                        rng.gen_range(-50.0..50.0),
+                        rng.gen_range(-50.0..50.0),
+                    ],
+                    half_size: [0.5, 0.5, 0.5],
+                },
             }));
         }
 
-        let mut solver = SingleThreadedSolver::new(
+        let mut solver = CpuSolver::new(
             [0.0, 50.0, 0.0],
             [0.8, 1.0, 0.8],
             [10, 10, 10],
