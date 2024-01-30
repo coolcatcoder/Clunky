@@ -1345,11 +1345,11 @@ fn generate_islands_circle_technique<T: Copy>(
             ];
 
             layer
-                .sphere_instances
+                .box_instances
                 .push(buffer_contents::Colour3DInstance::new(
                     colour,
                     math::Matrix4::from_translation(previous_position)
-                        .multiply(math::Matrix4::from_scale(previous_scale)),
+                        .multiply(math::Matrix4::from_scale(previous_scale)).multiply(Matrix4::from_scale([2.0, 2.0, 2.0])), // Double scale mul is there only for debugging what the aabbs look like with box instances.
                 ));
             aabbs.push(AabbCentredOrigin {
                     position: previous_position,

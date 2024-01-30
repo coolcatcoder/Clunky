@@ -34,6 +34,8 @@ pub trait Float: Number {
     fn sin(self) -> Self;
     fn cos(self) -> Self;
     fn to_radians(self) -> Self;
+    fn from_f32(value: f32) -> Self;
+    fn from_f64(value: f64) -> Self;
 }
 
 impl Number for f32 {
@@ -76,6 +78,16 @@ impl Float for f32 {
     #[inline]
     fn to_radians(self) -> Self {
         self.to_radians()
+    }
+
+    #[inline]
+    fn from_f32(value: f32) -> Self {
+        value
+    }
+
+    #[inline]
+    fn from_f64(value: f64) -> Self {
+        value as f32
     }
 }
 

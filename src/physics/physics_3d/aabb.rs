@@ -124,7 +124,8 @@ where
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+/// The direction a collision happened.
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum CollisionEnum {
     None,
     Positive,

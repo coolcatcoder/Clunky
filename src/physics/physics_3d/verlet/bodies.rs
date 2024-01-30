@@ -1,4 +1,4 @@
-use crate::{math, physics::physics_3d::aabb::AabbCentredOrigin};
+use crate::{math, physics::physics_3d::aabb::{AabbCentredOrigin, CollisionEnum}};
 
 use super::Particle;
 
@@ -72,25 +72,32 @@ where
                         position: lhs_player.particle.previous_position,
                         half_size: lhs_player.aabb.half_size,
                     };
-                    let previous_collision_axis = rhs_immovable_box.aabb.get_collision_axis(previous_player_aabb);
+                    let previous_collision_direction = rhs_immovable_box.aabb.get_collision_axis_with_direction(previous_player_aabb);
+                    //println!("direction: {:?}", previous_collision_direction);
 
-                    if previous_collision_axis[0] {
-                        lhs_player.particle.position[0] = lhs_player.particle.previous_position[0]; // TODO: Investigate stepping up onto small ledges.
+                    // TODO: investigate stepping up onto small ledges
+                    let step_up = true;
+
+                    if CollisionEnum::Positive == previous_collision_direction[0] && !step_up {
+                        lhs_player.particle.position[0] = rhs_immovable_box.aabb.position[0] - rhs_immovable_box.aabb.half_size[0] - lhs_player.aabb.half_size[0] - T::from_f32(0.01);
+                    } else if CollisionEnum::Negative == previous_collision_direction[0] && !step_up {
+                        lhs_player.particle.position[0] = rhs_immovable_box.aabb.position[0] + rhs_immovable_box.aabb.half_size[0] + lhs_player.aabb.half_size[0] + T::from_f32(0.01);
                     }
 
-                    if previous_collision_axis[1] {
-                        lhs_player.particle.position[1] = lhs_player.particle.previous_position[1];
-
-                        if previous_player_aabb.position[1] + previous_player_aabb.half_size[1]
-                            <= rhs_immovable_box.aabb.position[1] - rhs_immovable_box.aabb.half_size[1]
-                        {
-                            lhs_player.grounded = true;
-                        }
+                    if CollisionEnum::Positive == previous_collision_direction[1] || (step_up && CollisionEnum::None == previous_collision_direction[1]) {
+                        lhs_player.particle.position[1] = rhs_immovable_box.aabb.position[1] - rhs_immovable_box.aabb.half_size[1] - lhs_player.aabb.half_size[1] - T::from_f32(0.01); // Need to remove small amount or else next time it will break direction, by being None in incorrect axis.
+                        lhs_player.grounded = true;
+                    } else if CollisionEnum::Negative == previous_collision_direction[1] {
+                        lhs_player.particle.position[1] = rhs_immovable_box.aabb.position[1] + rhs_immovable_box.aabb.half_size[1] + lhs_player.aabb.half_size[1] + T::from_f32(0.01);
                     }
 
-                    if previous_collision_axis[2] {
-                        lhs_player.particle.position[2] = lhs_player.particle.previous_position[2];
+                    if CollisionEnum::Positive == previous_collision_direction[2] && !step_up {
+                        lhs_player.particle.position[2] = rhs_immovable_box.aabb.position[2] - rhs_immovable_box.aabb.half_size[2] - lhs_player.aabb.half_size[2] - T::from_f32(0.01);
+                    } else if CollisionEnum::Negative == previous_collision_direction[2] && !step_up {
+                        lhs_player.particle.position[2] = rhs_immovable_box.aabb.position[2] + rhs_immovable_box.aabb.half_size[2] + lhs_player.aabb.half_size[2] + T::from_f32(0.01);
                     }
+
+                    lhs_player.aabb.position = lhs_player.particle.position;
                 }
             }
 
