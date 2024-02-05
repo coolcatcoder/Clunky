@@ -1,16 +1,34 @@
 use std::{sync::Arc, time::Instant};
 
 use clunky::{
-    buffer_contents, lost_code::{is_pressed, FixedUpdate}, math::{self, Degrees, Matrix4, Radians}, meshes, physics::physics_3d::{aabb::AabbCentredOrigin, verlet::{bodies::{Box, CommonBody, ImmovableBox, Player}, OutsideOfGridBoundsBehaviour, Particle, CpuSolver}}, rendering::{self, draw_instanced, load_images, ImageBytes}, shaders
+    buffer_contents,
+    lost_code::{is_pressed, FixedUpdate},
+    math::{self, Degrees, Matrix4, Radians},
+    meshes,
+    physics::physics_3d::{
+        aabb::AabbCentredOrigin,
+        verlet::{
+            bodies::{Box, CommonBody, ImmovableBox, Player},
+            CpuSolver, OutsideOfGridBoundsBehaviour, Particle,
+        },
+    },
+    rendering::{self, draw_instanced, load_images, ImageBytes},
+    shaders,
 };
-use rand::{distributions::{Bernoulli, Distribution, Uniform}, rngs::ThreadRng, Rng};
+use rand::{
+    distributions::{Bernoulli, Distribution, Uniform},
+    rngs::ThreadRng,
+    Rng,
+};
 use vulkano::{
     buffer::{
         allocator::{SubbufferAllocator, SubbufferAllocatorCreateInfo},
         Buffer, BufferContents, BufferCreateInfo, BufferUsage, Subbuffer,
     },
     command_buffer::{
-        allocator::StandardCommandBufferAllocator, AutoCommandBufferBuilder, CommandBufferUsage, PrimaryAutoCommandBuffer, PrimaryCommandBufferAbstract, RenderPassBeginInfo, SubpassContents
+        allocator::StandardCommandBufferAllocator, AutoCommandBufferBuilder, CommandBufferUsage,
+        PrimaryAutoCommandBuffer, PrimaryCommandBufferAbstract, RenderPassBeginInfo,
+        SubpassContents,
     },
     descriptor_set::{
         allocator::StandardDescriptorSetAllocator, PersistentDescriptorSet, WriteDescriptorSet,
@@ -52,23 +70,17 @@ use winit::{
 
 const FIXED_DELTA_TIME: f32 = 0.04;
 const MAX_SUBSTEPS: u32 = 200;
+const TESTING_BOX_AMOUNT: usize = 2000;
 
 fn main() {
-    let (
-        event_loop,
-        window,
-        surface,
-        device,
-        queue,
-        mut swapchain,
-        swapchain_images,
-    ) = rendering::initiate_general(
-        QueueFlags::GRAPHICS | QueueFlags::COMPUTE,
-        DeviceExtensions {
-            khr_swapchain: true,
-            ..DeviceExtensions::empty()
-        },
-    );
+    let (event_loop, window, surface, device, queue, mut swapchain, swapchain_images) =
+        rendering::initiate_general(
+            QueueFlags::GRAPHICS | QueueFlags::COMPUTE,
+            DeviceExtensions {
+                khr_swapchain: true,
+                ..DeviceExtensions::empty()
+            },
+        );
 
     let memory_allocator = Arc::new(StandardMemoryAllocator::new_default(device.clone())); // TODO: work out which of the allocators we actually want to give away
 
@@ -347,46 +359,56 @@ fn main() {
         sky_bottom: sky_bottom.0,
     };
 
-    let mut bodies = Vec::with_capacity(1 + sky_top.1.len() + sky_middle.1.len() + sky_bottom.1.len());
+    let mut bodies =
+        Vec::with_capacity(1 + sky_top.1.len() + sky_middle.1.len() + sky_bottom.1.len());
 
-    bodies.push(CommonBody::Player(
-        Player {
-            particle: Particle::from_position([
-                0.0, -1050.0, 0.0,
-            ]),
-            aabb: AabbCentredOrigin {
-                position: [0.0, -1050.0, 0.0],
-                half_size: [0.5, 1.0, 0.5],
-            },
-            dampening: [0.0, 0.0, 0.0],
-            grounded: false,
-        },
-    ));
+    bodies.push(CommonBody::Player(Player {
+        particle: Particle::from_position([0.0, -1050.0, 0.0]),
+        half_size: [0.5, 1.0, 0.5],
+        dampening: [0.0, 0.0, 0.0],
+        grounded: false,
+    }));
+
+    let mut rng = rand::thread_rng();
+
+    let mut test_box_instances = Vec::with_capacity(TESTING_BOX_AMOUNT);
+
+    for _ in 0..TESTING_BOX_AMOUNT {
+        let position = [
+            rng.gen_range(-900.0..900.0),
+            rng.gen_range(-1000.0..-900.0),
+            rng.gen_range(-900.0..900.0),
+        ];
+
+        bodies.push(CommonBody::Box(Box {
+            particle: Particle::from_position(position),
+            half_size: [1.0, 1.0, 1.0],
+        }));
+
+        test_box_instances.push(buffer_contents::Colour3DInstance::new(
+            [1.0, 0.0, 0.0, 1.0],
+            Matrix4::from_translation(position),
+        ));
+    }
 
     for aabb in sky_top.1 {
-        bodies.push(CommonBody::ImmovableBox(ImmovableBox {
-            aabb,
-        }));
-    };
+        bodies.push(CommonBody::ImmovableBox(ImmovableBox { aabb }));
+    }
 
     for aabb in sky_middle.1 {
-        bodies.push(CommonBody::ImmovableBox(ImmovableBox {
-            aabb,
-        }));
-    };
+        bodies.push(CommonBody::ImmovableBox(ImmovableBox { aabb }));
+    }
 
     for aabb in sky_bottom.1 {
-        bodies.push(CommonBody::ImmovableBox(ImmovableBox {
-            aabb,
-        }));
-    };
+        bodies.push(CommonBody::ImmovableBox(ImmovableBox { aabb }));
+    }
 
     let mut verlet_solver = CpuSolver::new(
         [0.0, 50.0, 0.0],
         [0.8, 1.0, 0.8],
-        [2, 15, 2],
+        [8, 15, 8],
         [-1000.0, -2000.0, -1000.0],
-        [1000, 300, 1000],
+        [250, 300, 250],
         OutsideOfGridBoundsBehaviour::ContinueUpdating,
         bodies,
     );
@@ -405,6 +427,8 @@ fn main() {
     let mut delta_time = 0.0;
 
     let mut time = Instant::now();
+
+    let time_since_start = Instant::now();
 
     event_loop.run(move |event, _, control_flow| {
         match event {
@@ -427,7 +451,40 @@ fn main() {
             Event::MainEventsCleared => {
                 // game stuff
                 {
-                    fixed_update_runner.update(MAX_SUBSTEPS, || {fixed_update(&mut wasd_held, &mut jump_held, &mut sprinting, &mut rotation, &mut verlet_solver, &mut altitude, &mut box_buffers, &mut sphere_buffers, &mut moon_wax_tree_buffers, &mut simple_grass_buffers, &islands, &mut camera_uniform, &aspect_ratio)});
+                    fixed_update_runner.update(MAX_SUBSTEPS, || {
+                        fixed_update(
+                            &mut wasd_held,
+                            &mut jump_held,
+                            &mut sprinting,
+                            &mut rotation,
+                            &mut verlet_solver,
+                            &mut altitude,
+                            &mut box_buffers,
+                            &mut sphere_buffers,
+                            &mut moon_wax_tree_buffers,
+                            &mut simple_grass_buffers,
+                            &islands,
+                            &mut camera_uniform,
+                            &aspect_ratio,
+                        )
+                    });
+
+                    for i in 0..TESTING_BOX_AMOUNT {
+                        let CommonBody::Box(ref test_box) = verlet_solver.bodies[i+1] else {
+                            panic!();
+                        };
+
+                        test_box_instances[i] = buffer_contents::Colour3DInstance::new(
+                            [1.0, 0.0, 0.0, 1.0],
+                            Matrix4::from_translation(test_box.particle.position)
+                            .multiply(Matrix4::from_scale(math::mul_3d_by_1d(test_box.half_size, 2.0))),
+                        );
+                    }
+
+                    let strength = ((time_since_start.elapsed().as_secs_f32() / 60.0 / 3.0 + std::f32::consts::FRAC_PI_2).sin() + 1.0) / 2.0; // use desmos before modifying this
+                    println!("light strength: {strength}");
+
+                    camera_uniform.light_colour = [strength; 3].into();
 
                     update();
                 }
@@ -528,6 +585,16 @@ fn main() {
                         )
                         .unwrap();
 
+                    if test_box_instances.len() != 0 {
+                        draw_instanced(
+                            pipelines.colour_pipeline.clone(),
+                            &mut command_buffer_builder,
+                            &test_box_instances,
+                            &box_buffers.vertex_buffer,
+                            &box_buffers.index_buffer,
+                            &subbuffer_allocator,
+                        );
+                    }
                     if box_buffers.instance_buffer.len() != 0 {
                         draw_instanced(
                             pipelines.colour_pipeline.clone(),
@@ -669,6 +736,7 @@ fn main() {
                     &mut jump_held,
                     &window,
                     control_flow,
+                    &average_fps,
                 );
             }
 
@@ -717,7 +785,21 @@ fn main() {
     })
 }
 
-fn fixed_update(wasd_held: &mut [bool; 4], jump_held: &mut bool, sprinting: &mut bool, rotation: &mut [f32; 3], verlet_solver: &mut CpuSolver<f32, CommonBody<f32>>, altitude: &mut Altitude, box_buffers: &mut ColourBuffers, sphere_buffers: &mut ColourBuffers, moon_wax_tree_buffers: &mut UvBuffers, simple_grass_buffers: &mut ColourBuffers, islands: &Islands, camera_uniform: &mut shaders::colour_3d_instanced_vertex_shader::CameraData3D, aspect_ratio: &f32) {
+fn fixed_update(
+    wasd_held: &mut [bool; 4],
+    jump_held: &mut bool,
+    sprinting: &mut bool,
+    rotation: &mut [f32; 3],
+    verlet_solver: &mut CpuSolver<f32, CommonBody<f32>>,
+    altitude: &mut Altitude,
+    box_buffers: &mut ColourBuffers,
+    sphere_buffers: &mut ColourBuffers,
+    moon_wax_tree_buffers: &mut UvBuffers,
+    simple_grass_buffers: &mut ColourBuffers,
+    islands: &Islands,
+    camera_uniform: &mut shaders::colour_3d_instanced_vertex_shader::CameraData3D,
+    aspect_ratio: &f32,
+) {
     let CommonBody::Player(player) = &mut verlet_solver.bodies[0] else {
         unreachable!();
     };
@@ -739,39 +821,29 @@ fn fixed_update(wasd_held: &mut [bool; 4], jump_held: &mut bool, sprinting: &mut
 
     let speed = match (sprinting, *jump_held, player.grounded) {
         (false, true, true) | (false, false, true) | (false, true, false) => 25.0,
-        (true, true, true) | (true, false, true) | (false, false, false) | (true, true, false) => 50.0,
+        (true, true, true) | (true, false, true) | (false, false, false) | (true, true, false) => {
+            50.0
+        }
         (true, false, false) => 100.0,
     };
 
     let real_motion = (motion.0 * speed, motion.1 * speed);
 
-    let y_rotation_cos =
-        rotation[1].to_radians().cos();
-    let y_rotation_sin =
-        rotation[1].to_radians().sin();
+    let y_rotation_cos = rotation[1].to_radians().cos();
+    let y_rotation_sin = rotation[1].to_radians().sin();
 
     let real_motion = (
         real_motion.0 * y_rotation_cos - real_motion.1 * y_rotation_sin,
         real_motion.1 * y_rotation_cos + real_motion.0 * y_rotation_sin,
     );
 
-    player.particle.accelerate([
-        real_motion.0,
-        0.0,
-        real_motion.1,
-    ]);
+    player
+        .particle
+        .accelerate([real_motion.0, 0.0, real_motion.1]);
 
-    let horizontal_dampening = if player.grounded {
-        0.8
-    } else {
-        0.95
-    };
+    let horizontal_dampening = if player.grounded { 0.8 } else { 0.95 };
 
-    player.dampening = [
-        horizontal_dampening,
-        0.98,
-        horizontal_dampening,
-    ];
+    player.dampening = [horizontal_dampening, 0.98, horizontal_dampening];
 
     verlet_solver.update(FIXED_DELTA_TIME);
 
@@ -795,16 +867,38 @@ fn fixed_update(wasd_held: &mut [bool; 4], jump_held: &mut bool, sprinting: &mut
     *altitude = Altitude::get_altitude(player.particle.position[1]);
 
     if *altitude != previous_altitude {
-        (box_buffers.instance_buffer, sphere_buffers.instance_buffer, moon_wax_tree_buffers.instance_buffer, simple_grass_buffers.instance_buffer) = islands.update_altitude_and_get_instances(*altitude);
+        (
+            box_buffers.instance_buffer,
+            sphere_buffers.instance_buffer,
+            moon_wax_tree_buffers.instance_buffer,
+            simple_grass_buffers.instance_buffer,
+        ) = islands.update_altitude_and_get_instances(*altitude);
     }
 
-    camera_uniform.position = [player.particle.position[0], player.particle.position[1] -  1.0, player.particle.position[2]];
+    camera_uniform.position = [
+        player.particle.position[0],
+        player.particle.position[1] - 1.0,
+        player.particle.position[2],
+    ];
 
     camera_uniform.world_to_camera = Matrix4::from_scale([1.0, 1.0, 1.0])
-    .multiply(Matrix4::from_angle_x(Degrees(rotation[0]).to_radians())).multiply(Matrix4::from_angle_y(Degrees(rotation[1]).to_radians())).multiply(Matrix4::from_angle_z(Degrees(rotation[2]).to_radians()))
-    .multiply(Matrix4::from_translation([-player.particle.position[0], -player.particle.position[1], -player.particle.position[2]])).as_2d_array();
+        .multiply(Matrix4::from_angle_x(Degrees(rotation[0]).to_radians()))
+        .multiply(Matrix4::from_angle_y(Degrees(rotation[1]).to_radians()))
+        .multiply(Matrix4::from_angle_z(Degrees(rotation[2]).to_radians()))
+        .multiply(Matrix4::from_translation([
+            -player.particle.position[0],
+            -(player.particle.position[1] - 1.0),
+            -player.particle.position[2],
+        ]))
+        .as_2d_array();
 
-    camera_uniform.camera_to_clip = Matrix4::from_perspective(Radians(std::f32::consts::FRAC_PI_2), *aspect_ratio, 0.01, 1000.0).as_2d_array();
+    camera_uniform.camera_to_clip = Matrix4::from_perspective(
+        Radians(std::f32::consts::FRAC_PI_2),
+        *aspect_ratio,
+        0.01,
+        1000.0,
+    )
+    .as_2d_array();
 }
 
 fn update() {}
@@ -981,6 +1075,7 @@ fn on_keyboard_input(
     jump_held: &mut bool,
     window: &Arc<Window>,
     control_flow: &mut ControlFlow,
+    average_fps: &f32,
 ) {
     if let Some(key_code) = input.virtual_keycode {
         match key_code {
@@ -1010,6 +1105,12 @@ fn on_keyboard_input(
             VirtualKeyCode::Delete => {
                 if is_pressed(input.state) {
                     *control_flow = ControlFlow::Exit;
+                }
+            }
+
+            VirtualKeyCode::X => {
+                if is_pressed(input.state) {
+                    println!("{average_fps}");
                 }
             }
             _ => (),
@@ -1349,12 +1450,13 @@ fn generate_islands_circle_technique<T: Copy>(
                 .push(buffer_contents::Colour3DInstance::new(
                     colour,
                     math::Matrix4::from_translation(previous_position)
-                        .multiply(math::Matrix4::from_scale(previous_scale)).multiply(Matrix4::from_scale([2.0, 2.0, 2.0])), // Double scale mul is there only for debugging what the aabbs look like with box instances.
+                        .multiply(math::Matrix4::from_scale(previous_scale))
+                        .multiply(Matrix4::from_scale([2.0, 2.0, 2.0])), // Double scale mul is there only for debugging what the aabbs look like with box instances.
                 ));
             aabbs.push(AabbCentredOrigin {
-                    position: previous_position,
-                    half_size: previous_scale,
-                });
+                position: previous_position,
+                half_size: previous_scale,
+            });
 
             create_per_piece_type(
                 &mut layer,

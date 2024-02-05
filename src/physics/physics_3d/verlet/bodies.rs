@@ -154,7 +154,7 @@ where
     T: math::Float,
 {
     pub particle: Particle<T>,
-    pub aabb: crate::physics::physics_3d::aabb::AabbCentredOrigin<T>,
+    pub half_size: [T; 3],
     pub dampening: [T; 3],
     pub grounded: bool,
 }
