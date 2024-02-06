@@ -66,38 +66,40 @@ where
             (CommonBody::Player(lhs_player), CommonBody::Box(rhs_box)) => {
                 todo!();
             }
-            (CommonBody::Player(lhs_player), CommonBody::ImmovableBox(rhs_immovable_box)) => {
-                if lhs_player.aabb.is_intersected_by_aabb(rhs_immovable_box.aabb) {
+            (CommonBody::Player(lhs_player), CommonBody::ImmovableBox(rhs_immovable_cuboid)) => {
+                let lhs_player_aabb = AabbCentredOrigin {
+                    position: lhs_player.particle.position,
+                    half_size: lhs_player.half_size,
+                };
+                if lhs_player_aabb.is_intersected_by_aabb(rhs_immovable_cuboid.aabb) {
                     let previous_player_aabb = AabbCentredOrigin {
                         position: lhs_player.particle.previous_position,
-                        half_size: lhs_player.aabb.half_size,
+                        half_size: lhs_player.half_size,
                     };
-                    let previous_collision_direction = rhs_immovable_box.aabb.get_collision_axis_with_direction(previous_player_aabb);
+                    let previous_collision_direction = rhs_immovable_cuboid.aabb.get_collision_axis_with_direction(previous_player_aabb);
                     //println!("direction: {:?}", previous_collision_direction);
 
                     // TODO: investigate stepping up onto small ledges
                     let step_up = true;
 
                     if CollisionEnum::Positive == previous_collision_direction[0] && !step_up {
-                        lhs_player.particle.position[0] = rhs_immovable_box.aabb.position[0] - rhs_immovable_box.aabb.half_size[0] - lhs_player.aabb.half_size[0] - T::from_f32(0.01);
+                        lhs_player.particle.position[0] = rhs_immovable_cuboid.aabb.position[0] - rhs_immovable_cuboid.aabb.half_size[0] - lhs_player.half_size[0] - T::from_f32(0.01);
                     } else if CollisionEnum::Negative == previous_collision_direction[0] && !step_up {
-                        lhs_player.particle.position[0] = rhs_immovable_box.aabb.position[0] + rhs_immovable_box.aabb.half_size[0] + lhs_player.aabb.half_size[0] + T::from_f32(0.01);
+                        lhs_player.particle.position[0] = rhs_immovable_cuboid.aabb.position[0] + rhs_immovable_cuboid.aabb.half_size[0] + lhs_player.half_size[0] + T::from_f32(0.01);
                     }
 
                     if CollisionEnum::Positive == previous_collision_direction[1] || (step_up && CollisionEnum::None == previous_collision_direction[1]) {
-                        lhs_player.particle.position[1] = rhs_immovable_box.aabb.position[1] - rhs_immovable_box.aabb.half_size[1] - lhs_player.aabb.half_size[1] - T::from_f32(0.01); // Need to remove small amount or else next time it will break direction, by being None in incorrect axis.
+                        lhs_player.particle.position[1] = rhs_immovable_cuboid.aabb.position[1] - rhs_immovable_cuboid.aabb.half_size[1] - lhs_player.half_size[1] - T::from_f32(0.01); // Need to remove small amount or else next time it will break direction, by being None in incorrect axis.
                         lhs_player.grounded = true;
                     } else if CollisionEnum::Negative == previous_collision_direction[1] {
-                        lhs_player.particle.position[1] = rhs_immovable_box.aabb.position[1] + rhs_immovable_box.aabb.half_size[1] + lhs_player.aabb.half_size[1] + T::from_f32(0.01);
+                        lhs_player.particle.position[1] = rhs_immovable_cuboid.aabb.position[1] + rhs_immovable_cuboid.aabb.half_size[1] + lhs_player.half_size[1] + T::from_f32(0.01);
                     }
 
                     if CollisionEnum::Positive == previous_collision_direction[2] && !step_up {
-                        lhs_player.particle.position[2] = rhs_immovable_box.aabb.position[2] - rhs_immovable_box.aabb.half_size[2] - lhs_player.aabb.half_size[2] - T::from_f32(0.01);
+                        lhs_player.particle.position[2] = rhs_immovable_cuboid.aabb.position[2] - rhs_immovable_cuboid.aabb.half_size[2] - lhs_player.half_size[2] - T::from_f32(0.01);
                     } else if CollisionEnum::Negative == previous_collision_direction[2] && !step_up {
-                        lhs_player.particle.position[2] = rhs_immovable_box.aabb.position[2] + rhs_immovable_box.aabb.half_size[2] + lhs_player.aabb.half_size[2] + T::from_f32(0.01);
+                        lhs_player.particle.position[2] = rhs_immovable_cuboid.aabb.position[2] + rhs_immovable_cuboid.aabb.half_size[2] + lhs_player.half_size[2] + T::from_f32(0.01);
                     }
-
-                    lhs_player.aabb.position = lhs_player.particle.position;
                 }
             }
 
@@ -174,7 +176,6 @@ where
             math::mul_3d(self.particle.calculate_displacement(), self.dampening),
         );
 
-        self.aabb.position = self.particle.position;
         self.grounded = false;
 
         self.particle.position
@@ -182,15 +183,15 @@ where
 }
 
 //#[derive(Clone, Copy)]
-pub struct Box<T>
+pub struct Cuboid<T>
 where
     T: math::Float,
 {
     pub particle: Particle<T>, // Do we even want to store particles with collision data?
-    pub aabb: crate::physics::physics_3d::aabb::AabbCentredOrigin<T>,
+    pub half_size: [T; 3],
 }
 
-impl<T> Box<T>
+impl<T> Cuboid<T>
 where
     T: math::Float,
 {
@@ -206,20 +207,18 @@ where
             math::mul_3d(self.particle.calculate_displacement(), dampening),
         );
 
-        self.aabb.position = self.particle.position;
-
         self.particle.position
     }
 }
 
-pub struct ImmovableBox<T>
+pub struct ImmovableCuboid<T>
 where
     T: math::Float,
 {
-    pub aabb: crate::physics::physics_3d::aabb::AabbCentredOrigin<T>,
+    pub aabb: AabbCentredOrigin<T>,
 }
 
-impl<T> ImmovableBox<T>
+impl<T> ImmovableCuboid<T>
 where
     T: math::Float,
 {
@@ -234,4 +233,4 @@ where
 }
 
 // TODO: List of common shaps I want to include here. But first, a naming scheme. No rotation should be by default. Axis aligned should be the default. At least 1 particle should be the default. As such "box" should refer to an axis aligned box with a single particle that can't rotate.
-// List: Box, ImmovableBox, Sphere, ImmovableSphere, Player, Cylinder, ImmovableCylinder
+// List: Cuboid, ImmovableCuboid, Sphere, ImmovableSphere, Player, Cylinder, ImmovableCylinder
