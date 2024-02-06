@@ -479,15 +479,12 @@ pub fn get_starting_storage(render_storage: &mut crate::RenderStorage) -> OtherE
             [-1000.0, -2000.0, -1000.0],
             [1000, 300, 1000],
             physics::physics_3d::verlet::OutsideOfGridBoundsBehaviour::ContinueUpdating,
-            vec![physics::physics_3d::verlet::bodies::CommonBody::Box(
-                physics::physics_3d::verlet::bodies::Box {
+            vec![physics::physics_3d::verlet::bodies::CommonBody::Cuboid(
+                physics::physics_3d::verlet::bodies::Cuboid {
                     particle: physics::physics_3d::verlet::Particle::from_position([
                         0.0, -1050.0, 0.0,
                     ]),
-                    aabb: physics::physics_3d::aabb::AabbCentredOrigin {
-                        position: [0.0, -1050.0, 0.0],
-                        half_size: [0.5, 1.0, 0.5],
-                    },
+                    half_size: [0.5, 1.0, 0.5],
                 },
             )],
         ),
@@ -885,8 +882,8 @@ pub const MENU: menus::Data = menus::Data {
                 .other_example_3d_storage
                 .verlet_solver
                 .bodies
-                .push(physics::physics_3d::verlet::bodies::CommonBody::ImmovableBox(
-                    physics::physics_3d::verlet::bodies::ImmovableBox { aabb: *aabb },
+                .push(physics::physics_3d::verlet::bodies::CommonBody::ImmovableCuboid(
+                    physics::physics_3d::verlet::bodies::ImmovableCuboid { aabb: *aabb },
                 ));
         }
     },

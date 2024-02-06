@@ -19,8 +19,8 @@ where
     T: math::Float,
 {
     Player(Player<T>),
-    Box(Box<T>),
-    ImmovableBox(ImmovableBox<T>),
+    Cuboid(Cuboid<T>),
+    ImmovableCuboid(ImmovableCuboid<T>),
 }
 
 impl<T> Body<T> for CommonBody<T>
@@ -37,11 +37,11 @@ where
             CommonBody::Player(player) => {
                 player.update_and_get_position(gravity, delta_time)
             }
-            CommonBody::Box(simple_box) => {
-                simple_box.update_and_get_position(gravity, dampening, delta_time)
+            CommonBody::Cuboid(simple_cuboid) => {
+                simple_cuboid.update_and_get_position(gravity, dampening, delta_time)
             }
-            CommonBody::ImmovableBox(immovable_box) => {
-                immovable_box.update_and_get_position(gravity, dampening, delta_time)
+            CommonBody::ImmovableCuboid(immovable_cuboid) => {
+                immovable_cuboid.update_and_get_position(gravity, dampening, delta_time)
             }
         }
     }
@@ -50,8 +50,8 @@ where
     fn collide_with_others(&self) -> bool {
         match self {
             CommonBody::Player(_) => true,
-            CommonBody::Box(_) => true,
-            CommonBody::ImmovableBox(_) => false,
+            CommonBody::Cuboid(_) => true,
+            CommonBody::ImmovableCuboid(_) => false,
         }
     }
 
@@ -63,10 +63,10 @@ where
             (CommonBody::Player(lhs_player), CommonBody::Player(rhs_player)) => {
                 todo!();
             }
-            (CommonBody::Player(lhs_player), CommonBody::Box(rhs_box)) => {
+            (CommonBody::Player(lhs_player), CommonBody::Cuboid(rhs_cuboid)) => {
                 todo!();
             }
-            (CommonBody::Player(lhs_player), CommonBody::ImmovableBox(rhs_immovable_cuboid)) => {
+            (CommonBody::Player(lhs_player), CommonBody::ImmovableCuboid(rhs_immovable_cuboid)) => {
                 let lhs_player_aabb = AabbCentredOrigin {
                     position: lhs_player.particle.position,
                     half_size: lhs_player.half_size,
@@ -103,48 +103,49 @@ where
                 }
             }
 
-            // box which has to be called simple_box sometimes due to naming conflicts...
-            (CommonBody::Box(lhs_box), CommonBody::Player(rhs_player)) => {
+            // cuboid
+            (CommonBody::Cuboid(lhs_cuboid), CommonBody::Player(rhs_player)) => {
                 todo!();
             }
-            (CommonBody::Box(lhs_box), CommonBody::Box(rhs_box)) => {
+            (CommonBody::Cuboid(lhs_cuboid), CommonBody::Cuboid(rhs_cuboid)) => {
                 // TODO: Mess with ref mut and mut and all that, and you will gain and lose 70x performance, somehow.
-                // if lhs_simple_box
+                // if lhs_cuboid
                 //     .aabb
-                //     .is_intersected_by_aabb(rhs_simple_box.aabb)
+                //     .is_intersected_by_aabb(rhs_cuboid.aabb)
                 // {
-                //     lhs_simple_box.particle.position = lhs_simple_box.particle.previous_position; // these lines in particular are slow
-                //     rhs_simple_box.particle.position = rhs_simple_box.particle.previous_position;
+                //     lhs_cuboid.particle.position = lhs_cuboid.particle.previous_position; // these lines in particular are slow
+                //     rhs_cuboid.particle.position = rhs_cuboid.particle.previous_position;
                 // }
                 todo!();
             }
             (
-                CommonBody::Box(lhs_simple_box),
-                CommonBody::ImmovableBox(rhs_immovable_simple_box),
+                CommonBody::Cuboid(lhs_cuboid),
+                CommonBody::ImmovableCuboid(rhs_immovable_cuboid),
             ) => {
-                if lhs_simple_box
-                    .aabb
-                    .is_intersected_by_aabb(rhs_immovable_simple_box.aabb)
-                {
-                    let collision_axis = rhs_immovable_simple_box
-                        .aabb
-                        .get_collision_axis_with_direction(AabbCentredOrigin {
-                            position: lhs_simple_box.particle.previous_position,
-                            half_size: lhs_simple_box.aabb.half_size,
-                        });
+                todo!()
+                // if lhs_cuboid
+                //     .aabb
+                //     .is_intersected_by_aabb(rhs_immovable_cuboid.aabb)
+                // {
+                //     let collision_axis = rhs_immovable_cuboid
+                //         .aabb
+                //         .get_collision_axis_with_direction(AabbCentredOrigin {
+                //             position: lhs_cuboid.particle.previous_position,
+                //             half_size: lhs_cuboid.aabb.half_size,
+                //         });
 
-                    //println!("collision axis: {:?}", collision_axis);
+                //     //println!("collision axis: {:?}", collision_axis);
 
-                    lhs_simple_box.particle.position = lhs_simple_box.particle.previous_position;
+                //     lhs_cuboid.particle.position = lhs_cuboid.particle.previous_position;
 
-                    //println!("Collision!");
-                }
+                //     //println!("Collision!");
+                // }
             }
 
-            // immovable simple box (This cannot happen, as immovable simple boxes don't check to see if they have collided with others.)
-            (CommonBody::ImmovableBox(_), CommonBody::Player(_)) => unreachable!(),
-            (CommonBody::ImmovableBox(_), CommonBody::Box(_)) => unreachable!(),
-            (CommonBody::ImmovableBox(_), CommonBody::ImmovableBox(_)) => {
+            // immovable simple cuboid (This cannot happen, as immovable simple cuboides don't check to see if they have collided with others.)
+            (CommonBody::ImmovableCuboid(_), CommonBody::Player(_)) => unreachable!(),
+            (CommonBody::ImmovableCuboid(_), CommonBody::Cuboid(_)) => unreachable!(),
+            (CommonBody::ImmovableCuboid(_), CommonBody::ImmovableCuboid(_)) => {
                 unreachable!()
             }
         }
@@ -232,5 +233,5 @@ where
     }
 }
 
-// TODO: List of common shaps I want to include here. But first, a naming scheme. No rotation should be by default. Axis aligned should be the default. At least 1 particle should be the default. As such "box" should refer to an axis aligned box with a single particle that can't rotate.
+// TODO: List of common shaps I want to include here. But first, a naming scheme. No rotation should be by default. Axis aligned should be the default. At least 1 particle should be the default. As such "cuboid" should refer to an axis aligned cuboid with a single particle that can't rotate.
 // List: Cuboid, ImmovableCuboid, Sphere, ImmovableSphere, Player, Cylinder, ImmovableCylinder

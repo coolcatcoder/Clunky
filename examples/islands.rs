@@ -8,7 +8,7 @@ use clunky::{
     physics::physics_3d::{
         aabb::AabbCentredOrigin,
         verlet::{
-            bodies::{Box, CommonBody, ImmovableBox, Player},
+            bodies::{Cuboid, CommonBody, ImmovableCuboid, Player},
             CpuSolver, OutsideOfGridBoundsBehaviour, Particle,
         },
     },
@@ -380,7 +380,7 @@ fn main() {
             rng.gen_range(-900.0..900.0),
         ];
 
-        bodies.push(CommonBody::Box(Box {
+        bodies.push(CommonBody::Cuboid(Cuboid {
             particle: Particle::from_position(position),
             half_size: [1.0, 1.0, 1.0],
         }));
@@ -392,15 +392,15 @@ fn main() {
     }
 
     for aabb in sky_top.1 {
-        bodies.push(CommonBody::ImmovableBox(ImmovableBox { aabb }));
+        bodies.push(CommonBody::ImmovableCuboid(ImmovableCuboid { aabb }));
     }
 
     for aabb in sky_middle.1 {
-        bodies.push(CommonBody::ImmovableBox(ImmovableBox { aabb }));
+        bodies.push(CommonBody::ImmovableCuboid(ImmovableCuboid { aabb }));
     }
 
     for aabb in sky_bottom.1 {
-        bodies.push(CommonBody::ImmovableBox(ImmovableBox { aabb }));
+        bodies.push(CommonBody::ImmovableCuboid(ImmovableCuboid { aabb }));
     }
 
     let mut verlet_solver = CpuSolver::new(
@@ -470,7 +470,7 @@ fn main() {
                     });
 
                     for i in 0..TESTING_BOX_AMOUNT {
-                        let CommonBody::Box(ref test_box) = verlet_solver.bodies[i+1] else {
+                        let CommonBody::Cuboid(ref test_box) = verlet_solver.bodies[i+1] else {
                             panic!();
                         };
 

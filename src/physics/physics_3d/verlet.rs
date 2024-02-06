@@ -290,7 +290,7 @@ pub enum OutsideOfGridBoundsBehaviour<T: math::Number> {
 
 #[cfg(test)]
 mod tests {
-    use self::bodies::Box;
+    use self::bodies::Cuboid;
     use self::bodies::CommonBody;
 
     use super::*;
@@ -304,16 +304,16 @@ mod tests {
         let mut rng = thread_rng();
 
         for _ in 0..1000 {
-            verlet_bodies.push(CommonBody::Box(Box {
-                particle: Particle::from_position([0.0, 0.0, 0.0]),
-                aabb: crate::physics::physics_3d::aabb::AabbCentredOrigin {
-                    position: [
-                        rng.gen_range(-50.0..50.0),
-                        rng.gen_range(-50.0..50.0),
-                        rng.gen_range(-50.0..50.0),
-                    ],
+            verlet_bodies.push(CommonBody::Cuboid(Cuboid {
+                particle: Particle::from_position([
+                    rng.gen_range(-50.0..50.0),
+                    rng.gen_range(-50.0..50.0),
+                    rng.gen_range(-50.0..50.0),
+                ]),
+
+                    
                     half_size: [0.5, 0.5, 0.5],
-                },
+                
             }));
         }
 
