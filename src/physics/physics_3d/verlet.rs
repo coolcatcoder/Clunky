@@ -300,7 +300,7 @@ where
             // This is meant to keep memory usage low, with only a minor performance cost, but I'm not convinced.
             // Even though we check for 0, this still seems dodgy. Perhaps this should be a choice for the user.
             if cell.len() <= cell.capacity() / 2 {
-                println!("len: {}, capacity: {}", cell.len(), cell.capacity());
+                //println!("len: {}, capacity: {}", cell.len(), cell.capacity());
                 cell.shrink_to_fit();
             }
             cell.clear();

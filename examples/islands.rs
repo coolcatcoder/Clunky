@@ -73,6 +73,8 @@ const MAX_SUBSTEPS: u32 = 200;
 const TESTING_BOX_AMOUNT: usize = 0; //2000;
 
 fn main() {
+    let pain = rust_gpu_easier::wow!(/home/coolcatcoder/Documents/GitHub/Clunky/src/test_out.rs);
+    println!("{}", pain);
     let (event_loop, window, surface, device, queue, mut swapchain, swapchain_images) =
         rendering::initiate_general(
             QueueFlags::GRAPHICS | QueueFlags::COMPUTE,
