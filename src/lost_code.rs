@@ -38,7 +38,10 @@ impl FixedUpdate {
     /// Call this every frame, and it will call closure every fixed_delta_time seconds.
     ///
     /// If there are more substeps than max_substeps it will println!() to let you know, but will not panic!(). This may change.
-    pub fn update<F>(&mut self, max_substeps: u32, mut closure: F) where F: FnMut() {
+    pub fn update<F>(&mut self, max_substeps: u32, mut closure: F)
+    where
+        F: FnMut(),
+    {
         let seconds_since_start = self.starting_time.elapsed().as_secs_f32();
         let mut substeps = 0;
 

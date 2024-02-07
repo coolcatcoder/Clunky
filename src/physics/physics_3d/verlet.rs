@@ -1,3 +1,5 @@
+use std::mem::{self, MaybeUninit};
+
 use rayon::prelude::*;
 
 use crate::math;
@@ -101,9 +103,8 @@ where
         let real_grid_height = self.grid_size[1] * self.cell_size[1];
         let real_grid_length = self.grid_size[2] * self.cell_size[2];
 
-        for (verlet_body_index, verlet_body) in (0..self.bodies.len())
-            .into_iter()
-            .zip(&mut self.bodies)
+        for (verlet_body_index, verlet_body) in
+            (0..self.bodies.len()).into_iter().zip(&mut self.bodies)
         {
             let verlet_body_position =
                 verlet_body.update_and_get_position(self.gravity, self.dampening, delta_time);
@@ -181,13 +182,19 @@ where
                 self.grid_size[1],
             );
 
-            //self.grid[grid_cell_index].push(verlet_body_index); // got a panic here, so something must be terribly wrong. Update I think I fixed it with my -1 to everything on ouside side. Remove this once we are certain it is all good.
-            self.grid.get_mut(grid_cell_index).unwrap_or_else(|| {
-                println!("verlet_body_position: {:?}", verlet_body_position);
-                println!("corrected_position_as_isize: {:?}", corrected_position_as_isize);
-                println!("grid_cell_position: {:?}", grid_cell_position);
-                panic!()
-            }).push(verlet_body_index);
+            // If something is wrong, this debug information is usually helpful.
+            self.grid
+                .get_mut(grid_cell_index)
+                .unwrap_or_else(|| {
+                    println!("verlet_body_position: {:?}", verlet_body_position);
+                    println!(
+                        "corrected_position_as_isize: {:?}",
+                        corrected_position_as_isize
+                    );
+                    println!("grid_cell_position: {:?}", grid_cell_position);
+                    panic!()
+                })
+                .push(verlet_body_index);
         }
 
         // TODO: How the hell can we multithread this?
@@ -197,7 +204,11 @@ where
                 math::position_from_index_3d(cell_index, self.grid_size[0], self.grid_size[1]);
 
             // Debating how much I like performance. I don't want to write by hand 26 different cell lets. This will do:
-            let mut neighbours = Vec::with_capacity(27); // 27 cause this includes the center cell.
+            // This code seems dodgy, but I reckon it is better than using a vec. Gotten from: https://users.rust-lang.org/t/uninitialized-array/50278/3
+            // len of 27 because this includes the center cell
+            let mut neighbours: [MaybeUninit<&Vec<usize>>; 27] =
+                unsafe { MaybeUninit::uninit().assume_init() };
+            let mut neighbours_len: u8 = 0;
 
             for x in -1..=1 {
                 for y in -1..=1 {
@@ -215,7 +226,7 @@ where
                             && position[2] >= 0
                             && position[2] < self.grid_size[2] as isize
                         {
-                            neighbours.push(
+                            neighbours[neighbours_len as usize] = MaybeUninit::new(
                                 &self.grid[math::index_from_position_3d(
                                     [
                                         position[0] as usize,
@@ -226,17 +237,26 @@ where
                                     self.grid_size[1],
                                 )],
                             );
+
+                            neighbours_len += 1;
                         }
                     }
                 }
             }
+
+            // Leaving this here as a lesson. For edge cells there will be less than 27 neighbours, as such it must remain maybe uninit.
+            // let neighbours = unsafe {
+            //     mem::transmute::<_, [&Vec<usize>; 27]>(neighbours)
+            // };
 
             for lhs_verlet_body_index in cell {
                 if !self.bodies[*lhs_verlet_body_index].collide_with_others() {
                     continue;
                 }
 
-                for neighbour in &neighbours {
+                for neighbour_index in 0..neighbours_len {
+                    // we are certain that assume_init() is safe due to iterating from 0 to neighbours_len.
+                    let neighbour = unsafe { &neighbours[neighbour_index as usize].assume_init() };
                     for rhs_verlet_body_index in *neighbour {
                         if lhs_verlet_body_index == rhs_verlet_body_index {
                             continue;
@@ -246,8 +266,10 @@ where
                         if lhs_verlet_body_index > rhs_verlet_body_index {
                             let (lhs_verlet_bodies, rhs_verlet_bodies) =
                                 self.bodies.split_at_mut(*lhs_verlet_body_index);
-                            rhs_verlet_bodies[0]
-                                .collide(&mut lhs_verlet_bodies[*rhs_verlet_body_index], *rhs_verlet_body_index);
+                            rhs_verlet_bodies[0].collide(
+                                &mut lhs_verlet_bodies[*rhs_verlet_body_index],
+                                *rhs_verlet_body_index,
+                            );
                             //collide_test(&mut rhs_verlet_bodies[0], &mut lhs_verlet_bodies[*rhs_verlet_body_index]);
                             //test::black_box(lhs_verlet_bodies);
                             //test::black_box(rhs_verlet_bodies);
@@ -272,7 +294,13 @@ where
         }
 
         for cell in &mut self.grid {
+            if cell.capacity() == 0 {
+                continue;
+            }
+            // This is meant to keep memory usage low, with only a minor performance cost, but I'm not convinced.
+            // Even though we check for 0, this still seems dodgy. Perhaps this should be a choice for the user.
             if cell.len() <= cell.capacity() / 2 {
+                println!("len: {}, capacity: {}", cell.len(), cell.capacity());
                 cell.shrink_to_fit();
             }
             cell.clear();
@@ -290,8 +318,8 @@ pub enum OutsideOfGridBoundsBehaviour<T: math::Number> {
 
 #[cfg(test)]
 mod tests {
-    use self::bodies::Cuboid;
     use self::bodies::CommonBody;
+    use self::bodies::Cuboid;
 
     use super::*;
     use rand::thread_rng;
@@ -311,9 +339,7 @@ mod tests {
                     rng.gen_range(-50.0..50.0),
                 ]),
 
-                    
-                    half_size: [0.5, 0.5, 0.5],
-                
+                half_size: [0.5, 0.5, 0.5],
             }));
         }
 

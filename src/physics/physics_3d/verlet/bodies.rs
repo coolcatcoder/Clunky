@@ -1,18 +1,29 @@
-use crate::{math, physics::physics_3d::aabb::{AabbCentredOrigin, CollisionEnum}};
+use crate::{
+    math,
+    physics::physics_3d::aabb::{AabbCentredOrigin, CollisionEnum},
+};
 
 use super::Particle;
 
 /// Usually you want to implement this for an enum that has varients for each of the different body types you want to use with the verlet solver.
-/// 
+///
 /// For an example of an enum that implements this, check out [CommonBody].
-pub trait Body<T> where T: math::Float {
-    fn update_and_get_position(&mut self, gravity: [T; 3], dampening: [T; 3], delta_time: T) -> [T; 3];
+pub trait Body<T>
+where
+    T: math::Float,
+{
+    fn update_and_get_position(
+        &mut self,
+        gravity: [T; 3],
+        dampening: [T; 3],
+        delta_time: T,
+    ) -> [T; 3];
     fn collide_with_others(&self) -> bool;
     fn collide(&mut self, other: &mut Self, other_index: usize);
 }
 
 /// A premade enum for you to use as the body type for the verlet solver.
-/// 
+///
 /// The name might change.
 pub enum CommonBody<T>
 where
@@ -34,9 +45,7 @@ where
         delta_time: T,
     ) -> [T; 3] {
         match self {
-            CommonBody::Player(player) => {
-                player.update_and_get_position(gravity, delta_time)
-            }
+            CommonBody::Player(player) => player.update_and_get_position(gravity, delta_time),
             CommonBody::Cuboid(simple_cuboid) => {
                 simple_cuboid.update_and_get_position(gravity, dampening, delta_time)
             }
@@ -76,29 +85,53 @@ where
                         position: lhs_player.particle.previous_position,
                         half_size: lhs_player.half_size,
                     };
-                    let previous_collision_direction = rhs_immovable_cuboid.aabb.get_collision_axis_with_direction(previous_player_aabb);
+                    let previous_collision_direction = rhs_immovable_cuboid
+                        .aabb
+                        .get_collision_axis_with_direction(previous_player_aabb);
                     //println!("direction: {:?}", previous_collision_direction);
 
                     // TODO: investigate stepping up onto small ledges
                     let step_up = true;
 
                     if CollisionEnum::Positive == previous_collision_direction[0] && !step_up {
-                        lhs_player.particle.position[0] = rhs_immovable_cuboid.aabb.position[0] - rhs_immovable_cuboid.aabb.half_size[0] - lhs_player.half_size[0] - T::from_f32(0.01);
-                    } else if CollisionEnum::Negative == previous_collision_direction[0] && !step_up {
-                        lhs_player.particle.position[0] = rhs_immovable_cuboid.aabb.position[0] + rhs_immovable_cuboid.aabb.half_size[0] + lhs_player.half_size[0] + T::from_f32(0.01);
+                        lhs_player.particle.position[0] = rhs_immovable_cuboid.aabb.position[0]
+                            - rhs_immovable_cuboid.aabb.half_size[0]
+                            - lhs_player.half_size[0]
+                            - T::from_f32(0.01);
+                    } else if CollisionEnum::Negative == previous_collision_direction[0] && !step_up
+                    {
+                        lhs_player.particle.position[0] = rhs_immovable_cuboid.aabb.position[0]
+                            + rhs_immovable_cuboid.aabb.half_size[0]
+                            + lhs_player.half_size[0]
+                            + T::from_f32(0.01);
                     }
 
-                    if CollisionEnum::Positive == previous_collision_direction[1] || (step_up && CollisionEnum::None == previous_collision_direction[1]) {
-                        lhs_player.particle.position[1] = rhs_immovable_cuboid.aabb.position[1] - rhs_immovable_cuboid.aabb.half_size[1] - lhs_player.half_size[1] - T::from_f32(0.01); // Need to remove small amount or else next time it will break direction, by being None in incorrect axis.
+                    if CollisionEnum::Positive == previous_collision_direction[1]
+                        || (step_up && CollisionEnum::None == previous_collision_direction[1])
+                    {
+                        lhs_player.particle.position[1] = rhs_immovable_cuboid.aabb.position[1]
+                            - rhs_immovable_cuboid.aabb.half_size[1]
+                            - lhs_player.half_size[1]
+                            - T::from_f32(0.01); // Need to remove small amount or else next time it will break direction, by being None in incorrect axis.
                         lhs_player.grounded = true;
                     } else if CollisionEnum::Negative == previous_collision_direction[1] {
-                        lhs_player.particle.position[1] = rhs_immovable_cuboid.aabb.position[1] + rhs_immovable_cuboid.aabb.half_size[1] + lhs_player.half_size[1] + T::from_f32(0.01);
+                        lhs_player.particle.position[1] = rhs_immovable_cuboid.aabb.position[1]
+                            + rhs_immovable_cuboid.aabb.half_size[1]
+                            + lhs_player.half_size[1]
+                            + T::from_f32(0.01);
                     }
 
                     if CollisionEnum::Positive == previous_collision_direction[2] && !step_up {
-                        lhs_player.particle.position[2] = rhs_immovable_cuboid.aabb.position[2] - rhs_immovable_cuboid.aabb.half_size[2] - lhs_player.half_size[2] - T::from_f32(0.01);
-                    } else if CollisionEnum::Negative == previous_collision_direction[2] && !step_up {
-                        lhs_player.particle.position[2] = rhs_immovable_cuboid.aabb.position[2] + rhs_immovable_cuboid.aabb.half_size[2] + lhs_player.half_size[2] + T::from_f32(0.01);
+                        lhs_player.particle.position[2] = rhs_immovable_cuboid.aabb.position[2]
+                            - rhs_immovable_cuboid.aabb.half_size[2]
+                            - lhs_player.half_size[2]
+                            - T::from_f32(0.01);
+                    } else if CollisionEnum::Negative == previous_collision_direction[2] && !step_up
+                    {
+                        lhs_player.particle.position[2] = rhs_immovable_cuboid.aabb.position[2]
+                            + rhs_immovable_cuboid.aabb.half_size[2]
+                            + lhs_player.half_size[2]
+                            + T::from_f32(0.01);
                     }
                 }
             }
@@ -118,10 +151,7 @@ where
                 // }
                 todo!();
             }
-            (
-                CommonBody::Cuboid(lhs_cuboid),
-                CommonBody::ImmovableCuboid(rhs_immovable_cuboid),
-            ) => {
+            (CommonBody::Cuboid(lhs_cuboid), CommonBody::ImmovableCuboid(rhs_immovable_cuboid)) => {
                 todo!()
                 // if lhs_cuboid
                 //     .aabb
@@ -166,11 +196,7 @@ impl<T> Player<T>
 where
     T: math::Float,
 {
-    pub fn update_and_get_position(
-        &mut self,
-        gravity: [T; 3],
-        delta_time: T,
-    ) -> [T; 3] {
+    pub fn update_and_get_position(&mut self, gravity: [T; 3], delta_time: T) -> [T; 3] {
         self.particle.accelerate(gravity);
         self.particle.update(
             delta_time,

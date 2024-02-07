@@ -116,7 +116,10 @@ pub struct OtherExample3DStorage {
     uniform_buffer: shaders::colour_3d_instanced_vertex_shader::CameraData3D,
     //box_pipeline: Arc<GraphicsPipeline>,
     //sphere_pipeline: Arc<GraphicsPipeline>, TODO: I just can't work out how to do this. I can't init this, because I don't have the stuff until later. I could do Option<> but that is messy and is terrible.
-    verlet_solver: physics::physics_3d::verlet::CpuSolver<f32, physics::physics_3d::verlet::bodies::CommonBody<f32>>,
+    verlet_solver: physics::physics_3d::verlet::CpuSolver<
+        f32,
+        physics::physics_3d::verlet::bodies::CommonBody<f32>,
+    >,
 }
 
 #[derive(PartialEq, Clone, Copy, Debug)]
@@ -882,9 +885,11 @@ pub const MENU: menus::Data = menus::Data {
                 .other_example_3d_storage
                 .verlet_solver
                 .bodies
-                .push(physics::physics_3d::verlet::bodies::CommonBody::ImmovableCuboid(
-                    physics::physics_3d::verlet::bodies::ImmovableCuboid { aabb: *aabb },
-                ));
+                .push(
+                    physics::physics_3d::verlet::bodies::CommonBody::ImmovableCuboid(
+                        physics::physics_3d::verlet::bodies::ImmovableCuboid { aabb: *aabb },
+                    ),
+                );
         }
     },
     update: |_user_storage, _render_storage, _delta_time, _average_fps| {},

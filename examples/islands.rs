@@ -8,7 +8,7 @@ use clunky::{
     physics::physics_3d::{
         aabb::AabbCentredOrigin,
         verlet::{
-            bodies::{Cuboid, CommonBody, ImmovableCuboid, Player},
+            bodies::{CommonBody, Cuboid, ImmovableCuboid, Player},
             CpuSolver, OutsideOfGridBoundsBehaviour, Particle,
         },
     },
@@ -70,7 +70,7 @@ use winit::{
 
 const FIXED_DELTA_TIME: f32 = 0.04;
 const MAX_SUBSTEPS: u32 = 200;
-const TESTING_BOX_AMOUNT: usize = 2000;
+const TESTING_BOX_AMOUNT: usize = 0; //2000;
 
 fn main() {
     let (event_loop, window, surface, device, queue, mut swapchain, swapchain_images) =
@@ -470,19 +470,24 @@ fn main() {
                     });
 
                     for i in 0..TESTING_BOX_AMOUNT {
-                        let CommonBody::Cuboid(ref test_box) = verlet_solver.bodies[i+1] else {
+                        let CommonBody::Cuboid(ref test_box) = verlet_solver.bodies[i + 1] else {
                             panic!();
                         };
 
                         test_box_instances[i] = buffer_contents::Colour3DInstance::new(
                             [1.0, 0.0, 0.0, 1.0],
-                            Matrix4::from_translation(test_box.particle.position)
-                            .multiply(Matrix4::from_scale(math::mul_3d_by_1d(test_box.half_size, 2.0))),
+                            Matrix4::from_translation(test_box.particle.position).multiply(
+                                Matrix4::from_scale(math::mul_3d_by_1d(test_box.half_size, 2.0)),
+                            ),
                         );
                     }
 
-                    let strength = ((time_since_start.elapsed().as_secs_f32() / 60.0 / 3.0 + std::f32::consts::FRAC_PI_2).sin() + 1.0) / 2.0; // use desmos before modifying this
-                    println!("light strength: {strength}");
+                    let strength = ((time_since_start.elapsed().as_secs_f32() / 60.0 / 3.0
+                        + std::f32::consts::FRAC_PI_2)
+                        .sin()
+                        + 1.0)
+                        / 2.0; // use desmos before modifying this
+                    //println!("light strength: {strength}");
 
                     camera_uniform.light_colour = [strength; 3].into();
 
@@ -845,7 +850,7 @@ fn fixed_update(
 
     player.dampening = [horizontal_dampening, 0.98, horizontal_dampening];
 
-    verlet_solver.update(FIXED_DELTA_TIME);
+    verlet_solver.update(FIXED_DELTA_TIME); // This function is not the slow one.
 
     let CommonBody::Player(player) = &mut verlet_solver.bodies[0] else {
         unreachable!();
