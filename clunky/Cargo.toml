@@ -1,0 +1,28 @@
+[package]
+name = "clunky"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+rust-gpu-easier = { path = "../rust-gpu-easier" }
+cgmath = "0.18.0"
+const_soft_float = "0.1.4"
+gltf = "1.4.0"
+noise = "0.8.2"
+num-traits = "0.2.17"
+png = "0.17.10"
+rand = "0.8.5"
+rayon = "1.8.1"
+smallvec = "1.11.2"
+vulkano = "0.34.0"
+vulkano-shaders = "0.34.0"
+vulkano-win = "0.34.0"
+winit = "0.28.6"
+
+[build-dependencies.gltf]
+version = "1.4.0"
+features = ["extras", "names", "extensions"]
+

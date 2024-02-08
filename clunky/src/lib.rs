@@ -2,7 +2,7 @@
 
 #![feature(const_fn_floating_point_arithmetic)] // Required for math for now.
 #![feature(test)]
-#![doc = include_str!("../README.md")]
+#![doc = include_str!("../../README.md")]
 //#![warn(missing_docs)] // Uncomment this when you want to do some documenting. Otherwise leave commented.
 
 use std::{sync::Arc, time::Instant};
