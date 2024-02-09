@@ -7,7 +7,9 @@ const CHANNEL: &str = "nightly-2023-09-30";
 
 #[proc_macro]
 pub fn wow(item: TokenStream) -> TokenStream {
+    // got a better plan: Copy file into a cargo crate that is pre setup, then we just compile with cargo, and it is all good.
     let rust_file = item.to_string();
+    // This doesn't allow relative paths. Very bad. This should be relative to crate root it is called from?
     match Path::new(&rust_file).try_exists() {
         Ok(true) => (),
         Ok(false) => panic!("File '{}' does not exist.", rust_file.clone()),

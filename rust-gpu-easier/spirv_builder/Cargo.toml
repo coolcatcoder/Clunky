@@ -1,0 +1,8 @@
+[build-dependencies]
+spirv-builder = "0.9"
+
+[profile.release.build-override]
+opt-level = 3
+codegen-units = 16
+[profile.dev.build-override]
+opt-level = 3
