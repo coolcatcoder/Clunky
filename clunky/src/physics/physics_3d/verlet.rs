@@ -37,6 +37,13 @@ where
         math::sub_3d(self.position, self.previous_position)
     }
 
+    /// Calculates the velocity using the formula displacement / time.
+    #[inline]
+    #[must_use]
+    pub fn calculate_velocity(&self, delta_time: T) -> [T; 3] {
+        math::div_3d_by_1d(self.calculate_displacement(), delta_time)
+    }
+
     pub fn update(&mut self, delta_time: T, displacement: [T; 3]) {
         self.previous_position = self.position;
 
@@ -269,22 +276,16 @@ where
                             rhs_verlet_bodies[0].collide(
                                 &mut lhs_verlet_bodies[*rhs_verlet_body_index],
                                 *rhs_verlet_body_index,
+                                delta_time,
                             );
-                            //collide_test(&mut rhs_verlet_bodies[0], &mut lhs_verlet_bodies[*rhs_verlet_body_index]);
-                            //test::black_box(lhs_verlet_bodies);
-                            //test::black_box(rhs_verlet_bodies);
-                            //test::black_box(&mut rhs_verlet_bodies[0]);
-                            //test::black_box(&mut lhs_verlet_bodies[*rhs_verlet_body_index]);
                         } else {
                             let (lhs_verlet_bodies, rhs_verlet_bodies) =
                                 self.bodies.split_at_mut(*rhs_verlet_body_index);
-                            lhs_verlet_bodies[*lhs_verlet_body_index]
-                                .collide(&mut rhs_verlet_bodies[0], *rhs_verlet_body_index);
-                            //collide_test(&mut lhs_verlet_bodies[*lhs_verlet_body_index], &mut rhs_verlet_bodies[0]);
-                            //test::black_box(lhs_verlet_bodies);
-                            //test::black_box(rhs_verlet_bodies);
-                            //test::black_box(&mut lhs_verlet_bodies[*lhs_verlet_body_index]);
-                            //test::black_box(&mut rhs_verlet_bodies[0]);
+                            lhs_verlet_bodies[*lhs_verlet_body_index].collide(
+                                &mut rhs_verlet_bodies[0],
+                                *rhs_verlet_body_index,
+                                delta_time,
+                            );
                         }
                     }
                 }

@@ -73,8 +73,8 @@ const MAX_SUBSTEPS: u32 = 200;
 const TESTING_BOX_AMOUNT: usize = 0; //2000;
 
 fn main() {
-    let pain = rust_gpu_easier::wow!(/home/coolcatcoder/Documents/GitHub/Clunky/clunky/src/test_out.rs);
-    println!("{}", pain);
+    //let pain = rust_gpu_easier::wow!(/home/coolcatcoder/Documents/GitHub/Clunky/clunky/src/test_out.rs);
+    //println!("{}", pain);
     let (event_loop, window, surface, device, queue, mut swapchain, swapchain_images) =
         rendering::initiate_general(
             QueueFlags::GRAPHICS | QueueFlags::COMPUTE,
@@ -366,6 +366,9 @@ fn main() {
 
     bodies.push(CommonBody::Player(Player {
         particle: Particle::from_position([0.0, -1050.0, 0.0]),
+        mass: 30.0,
+        friction: 5.0,
+        restitution: 0.5,
         half_size: [0.5, 1.0, 0.5],
         dampening: [0.0, 0.0, 0.0],
         grounded: false,
@@ -489,7 +492,7 @@ fn main() {
                         .sin()
                         + 1.0)
                         / 2.0; // use desmos before modifying this
-                    //println!("light strength: {strength}");
+                               //println!("light strength: {strength}");
 
                     camera_uniform.light_colour = [strength; 3].into();
 
@@ -848,9 +851,9 @@ fn fixed_update(
         .particle
         .accelerate([real_motion.0, 0.0, real_motion.1]);
 
-    let horizontal_dampening = if player.grounded { 0.8 } else { 0.95 };
+    let horizontal_dampening = if player.grounded { 0.8 } else { 0.95 }; // grounded originally 0.8
 
-    player.dampening = [horizontal_dampening, 0.98, horizontal_dampening];
+    player.dampening = [horizontal_dampening, 1.0, horizontal_dampening]; // y 0.98 originally
 
     verlet_solver.update(FIXED_DELTA_TIME); // This function is not the slow one.
 

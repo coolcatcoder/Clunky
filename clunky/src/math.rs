@@ -29,7 +29,7 @@ pub trait Number:
     fn is_sign_positive(self) -> bool;
 }
 
-pub trait Float: Number {
+pub trait Float: Number + ops::Neg<Output = Self> {
     fn sqrt(self) -> Self;
     fn sin(self) -> Self;
     fn cos(self) -> Self;
@@ -412,9 +412,17 @@ pub fn get_magnitude_3d<T: Float>(vector: [T; 3]) -> T {
     get_squared_magnitude_3d(vector).sqrt()
 }
 
+/// Normalises a 3d number.
+/// If the magnitude is 0, it will return 0 and not NaN.
 #[inline]
+#[must_use]
 pub fn normalise_3d<T: Float>(vector: [T; 3]) -> [T; 3] {
     let magnitude = get_magnitude_3d(vector);
+
+    // We can't let this function return NaN.
+    if magnitude == T::ZERO {
+        return [T::ZERO; 3]
+    }
 
     [
         vector[0] / magnitude,
@@ -443,9 +451,33 @@ pub fn div_3d<T: Number>(lhs: [T; 3], rhs: [T; 3]) -> [T; 3] {
     [lhs[0] / rhs[0], lhs[1] / rhs[1], lhs[2] / rhs[2]]
 }
 
+/// Takes a 3d number and returns the 3d number with each of the axis' values being negative what they were previously.
 #[inline]
+#[must_use]
+pub fn neg_3d<T: Number + ops::Neg<Output = T>>(value: [T; 3]) -> [T; 3] {
+    [-value[0], -value[1], -value[2]]
+}
+
+/// Adds the 1d number to each of the 3d number's axis.
+/// Name may change.
+#[inline]
+#[must_use]
+pub fn add_3d_with_1d<T: Number>(lhs: [T; 3], rhs: T) -> [T; 3] {
+    [lhs[0] + rhs, lhs[1] + rhs, lhs[2] + rhs]
+}
+
+/// Multiplies each axis of a 3d number by a 1d number.
+#[inline]
+#[must_use]
 pub fn mul_3d_by_1d<T: Number>(lhs: [T; 3], rhs: T) -> [T; 3] {
     [lhs[0] * rhs, lhs[1] * rhs, lhs[2] * rhs]
+}
+
+/// Divides each axis of a 3d number by a 1d number.
+#[inline]
+#[must_use]
+pub fn div_3d_by_1d<T: Number>(lhs: [T; 3], rhs: T) -> [T; 3] {
+    [lhs[0] / rhs, lhs[1] / rhs, lhs[2] / rhs]
 }
 
 #[inline]
@@ -488,6 +520,11 @@ pub fn rotate_2d<T: Float>(position: [T; 2], theta: T) -> [T; 2] {
         position[0] * theta_cos - position[1] * theta_sin,
         position[1] * theta_cos + position[0] * theta_sin,
     ]
+}
+
+/// Calculates the dot product of 2 3d numbers.
+pub fn dot<T: Number>(lhs: [T; 3], rhs: [T; 3]) -> T {
+    lhs[0] * rhs[0] + lhs[1] * rhs[1] + lhs[2] * rhs[2]
 }
 
 #[cfg(test)]

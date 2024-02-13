@@ -5,6 +5,7 @@ use proc_macro::TokenStream;
 
 const CHANNEL: &str = "nightly-2023-09-30";
 
+// I'm starting to rethink this idea. Even with it working perfectly somehow, you would still probably need a seperate cargo crate to get proper syntax highlighting and stuff. Might give up.
 #[proc_macro]
 pub fn wow(item: TokenStream) -> TokenStream {
     // got a better plan: Copy file into a cargo crate that is pre setup, then we just compile with cargo, and it is all good.
@@ -13,7 +14,7 @@ pub fn wow(item: TokenStream) -> TokenStream {
     match Path::new(&rust_file).try_exists() {
         Ok(true) => (),
         Ok(false) => panic!("File '{}' does not exist.", rust_file.clone()),
-        Err(err) => panic!("{}",err),
+        Err(err) => panic!("{}", err),
     }
 
     let out_dir = env::var_os("OUT_DIR").unwrap();

@@ -1,6 +1,10 @@
 use crate::{
     math,
-    physics::physics_3d::aabb::{AabbCentredOrigin, CollisionEnum},
+    physics::physics_3d::{
+        aabb::{AabbCentredOrigin, CollisionEnum},
+        calculate_velocities_during_elastic_collision,
+        calculate_velocities_during_elastic_collision_with_friction_and_restitution,
+    },
 };
 
 use super::Particle;
@@ -19,7 +23,7 @@ where
         delta_time: T,
     ) -> [T; 3];
     fn collide_with_others(&self) -> bool;
-    fn collide(&mut self, other: &mut Self, other_index: usize);
+    fn collide(&mut self, other: &mut Self, other_index: usize, delta_time: T);
 }
 
 /// A premade enum for you to use as the body type for the verlet solver.
@@ -66,7 +70,7 @@ where
 
     // This function is insanely expensive, no clue why.
     #[inline]
-    fn collide(&mut self, other: &mut CommonBody<T>, other_index: usize) {
+    fn collide(&mut self, other: &mut CommonBody<T>, other_index: usize, delta_time: T) {
         match (self, other) {
             // player
             (CommonBody::Player(lhs_player), CommonBody::Player(rhs_player)) => {
@@ -90,20 +94,27 @@ where
                         .get_collision_axis_with_direction(previous_player_aabb);
                     //println!("direction: {:?}", previous_collision_direction);
 
+                    let current_player_velocity = lhs_player.particle.calculate_velocity(delta_time);
+                    let collision_normal = math::normalise_3d(math::sub_3d(rhs_immovable_cuboid.aabb.position, lhs_player.particle.previous_position));
+                    let velocity_normal = math::dot(current_player_velocity, collision_normal);
+                    let player_velocity = math::sub_3d(current_player_velocity, math::mul_3d_by_1d(collision_normal, T::from_f32(2.0) * velocity_normal * lhs_player.restitution));
+                    println!("velocity: {:?}", player_velocity);
+                    lhs_player
+                        .particle
+                        .accelerate(math::div_3d_by_1d(math::neg_3d(player_velocity), delta_time));
+
                     // TODO: investigate stepping up onto small ledges
                     let step_up = true;
 
                     if CollisionEnum::Positive == previous_collision_direction[0] && !step_up {
                         lhs_player.particle.position[0] = rhs_immovable_cuboid.aabb.position[0]
                             - rhs_immovable_cuboid.aabb.half_size[0]
-                            - lhs_player.half_size[0]
-                            - T::from_f32(0.01);
+                            - lhs_player.half_size[0];
                     } else if CollisionEnum::Negative == previous_collision_direction[0] && !step_up
                     {
                         lhs_player.particle.position[0] = rhs_immovable_cuboid.aabb.position[0]
                             + rhs_immovable_cuboid.aabb.half_size[0]
-                            + lhs_player.half_size[0]
-                            + T::from_f32(0.01);
+                            + lhs_player.half_size[0];
                     }
 
                     if CollisionEnum::Positive == previous_collision_direction[1]
@@ -111,27 +122,24 @@ where
                     {
                         lhs_player.particle.position[1] = rhs_immovable_cuboid.aabb.position[1]
                             - rhs_immovable_cuboid.aabb.half_size[1]
-                            - lhs_player.half_size[1]
-                            - T::from_f32(0.01); // Need to remove small amount or else next time it will break direction, by being None in incorrect axis.
+                            - lhs_player.half_size[1];
+                            //- T::from_f32(0.01);
                         lhs_player.grounded = true;
                     } else if CollisionEnum::Negative == previous_collision_direction[1] {
                         lhs_player.particle.position[1] = rhs_immovable_cuboid.aabb.position[1]
                             + rhs_immovable_cuboid.aabb.half_size[1]
-                            + lhs_player.half_size[1]
-                            + T::from_f32(0.01);
+                            + lhs_player.half_size[1];
                     }
 
                     if CollisionEnum::Positive == previous_collision_direction[2] && !step_up {
                         lhs_player.particle.position[2] = rhs_immovable_cuboid.aabb.position[2]
                             - rhs_immovable_cuboid.aabb.half_size[2]
                             - lhs_player.half_size[2]
-                            - T::from_f32(0.01);
                     } else if CollisionEnum::Negative == previous_collision_direction[2] && !step_up
                     {
                         lhs_player.particle.position[2] = rhs_immovable_cuboid.aabb.position[2]
                             + rhs_immovable_cuboid.aabb.half_size[2]
                             + lhs_player.half_size[2]
-                            + T::from_f32(0.01);
                     }
                 }
             }
@@ -187,6 +195,9 @@ where
     T: math::Float,
 {
     pub particle: Particle<T>,
+    pub mass: T,
+    pub friction: T,
+    pub restitution: T,
     pub half_size: [T; 3],
     pub dampening: [T; 3],
     pub grounded: bool,
