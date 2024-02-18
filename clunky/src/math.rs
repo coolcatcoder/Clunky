@@ -16,13 +16,16 @@ pub trait Number:
     + ops::Add<Output = Self>
     + ops::AddAssign
     + ops::Sub<Output = Self>
+    + ops::SubAssign
     + ops::Mul<Output = Self>
     + ops::Div<Output = Self>
     + ops::Rem<Output = Self>
     + PartialOrd
     + std::fmt::Debug
+    + From<u16>
 {
     const ZERO: Self;
+    const ONE: Self;
     fn abs(self) -> Self;
     fn to_usize(self) -> usize; // TODO: all number should be able to convert to all other numbers, but this will take a few minutes, and I'm lazy
     fn to_isize(self) -> isize;
@@ -40,6 +43,7 @@ pub trait Float: Number + ops::Neg<Output = Self> {
 
 impl Number for f32 {
     const ZERO: Self = 0.0;
+    const ONE: Self = 1.0;
     #[inline]
     fn abs(self) -> Self {
         self.abs()
@@ -91,8 +95,63 @@ impl Float for f32 {
     }
 }
 
+impl Number for f64 {
+    const ZERO: Self = 0.0;
+    const ONE: Self = 1.0;
+    #[inline]
+    fn abs(self) -> Self {
+        self.abs()
+    }
+
+    #[inline]
+    fn to_usize(self) -> usize {
+        self as usize
+    }
+    #[inline]
+    fn to_isize(self) -> isize {
+        self as isize
+    }
+    #[inline]
+    fn is_sign_positive(self) -> bool {
+        self.is_sign_positive()
+    }
+}
+
+impl Float for f64 {
+    #[inline]
+    fn sqrt(self) -> Self {
+        self.sqrt()
+    }
+
+    #[inline]
+    fn sin(self) -> Self {
+        self.sin()
+    }
+
+    #[inline]
+    fn cos(self) -> Self {
+        self.cos()
+    }
+
+    #[inline]
+    fn to_radians(self) -> Self {
+        self.to_radians()
+    }
+
+    #[inline]
+    fn from_f32(value: f32) -> Self {
+        value as f64
+    }
+
+    #[inline]
+    fn from_f64(value: f64) -> Self {
+        value
+    }
+}
+
 impl Number for usize {
     const ZERO: Self = 0;
+    const ONE: Self = 1;
     #[inline]
     fn abs(self) -> Self {
         self
@@ -431,6 +490,22 @@ pub fn normalise_3d<T: Float>(vector: [T; 3]) -> [T; 3] {
     ]
 }
 
+/// Multiply a 2d number by another 2d number.
+/// \[lhs\[0] * rhs\[0], lhs\[1] * rhs\[1],]
+#[inline]
+#[must_use]
+pub fn mul_2d<T: Number>(lhs: [T; 2], rhs: [T; 2]) -> [T; 2] {
+    [lhs[0] * rhs[0], lhs[1] * rhs[1]]
+}
+
+/// Multiply a 2d number by a 1d number.
+/// \[lhs\[0] * rhs, lhs\[1] * rhs,]
+#[inline]
+#[must_use]
+pub fn mul_2d_by_1d<T: Number>(lhs: [T; 2], rhs: T) -> [T; 2] {
+    [lhs[0] * rhs, lhs[1] * rhs]
+}
+
 #[inline]
 pub fn add_3d<T: Number>(lhs: [T; 3], rhs: [T; 3]) -> [T; 3] {
     [lhs[0] + rhs[0], lhs[1] + rhs[1], lhs[2] + rhs[2]]
@@ -441,6 +516,8 @@ pub fn sub_3d<T: Number>(lhs: [T; 3], rhs: [T; 3]) -> [T; 3] {
     [lhs[0] - rhs[0], lhs[1] - rhs[1], lhs[2] - rhs[2]]
 }
 
+/// Multiply a 3d number by another 3d number.
+/// \[lhs\[0] * rhs\[0], lhs\[1] * rhs\[1], lhs\[2] * rhs\[2],]
 #[inline]
 pub fn mul_3d<T: Number>(lhs: [T; 3], rhs: [T; 3]) -> [T; 3] {
     [lhs[0] * rhs[0], lhs[1] * rhs[1], lhs[2] * rhs[2]]

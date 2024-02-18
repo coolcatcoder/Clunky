@@ -1,16 +1,4 @@
-pub mod colour_3d_instanced_vertex_shader {
-    vulkano_shaders::shader! {
-        ty: "vertex",
-        path: "src/shaders/colour_3d_instanced_shaders/vertex_shader.vert",
-    }
-}
-
-pub mod colour_3d_instanced_fragment_shader {
-    vulkano_shaders::shader! {
-        ty: "fragment",
-        path: "src/shaders/colour_3d_instanced_shaders/fragment_shader.frag",
-    }
-}
+pub mod colour_3d_instanced_shaders;
 
 pub mod uv_3d_instanced_vertex_shader {
     vulkano_shaders::shader! {

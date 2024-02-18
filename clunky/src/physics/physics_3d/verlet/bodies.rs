@@ -95,13 +95,11 @@ where
                     //println!("direction: {:?}", previous_collision_direction);
 
                     let current_player_velocity = lhs_player.particle.calculate_velocity(delta_time);
-                    let collision_normal = math::normalise_3d(math::sub_3d(rhs_immovable_cuboid.aabb.position, lhs_player.particle.previous_position));
-                    let velocity_normal = math::dot(current_player_velocity, collision_normal);
-                    let player_velocity = math::sub_3d(current_player_velocity, math::mul_3d_by_1d(collision_normal, T::from_f32(2.0) * velocity_normal * lhs_player.restitution));
-                    println!("velocity: {:?}", player_velocity);
+                    let player_velocity = math::neg_3d(current_player_velocity);
+                    //println!("velocity: {:?}", player_velocity);
                     lhs_player
                         .particle
-                        .accelerate(math::div_3d_by_1d(math::neg_3d(player_velocity), delta_time));
+                        .accelerate(math::div_3d_by_1d(player_velocity, delta_time));
 
                     // TODO: investigate stepping up onto small ledges
                     let step_up = true;
@@ -120,10 +118,15 @@ where
                     if CollisionEnum::Positive == previous_collision_direction[1]
                         || (step_up && CollisionEnum::None == previous_collision_direction[1])
                     {
+                        let temp_lhs_player_position = lhs_player.particle.position[1];
                         lhs_player.particle.position[1] = rhs_immovable_cuboid.aabb.position[1]
                             - rhs_immovable_cuboid.aabb.half_size[1]
                             - lhs_player.half_size[1];
-                            //- T::from_f32(0.01);
+                        
+                        println!("{:?}", temp_lhs_player_position - lhs_player.particle.position[1]);
+
+                        lhs_player.particle.acceleration[1] -= (temp_lhs_player_position - lhs_player.particle.position[1]) / (delta_time * delta_time);
+
                         lhs_player.grounded = true;
                     } else if CollisionEnum::Negative == previous_collision_direction[1] {
                         lhs_player.particle.position[1] = rhs_immovable_cuboid.aabb.position[1]

@@ -237,6 +237,7 @@ dependencies = [
  "smallvec",
  "vulkano",
  "vulkano-shaders",
+ "vulkano-util",
  "vulkano-win",
  "winit",
 ]
@@ -1473,6 +1474,17 @@ dependencies = [
  "shaderc",
  "syn 2.0.39",
  "vulkano",
+]
+
+[[package]]
+name = "vulkano-util"
+version = "0.34.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ff1f96a4055a8362c8fa77a17c01da184c6412961cd9572110533ff89e6669a7"
+dependencies = [
+ "ahash",
+ "vulkano",
+ "winit",
 ]
 
 [[package]]

@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Instant};
 
 use clunky::{
     buffer_contents,
-    lost_code::{is_pressed, FixedUpdate},
+    lost_code::{is_pressed, FixedUpdate, FpsTracker},
     math::{self, Degrees, Matrix4, Radians},
     meshes,
     physics::physics_3d::{
@@ -298,7 +298,7 @@ fn main() {
         instance_buffer: vec![],
     };
 
-    let mut camera_uniform = shaders::colour_3d_instanced_vertex_shader::CameraData3D {
+    let mut camera_uniform = shaders::colour_3d_instanced_shaders::vertex_shader::CameraData3D {
         position: [0.0, 0.0, 0.0],
 
         ambient_strength: 0.3,
@@ -426,12 +426,7 @@ fn main() {
 
     let mut fixed_update_runner = FixedUpdate::new(FIXED_DELTA_TIME);
 
-    let mut delta_time_sum = 0.0;
-    let mut average_fps = 0.0;
-    let mut frame_count = 0.0;
-    let mut delta_time = 0.0;
-
-    let mut time = Instant::now();
+    let mut fps_tracker = FpsTracker::<f32>::new();
 
     let time_since_start = Instant::now();
 
@@ -723,16 +718,7 @@ fn main() {
 
                 frames_since_start += 1;
 
-                if delta_time_sum > 1.0 {
-                    average_fps = frame_count / delta_time_sum;
-                    frame_count = 0.0;
-                    delta_time_sum = 0.0;
-                }
-
-                delta_time = time.elapsed().as_secs_f32();
-                delta_time_sum += delta_time;
-                frame_count += 1.0;
-                time = Instant::now();
+                fps_tracker.update();
             }
 
             Event::WindowEvent {
@@ -746,7 +732,7 @@ fn main() {
                     &mut jump_held,
                     &window,
                     control_flow,
-                    &average_fps,
+                    fps_tracker.average_fps(),
                 );
             }
 
@@ -807,7 +793,7 @@ fn fixed_update(
     moon_wax_tree_buffers: &mut UvBuffers,
     simple_grass_buffers: &mut ColourBuffers,
     islands: &Islands,
-    camera_uniform: &mut shaders::colour_3d_instanced_vertex_shader::CameraData3D,
+    camera_uniform: &mut shaders::colour_3d_instanced_shaders::vertex_shader::CameraData3D,
     aspect_ratio: &f32,
 ) {
     let CommonBody::Player(player) = &mut verlet_solver.bodies[0] else {
@@ -1085,7 +1071,7 @@ fn on_keyboard_input(
     jump_held: &mut bool,
     window: &Arc<Window>,
     control_flow: &mut ControlFlow,
-    average_fps: &f32,
+    average_fps: f32,
 ) {
     if let Some(key_code) = input.virtual_keycode {
         match key_code {
@@ -1197,12 +1183,12 @@ fn get_colour_pipeline(
     extent: [u32; 3],
     render_pass: &Arc<RenderPass>,
 ) -> Arc<GraphicsPipeline> {
-    let vertex_shader_entrance = shaders::colour_3d_instanced_vertex_shader::load(device.clone())
+    let vertex_shader_entrance = shaders::colour_3d_instanced_shaders::vertex_shader::load(device.clone())
         .unwrap()
         .entry_point("main")
         .unwrap();
     let fragment_shader_entrance =
-        shaders::colour_3d_instanced_fragment_shader::load(device.clone())
+        shaders::colour_3d_instanced_shaders::fragment_shader::load(device.clone())
             .unwrap()
             .entry_point("main")
             .unwrap();

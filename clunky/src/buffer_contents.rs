@@ -159,6 +159,8 @@ pub struct PositionOnlyVertex {
     pub position: [f32; 3],
 }
 
+/// A basic 3d vertex.
+/// Absolutely horrible name! And even worse documentation!
 #[derive(BufferContents, Vertex, Copy, Clone, Debug)]
 #[repr(C)]
 pub struct Basic3DVertex {

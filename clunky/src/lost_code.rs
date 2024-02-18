@@ -4,6 +4,8 @@ use std::time::Instant;
 
 use winit::event::ElementState;
 
+use crate::math::Float;
+
 pub fn wrap(value: f32, start: f32, limit: f32) -> f32 {
     start + (value - start) % (limit - start)
 }
@@ -58,6 +60,53 @@ impl FixedUpdate {
                     substeps
                 )
             }
+        }
+    }
+}
+
+/// Keeps track of how many frames are shown per second.
+pub struct FpsTracker<T: Float> {
+    delta_time_sum: T,
+    average_fps: T,
+    frame_count: u16, // If you have over 60 thousand fps, then you have a problem. Try implementing some inefficient single threaded cpu fluid physics to slow things down a bit.
+    delta_time: T,
+    time_since_previous_frame: Instant,
+}
+
+impl<T: Float> FpsTracker<T> {
+    /// Creates a new fps tracker!
+    #[must_use]
+    pub fn new() -> FpsTracker<T> {
+        FpsTracker {
+            delta_time_sum: T::ZERO,
+            average_fps: T::ZERO,
+            frame_count: 0,
+            delta_time: T::ZERO,
+            time_since_previous_frame: Instant::now(),
+        }
+    }
+    /// Gets fps averaged over the last second-ish.
+    /// We can't stop at the end of a second exactly, hence why it is slightly averaged.
+    #[inline]
+    #[must_use]
+    pub fn average_fps(&self) -> T {
+        self.average_fps
+    }
+
+    /// Call this when a frame has passed.
+    /// Updates delta_time.
+    /// If over a second has passed, it sets average_fps.
+    pub fn update(&mut self) {
+        // Bit messy, but it works.
+        self.delta_time = T::from_f64(self.time_since_previous_frame.elapsed().as_secs_f64());
+        self.delta_time_sum += self.delta_time;
+        self.frame_count += 1;
+        self.time_since_previous_frame = Instant::now();
+
+        if self.delta_time_sum > T::ONE {
+            self.average_fps = T::from(self.frame_count) / self.delta_time_sum;
+            self.frame_count = 0;
+            self.delta_time_sum = T::ZERO;
         }
     }
 }

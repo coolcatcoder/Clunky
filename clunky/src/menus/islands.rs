@@ -113,7 +113,7 @@ pub struct OtherExample3DStorage {
     simple_grass_index_buffer: Subbuffer<[u32]>,
     simple_grass_instance_buffer: Vec<buffer_contents::Colour3DInstance>,
 
-    uniform_buffer: shaders::colour_3d_instanced_vertex_shader::CameraData3D,
+    uniform_buffer: shaders::colour_3d_instanced_shaders::vertex_shader::CameraData3D,
     //box_pipeline: Arc<GraphicsPipeline>,
     //sphere_pipeline: Arc<GraphicsPipeline>, TODO: I just can't work out how to do this. I can't init this, because I don't have the stuff until later. I could do Option<> but that is messy and is terrible.
     verlet_solver: physics::physics_3d::verlet::CpuSolver<
@@ -463,7 +463,7 @@ pub fn get_starting_storage(render_storage: &mut crate::RenderStorage) -> OtherE
         .unwrap(),
         simple_grass_instance_buffer: vec![],
 
-        uniform_buffer: shaders::colour_3d_instanced_vertex_shader::CameraData3D {
+        uniform_buffer: shaders::colour_3d_instanced_shaders::vertex_shader::CameraData3D {
             position: [0.0, 0.0, 0.0],
 
             ambient_strength: 0.3,
@@ -1328,12 +1328,12 @@ fn get_colour_pipeline(
     extent: [u32; 3],
     render_pass: Arc<RenderPass>,
 ) -> Arc<GraphicsPipeline> {
-    let vertex_shader_entrance = shaders::colour_3d_instanced_vertex_shader::load(device.clone())
+    let vertex_shader_entrance = shaders::colour_3d_instanced_shaders::vertex_shader::load(device.clone())
         .unwrap()
         .entry_point("main")
         .unwrap();
     let fragment_shader_entrance =
-        shaders::colour_3d_instanced_fragment_shader::load(device.clone())
+        shaders::colour_3d_instanced_shaders::fragment_shader::load(device.clone())
             .unwrap()
             .entry_point("main")
             .unwrap();

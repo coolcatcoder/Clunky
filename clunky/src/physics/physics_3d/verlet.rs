@@ -62,8 +62,7 @@ where
     }
 }
 
-// Solvers are always way too set in stone for my liking currently.
-
+// This solver should not be in verlet.rs as it could be easilly generalised to work with any integration technique, or even multiple different ones at once.
 pub struct CpuSolver<T, B>
 where
     T: math::Float,

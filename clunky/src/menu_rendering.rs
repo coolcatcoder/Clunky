@@ -53,7 +53,7 @@ impl VertexShader {
             VertexShader::Colour2D => shaders::colour_2d_vertex_shader::load(device),
             VertexShader::Uv2D => shaders::uv_2d_vertex_shader::load(device),
             VertexShader::Colour3DInstanced => {
-                shaders::colour_3d_instanced_vertex_shader::load(device)
+                shaders::colour_3d_instanced_shaders::vertex_shader::load(device)
             }
         }
     }
@@ -70,7 +70,7 @@ impl FragmentShader {
             FragmentShader::Colour2D => shaders::colour_2d_fragment_shader::load(device),
             FragmentShader::Uv2D => shaders::uv_2d_fragment_shader::load(device),
             FragmentShader::Colour3DInstanced => {
-                shaders::colour_3d_instanced_fragment_shader::load(device)
+                shaders::colour_3d_instanced_shaders::fragment_shader::load(device)
             }
         }
     }
@@ -395,7 +395,7 @@ pub(crate) use instance_buffer_generic_caller;
 
 pub enum UniformBuffer {
     CameraData2D(BufferTypes<shaders::colour_2d_vertex_shader::CameraData2D>),
-    CameraData3D(BufferTypes<shaders::colour_3d_instanced_vertex_shader::CameraData3D>),
+    CameraData3D(BufferTypes<shaders::colour_3d_instanced_shaders::vertex_shader::CameraData3D>),
 }
 
 pub struct RenderBuffers {
