@@ -1183,10 +1183,11 @@ fn get_colour_pipeline(
     extent: [u32; 3],
     render_pass: &Arc<RenderPass>,
 ) -> Arc<GraphicsPipeline> {
-    let vertex_shader_entrance = shaders::colour_3d_instanced_shaders::vertex_shader::load(device.clone())
-        .unwrap()
-        .entry_point("main")
-        .unwrap();
+    let vertex_shader_entrance =
+        shaders::colour_3d_instanced_shaders::vertex_shader::load(device.clone())
+            .unwrap()
+            .entry_point("main")
+            .unwrap();
     let fragment_shader_entrance =
         shaders::colour_3d_instanced_shaders::fragment_shader::load(device.clone())
             .unwrap()

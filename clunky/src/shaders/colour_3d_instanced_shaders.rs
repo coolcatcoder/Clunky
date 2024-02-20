@@ -1,6 +1,23 @@
 use std::sync::Arc;
 
-use vulkano::{device::Device, pipeline::{graphics::{color_blend::{AttachmentBlend, ColorBlendAttachmentState, ColorBlendState}, depth_stencil::{CompareOp, DepthState, DepthStencilState}, input_assembly::{InputAssemblyState, PrimitiveTopology}, multisample::MultisampleState, rasterization::{CullMode, FrontFace, RasterizationState}, vertex_input::{Vertex, VertexDefinition}, viewport::ViewportState, GraphicsPipelineCreateInfo}, layout::PipelineDescriptorSetLayoutCreateInfo, DynamicState, GraphicsPipeline, PipelineLayout, PipelineShaderStageCreateInfo}, render_pass::Subpass};
+use vulkano::{
+    device::Device,
+    pipeline::{
+        graphics::{
+            color_blend::{AttachmentBlend, ColorBlendAttachmentState, ColorBlendState},
+            depth_stencil::{CompareOp, DepthState, DepthStencilState},
+            input_assembly::{InputAssemblyState, PrimitiveTopology},
+            multisample::MultisampleState,
+            rasterization::{CullMode, FrontFace, RasterizationState},
+            vertex_input::{Vertex, VertexDefinition},
+            viewport::ViewportState,
+            GraphicsPipelineCreateInfo,
+        },
+        layout::PipelineDescriptorSetLayoutCreateInfo,
+        DynamicState, GraphicsPipeline, PipelineLayout, PipelineShaderStageCreateInfo,
+    },
+    render_pass::Subpass,
+};
 
 use crate::buffer_contents;
 
@@ -21,19 +38,15 @@ pub mod fragment_shader {
 /// Creates a basic pipeline that works with this shader sometimes.
 /// There is no good way to make this work for most use cases currently.
 /// Use at your own risk.
-pub fn create_pipeline(
-    device: Arc<Device>,
-    subpass: Subpass,
-) -> Arc<GraphicsPipeline> {
+pub fn create_pipeline(device: Arc<Device>, subpass: Subpass) -> Arc<GraphicsPipeline> {
     let vertex_shader_entrance = vertex_shader::load(device.clone())
         .unwrap()
         .entry_point("main")
         .unwrap();
-    let fragment_shader_entrance =
-        fragment_shader::load(device.clone())
-            .unwrap()
-            .entry_point("main")
-            .unwrap();
+    let fragment_shader_entrance = fragment_shader::load(device.clone())
+        .unwrap()
+        .entry_point("main")
+        .unwrap();
 
     let vertex_input_state = [
         buffer_contents::Basic3DVertex::per_vertex(),

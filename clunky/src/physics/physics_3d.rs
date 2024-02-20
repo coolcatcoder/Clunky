@@ -61,8 +61,7 @@ pub fn calculate_velocities_during_elastic_collision_with_friction_and_restituti
     let relative_velocity_before = math::sub_3d(rhs_velocity, lhs_velocity);
 
     // Before the mangling: (lhs_restitution + rhs_restitution) * (lhs_mass * rhs_mass) / (lhs_mass + rhs_mass) * dot(relative_velocity_before, total_momentum_before) / dot(total_momentum_before, total_momentum_before)
-    let impulse = (T::from_f32(1.0) + restitution) * (lhs_mass * rhs_mass)
-        / (lhs_mass + rhs_mass)
+    let impulse = (T::from_f32(1.0) + restitution) * (lhs_mass * rhs_mass) / (lhs_mass + rhs_mass)
         * math::dot(relative_velocity_before, total_momentum_before)
         / math::dot(total_momentum_before, total_momentum_before);
 

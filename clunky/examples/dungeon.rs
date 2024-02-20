@@ -1,19 +1,49 @@
 use std::sync::Arc;
 
-use clunky::{buffer_contents, lost_code::FpsTracker, math, physics::physics_3d::verlet::{bodies::CommonBody, CpuSolver, OutsideOfGridBoundsBehaviour}, shaders::colour_3d_instanced_shaders};
-use rand::{distributions::{Distribution, Uniform}, rngs::ThreadRng};
-use vulkano::{command_buffer::{allocator::StandardCommandBufferAllocator, AutoCommandBufferBuilder, CommandBufferUsage, RenderPassBeginInfo}, device::Device, format::{ClearValue, Format}, image::{view::ImageView, Image, ImageCreateInfo, ImageType, ImageUsage}, memory::allocator::AllocationCreateInfo, pipeline::GraphicsPipeline, render_pass::{Framebuffer, RenderPass, Subpass}};
-use vulkano_util::{context::{VulkanoConfig, VulkanoContext}, renderer::VulkanoWindowRenderer, window::VulkanoWindows};
-use winit::{event::{DeviceEvent, Event, WindowEvent}, event_loop::{ControlFlow, EventLoop}, window::WindowId};
+use clunky::{
+    buffer_contents::{self, Colour3DInstance},
+    lost_code::FpsTracker,
+    math::{self, Matrix4},
+    physics::physics_3d::verlet::{bodies::CommonBody, CpuSolver, OutsideOfGridBoundsBehaviour},
+    shaders::colour_3d_instanced_shaders,
+};
+use rand::{
+    distributions::{Distribution, Uniform},
+    rngs::ThreadRng,
+};
+use vulkano::{
+    command_buffer::{
+        allocator::StandardCommandBufferAllocator, AutoCommandBufferBuilder, CommandBufferUsage,
+        RenderPassBeginInfo,
+    },
+    device::Device,
+    format::{ClearValue, Format},
+    image::{view::ImageView, Image, ImageCreateInfo, ImageType, ImageUsage},
+    memory::allocator::AllocationCreateInfo,
+    pipeline::GraphicsPipeline,
+    render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass, Subpass},
+};
+use vulkano_util::{
+    context::{VulkanoConfig, VulkanoContext},
+    renderer::VulkanoWindowRenderer,
+    window::VulkanoWindows,
+};
+use winit::{
+    event::{DeviceEvent, Event, WindowEvent},
+    event_loop::{ControlFlow, EventLoop},
+    window::WindowId,
+};
 
 const DUNGEON_SIZE: usize = 10;
 const ROOM_SIZE: [usize; 3] = [10, 10, 10];
+const DOOR_WIDTH_HEIGHT_AND_THICKNESS: [f32; 3] = [2.0, 3.0, 1.5];
 
 fn main() {
     let context = VulkanoContext::new(VulkanoConfig::default());
     let event_loop = EventLoop::new();
     let mut windows_manager = VulkanoWindows::default();
-    let window_id = windows_manager.create_window(&event_loop, &context, &Default::default(), |_| {});
+    let window_id =
+        windows_manager.create_window(&event_loop, &context, &Default::default(), |_| {});
 
     let render_pass = vulkano::single_pass_renderpass!(
         context.device().clone(),
@@ -57,8 +87,8 @@ fn main() {
             }
 
             Event::WindowEvent {
-                event: WindowEvent::Resized(..) | WindowEvent::ScaleFactorChanged {..},
-                window_id
+                event: WindowEvent::Resized(..) | WindowEvent::ScaleFactorChanged { .. },
+                window_id,
             } => {
                 let window_renderer = windows_manager.get_renderer_mut(window_id).unwrap();
                 window_renderer.resize();
@@ -67,35 +97,38 @@ fn main() {
             }
 
             Event::MainEventsCleared => {
-                render(&context, &mut windows_manager, window_id, &allocators);
+                render(&context, &mut windows_manager, window_id, &allocators, &render_pass);
                 fps_tracker.update();
-                println!("{}",fps_tracker.average_fps());
+                println!("{}", fps_tracker.average_fps());
             }
 
             Event::WindowEvent {
                 event: WindowEvent::KeyboardInput { input, .. },
                 ..
-            } => {
-            }
+            } => {}
 
             Event::DeviceEvent {
                 event: DeviceEvent::Motion { axis, value },
                 ..
-            } => {
-            }
+            } => {}
 
             Event::DeviceEvent {
                 event: DeviceEvent::MouseWheel { delta },
                 ..
-            } => {
-            }
+            } => {}
 
             _ => (),
         }
     });
 }
 
-fn render(context: &VulkanoContext, windows_manager: &mut VulkanoWindows, window_id: WindowId, allocators: &Allocators) {
+fn render(
+    context: &VulkanoContext,
+    windows_manager: &mut VulkanoWindows,
+    window_id: WindowId,
+    allocators: &Allocators,
+    render_pass: &Arc<RenderPass>,
+) {
     let window_renderer = windows_manager.get_renderer_mut(window_id).unwrap();
     let future = window_renderer.acquire().unwrap();
 
@@ -105,6 +138,30 @@ fn render(context: &VulkanoContext, windows_manager: &mut VulkanoWindows, window
         CommandBufferUsage::OneTimeSubmit,
     )
     .unwrap();
+
+    let depth_buffer_view = ImageView::new_default(
+        Image::new(
+            context.memory_allocator().clone(),
+            ImageCreateInfo {
+                image_type: ImageType::Dim2d,
+                format: Format::D32_SFLOAT,
+                extent: window_renderer.swapchain_image_view().image().extent(),
+                usage: ImageUsage::TRANSIENT_ATTACHMENT | ImageUsage::DEPTH_STENCIL_ATTACHMENT,
+                ..Default::default()
+            },
+            AllocationCreateInfo::default(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    let framebuffer = Framebuffer::new(
+        render_pass.clone(),
+        FramebufferCreateInfo {
+            attachments: vec![window_renderer.swapchain_image_view(), depth_buffer_view],
+            ..Default::default()
+        }
+    );
 
     /*
     command_buffer_builder
@@ -130,17 +187,23 @@ struct Allocators {
 
 fn create_allocators(device: &Arc<Device>) -> Allocators {
     Allocators {
-        command_buffer_allocator: StandardCommandBufferAllocator::new(device.clone(), Default::default()),
+        command_buffer_allocator: StandardCommandBufferAllocator::new(
+            device.clone(),
+            Default::default(),
+        ),
     }
 }
 
 struct Pipelines {
-    colour_pipeline: Arc<GraphicsPipeline>
+    colour_pipeline: Arc<GraphicsPipeline>,
 }
 
 fn create_pipelines(device: &Arc<Device>, render_pass: &Arc<RenderPass>) -> Pipelines {
     Pipelines {
-        colour_pipeline: colour_3d_instanced_shaders::create_pipeline(device.clone(), Subpass::from(render_pass.clone(), 0).unwrap()),
+        colour_pipeline: colour_3d_instanced_shaders::create_pipeline(
+            device.clone(),
+            Subpass::from(render_pass.clone(), 0).unwrap(),
+        ),
     }
 }
 
@@ -183,7 +246,7 @@ struct Game {
 
 fn create_game() -> Game {
     let mut game = Game {
-        rooms: Vec::with_capacity(DUNGEON_SIZE*DUNGEON_SIZE),
+        rooms: Vec::with_capacity(DUNGEON_SIZE * DUNGEON_SIZE),
         physics: CpuSolver::new(
             [0.0, 50.0, 0.0],
             [0.8, 1.0, 0.8],
@@ -191,15 +254,19 @@ fn create_game() -> Game {
             [0.0, 0.0, 0.0],
             ROOM_SIZE,
             OutsideOfGridBoundsBehaviour::ContinueUpdating,
-            Vec::with_capacity(DUNGEON_SIZE*DUNGEON_SIZE*10) // Around 10 bodies per room seems reasonable.
-        )
+            Vec::with_capacity(DUNGEON_SIZE * DUNGEON_SIZE * 10), // Around 10 bodies per room seems reasonable.
+        ),
     };
 
     let mut rng = rand::thread_rng();
     let variety_range = Uniform::from(0..10);
 
-    for i in 0..DUNGEON_SIZE*DUNGEON_SIZE {
-        game.rooms.push(generate_room(i, variety_range.sample(&mut rng), &mut game.physics));
+    for i in 0..DUNGEON_SIZE * DUNGEON_SIZE {
+        game.rooms.push(generate_room(
+            i,
+            variety_range.sample(&mut rng),
+            &mut game.physics,
+        ));
     }
 
     game
@@ -210,11 +277,138 @@ struct Room {
     cuboid_instances: Vec<buffer_contents::Colour3DInstance>,
 }
 
-fn generate_room(room_index: usize, variety: u8, physics: &mut CpuSolver<f32, CommonBody<f32>>) -> Room {
+fn generate_room(
+    room_index: usize,
+    variety: u8,
+    physics: &mut CpuSolver<f32, CommonBody<f32>>,
+) -> Room {
     let room_position = math::position_from_index_2d(room_index, DUNGEON_SIZE);
-    let real_room_position = [room_position[0] as f32 * ROOM_SIZE[0] as f32, room_position[1] as f32 * ROOM_SIZE[1] as f32];
+    let real_room_position = [
+        room_position[0] as f32 * ROOM_SIZE[0] as f32,
+        room_position[1] as f32 * ROOM_SIZE[1] as f32,
+    ];
+
+    let mut room = Room {
+        cuboid_instances: Vec::with_capacity(15), // 15 instances per room?
+    };
+
+    // bottom
+    room.cuboid_instances.push(Colour3DInstance::new(
+        [1.0, 1.0, 1.0, 1.0],
+        Matrix4::from_translation([
+            real_room_position[0] + ROOM_SIZE[0] as f32 * 0.5,
+            0.5,
+            real_room_position[2] + ROOM_SIZE[2] as f32 * 0.5,
+        ]) * Matrix4::from_scale([ROOM_SIZE[0] as f32, 1.0, ROOM_SIZE[2] as f32]),
+    ));
+
+    // Walls:
+
+    // top
+    room.cuboid_instances.push(Colour3DInstance::new(
+        [1.0, 1.0, 1.0, 1.0],
+        Matrix4::from_translation([
+            real_room_position[0] + ROOM_SIZE[0] as f32 * 0.5,
+            -(ROOM_SIZE[1] as f32) - 0.5,
+            real_room_position[2] + ROOM_SIZE[2] as f32 * 0.5,
+        ]) * Matrix4::from_scale([ROOM_SIZE[0] as f32, 1.0, ROOM_SIZE[2] as f32]),
+    ));
+
+    // +x
+    room.cuboid_instances.push(Colour3DInstance::new(
+        [1.0, 1.0, 1.0, 1.0],
+        Matrix4::from_translation([
+            real_room_position[0] + ROOM_SIZE[0] as f32 + 0.5,
+            ROOM_SIZE[1] as f32 * -0.5,
+            real_room_position[2] + ROOM_SIZE[2] as f32 * 0.5,
+        ]) * Matrix4::from_scale([1.0, ROOM_SIZE[1] as f32, ROOM_SIZE[2] as f32]),
+    ));
+
+    // -x
+    room.cuboid_instances.push(Colour3DInstance::new(
+        [1.0, 1.0, 1.0, 1.0],
+        Matrix4::from_translation([
+            real_room_position[0] - 0.5,
+            ROOM_SIZE[1] as f32 * -0.5,
+            real_room_position[2] + ROOM_SIZE[2] as f32 * 0.5,
+        ]) * Matrix4::from_scale([1.0, ROOM_SIZE[1] as f32, ROOM_SIZE[2] as f32]),
+    ));
+
+    // +z
+    room.cuboid_instances.push(Colour3DInstance::new(
+        [1.0, 1.0, 1.0, 1.0],
+        Matrix4::from_translation([
+            real_room_position[0] + ROOM_SIZE[0] as f32 * 0.5,
+            ROOM_SIZE[1] as f32 * -0.5,
+            real_room_position[2] + ROOM_SIZE[2] as f32 + 0.5,
+        ]) * Matrix4::from_scale([ROOM_SIZE[0] as f32, ROOM_SIZE[1] as f32, 1.0]),
+    ));
+
+    // -z
+    room.cuboid_instances.push(Colour3DInstance::new(
+        [1.0, 1.0, 1.0, 1.0],
+        Matrix4::from_translation([
+            real_room_position[0] + ROOM_SIZE[0] as f32 * 0.5,
+            ROOM_SIZE[1] as f32 * -0.5,
+            real_room_position[2] - 0.5,
+        ]) * Matrix4::from_scale([ROOM_SIZE[0] as f32, ROOM_SIZE[1] as f32, 1.0]),
+    ));
+
+    // Doors:
+
+    // +x
+    if room_position[0] != DUNGEON_SIZE-1 {
+        room.cuboid_instances.push(Colour3DInstance::new(
+            [1.0, 1.0, 1.0, 1.0],
+            Matrix4::from_translation([
+                real_room_position[0] + ROOM_SIZE[0] as f32 + 0.5,
+                ROOM_SIZE[1] as f32 * -0.5,
+                real_room_position[2] + ROOM_SIZE[2] as f32 * 0.5,
+            ]) * Matrix4::from_scale([DOOR_WIDTH_HEIGHT_AND_THICKNESS[2], DOOR_WIDTH_HEIGHT_AND_THICKNESS[1], DOOR_WIDTH_HEIGHT_AND_THICKNESS[0]]),
+        ));
+    }
+
+    // -x
+    if room_position[0] != DUNGEON_SIZE-1 {
+        room.cuboid_instances.push(Colour3DInstance::new(
+            [1.0, 1.0, 1.0, 1.0],
+            Matrix4::from_translation([
+                real_room_position[0] - 0.5,
+                ROOM_SIZE[1] as f32 * -0.5,
+                real_room_position[2] + ROOM_SIZE[2] as f32 * 0.5,
+            ]) * Matrix4::from_scale([DOOR_WIDTH_HEIGHT_AND_THICKNESS[2], DOOR_WIDTH_HEIGHT_AND_THICKNESS[1], DOOR_WIDTH_HEIGHT_AND_THICKNESS[0]]),
+        ));
+    }
+
+    // +z
+    if room_position[0] != DUNGEON_SIZE-1 {
+        room.cuboid_instances.push(Colour3DInstance::new(
+            [0.0, 0.0, 0.0, 1.0],
+            Matrix4::from_translation([
+                real_room_position[0] + ROOM_SIZE[0] as f32 * 0.5,
+                ROOM_SIZE[1] as f32 * -0.5,
+                real_room_position[2] + ROOM_SIZE[2] as f32 + 0.5,
+            ]) * Matrix4::from_scale([DOOR_WIDTH_HEIGHT_AND_THICKNESS[0], DOOR_WIDTH_HEIGHT_AND_THICKNESS[1], DOOR_WIDTH_HEIGHT_AND_THICKNESS[2]]),
+        ));
+    }
+
+    // -z
+    if room_position[0] != DUNGEON_SIZE-1 {
+        room.cuboid_instances.push(Colour3DInstance::new(
+            [0.0, 0.0, 0.0, 1.0],
+            Matrix4::from_translation([
+                real_room_position[0] + ROOM_SIZE[0] as f32 * 0.5,
+                ROOM_SIZE[1] as f32 * -0.5,
+                real_room_position[2] - 0.5,
+            ]) * Matrix4::from_scale([DOOR_WIDTH_HEIGHT_AND_THICKNESS[0], DOOR_WIDTH_HEIGHT_AND_THICKNESS[1], DOOR_WIDTH_HEIGHT_AND_THICKNESS[2]]),
+        ));
+    }
 
     match variety {
-        _ => unreachable!()
+        _ => {
+            unreachable!();
+        }
     }
+
+    room
 }

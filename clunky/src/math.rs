@@ -173,6 +173,8 @@ impl Number for usize {
     }
 }
 
+/// remember when doing matrix math transformations we do translate * rotate * scale unless you are doing world_to_camera, in which case it won't work, and you should try the reverse.
+/// All rights go to cgmath, I've just slighty tweaked their stuff.
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct Matrix4 {
@@ -429,6 +431,13 @@ impl Matrix4 {
     }
 }
 
+impl ops::Mul for Matrix4 {
+    type Output = Matrix4;
+    fn mul(self, rhs: Self) -> Self::Output {
+        self.multiply(rhs)
+    }
+}
+
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct Radians<T: Float>(pub T);
@@ -480,7 +489,7 @@ pub fn normalise_3d<T: Float>(vector: [T; 3]) -> [T; 3] {
 
     // We can't let this function return NaN.
     if magnitude == T::ZERO {
-        return [T::ZERO; 3]
+        return [T::ZERO; 3];
     }
 
     [

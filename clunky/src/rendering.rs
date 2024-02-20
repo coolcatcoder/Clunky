@@ -98,13 +98,13 @@ pub fn create_device_and_queue(
         })
         .unwrap();
 
-        /*
-        println!(
-            "Using device: {} (type: {:?})",
-            physical_device.properties().device_name,
-            physical_device.properties().device_type,
-        );
-        */
+    /*
+    println!(
+        "Using device: {} (type: {:?})",
+        physical_device.properties().device_name,
+        physical_device.properties().device_type,
+    );
+    */
 
     let (device, mut queues) = Device::new(
         physical_device,

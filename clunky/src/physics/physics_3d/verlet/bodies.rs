@@ -94,7 +94,8 @@ where
                         .get_collision_axis_with_direction(previous_player_aabb);
                     //println!("direction: {:?}", previous_collision_direction);
 
-                    let current_player_velocity = lhs_player.particle.calculate_velocity(delta_time);
+                    let current_player_velocity =
+                        lhs_player.particle.calculate_velocity(delta_time);
                     let player_velocity = math::neg_3d(current_player_velocity);
                     //println!("velocity: {:?}", player_velocity);
                     lhs_player
@@ -122,10 +123,15 @@ where
                         lhs_player.particle.position[1] = rhs_immovable_cuboid.aabb.position[1]
                             - rhs_immovable_cuboid.aabb.half_size[1]
                             - lhs_player.half_size[1];
-                        
-                        println!("{:?}", temp_lhs_player_position - lhs_player.particle.position[1]);
 
-                        lhs_player.particle.acceleration[1] -= (temp_lhs_player_position - lhs_player.particle.position[1]) / (delta_time * delta_time);
+                        println!(
+                            "{:?}",
+                            temp_lhs_player_position - lhs_player.particle.position[1]
+                        );
+
+                        lhs_player.particle.acceleration[1] -= (temp_lhs_player_position
+                            - lhs_player.particle.position[1])
+                            / (delta_time * delta_time);
 
                         lhs_player.grounded = true;
                     } else if CollisionEnum::Negative == previous_collision_direction[1] {
