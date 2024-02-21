@@ -5,6 +5,8 @@
 // split functions into const and non-const where applicable
 // Sort out the whole messy generic and non-generic stuff. Once const traits become stable, we must use them!
 
+// This will never be as good as glam and cgmath. Might give up maintaining this, and focus on things I can do! Like physics and premade shaders and such like.
+
 use const_soft_float::soft_f32::SoftF32;
 use std::ops;
 extern crate test;

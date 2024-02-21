@@ -523,7 +523,7 @@ fn main() {
                         recreate_swapchain = false;
                     }
 
-                    // Acquire imageto draw on.
+                    // Acquire image to draw on.
                     let (image_index, suboptimal, acquire_future) = match acquire_next_image(
                         swapchain.clone(),
                         None,
@@ -590,9 +590,12 @@ fn main() {
                         )
                         .unwrap();
 
+                    command_buffer_builder
+                        .bind_pipeline_graphics(pipelines.colour_pipeline.clone())
+                        .unwrap();
+
                     if test_box_instances.len() != 0 {
                         draw_instanced(
-                            pipelines.colour_pipeline.clone(),
                             &mut command_buffer_builder,
                             &test_box_instances,
                             &box_buffers.vertex_buffer,
@@ -602,7 +605,6 @@ fn main() {
                     }
                     if box_buffers.instance_buffer.len() != 0 {
                         draw_instanced(
-                            pipelines.colour_pipeline.clone(),
                             &mut command_buffer_builder,
                             &box_buffers.instance_buffer,
                             &box_buffers.vertex_buffer,
@@ -612,7 +614,6 @@ fn main() {
                     }
                     if sphere_buffers.instance_buffer.len() != 0 {
                         draw_instanced(
-                            pipelines.colour_pipeline.clone(),
                             &mut command_buffer_builder,
                             &sphere_buffers.instance_buffer,
                             &sphere_buffers.vertex_buffer,
@@ -622,7 +623,6 @@ fn main() {
                     }
                     if simple_grass_buffers.instance_buffer.len() != 0 {
                         draw_instanced(
-                            pipelines.colour_pipeline.clone(),
                             &mut command_buffer_builder,
                             &simple_grass_buffers.instance_buffer,
                             &simple_grass_buffers.vertex_buffer,
@@ -630,6 +630,10 @@ fn main() {
                             &subbuffer_allocator,
                         );
                     }
+
+                    command_buffer_builder
+                        .bind_pipeline_graphics(pipelines.uv_pipeline.clone())
+                        .unwrap();
 
                     command_buffer_builder
                         .bind_descriptor_sets(
@@ -672,7 +676,6 @@ fn main() {
 
                     if moon_wax_tree_buffers.instance_buffer.len() != 0 {
                         draw_instanced(
-                            pipelines.uv_pipeline.clone(),
                             &mut command_buffer_builder,
                             &moon_wax_tree_buffers.instance_buffer,
                             &moon_wax_tree_buffers.vertex_buffer,

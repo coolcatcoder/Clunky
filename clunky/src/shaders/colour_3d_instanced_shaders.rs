@@ -19,7 +19,10 @@ use vulkano::{
     render_pass::Subpass,
 };
 
-use crate::{buffer_contents, math};
+use crate::{
+    buffer_contents,
+    math::{self, Degrees, Matrix4, Radians},
+};
 
 pub mod vertex_shader {
     vulkano_shaders::shader! {
@@ -110,26 +113,43 @@ pub fn create_pipeline(device: Arc<Device>, subpass: Subpass) -> Arc<GraphicsPip
 }
 
 /// A more user friendly version of [vertex_shader::CameraData3D]
+/// Rotation is in degrees. I understand that this should be a quaternion.
 pub struct Camera {
     pub position: [f32; 3],
+    pub rotation: [f32; 3],
 
     pub ambient_strength: f32,
     pub specular_strength: f32,
     pub light_colour: [f32; 3],
     pub light_position: [f32; 3],
+
+    pub near_distance: f32,
+    pub far_distance: f32,
+    pub aspect_ratio: f32,
+    pub fov_y: Radians<f32>,
 }
 
 impl Camera {
     /// Converts the Camera into the uniform representation, so that the shader can use it.
     pub fn to_uniform(&self) -> vertex_shader::CameraData3D {
         vertex_shader::CameraData3D {
-            position: math::neg_3d(self.position),
+            position: self.position,
             ambient_strength: self.ambient_strength,
             specular_strength: self.specular_strength.into(),
             light_colour: self.light_colour.into(),
             light_position: self.light_position.into(),
-            camera_to_clip: todo!(),
-            world_to_camera: todo!(),
+            camera_to_clip: Matrix4::from_perspective(
+                self.fov_y,
+                self.aspect_ratio,
+                self.near_distance,
+                self.far_distance,
+            )
+            .as_2d_array(),
+            world_to_camera: (Matrix4::from_angle_x(Degrees(self.rotation[0]).to_radians())
+                * Matrix4::from_angle_y(Degrees(self.rotation[1]).to_radians())
+                * Matrix4::from_angle_z(Degrees(self.rotation[2]).to_radians())
+                * Matrix4::from_translation(math::neg_3d(self.position)))
+            .as_2d_array(),
         }
     }
 }

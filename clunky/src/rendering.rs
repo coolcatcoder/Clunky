@@ -308,7 +308,6 @@ pub enum ImageBytes<'a> {
 ///
 /// The name may change.
 pub fn draw_instanced<V, I>(
-    pipeline: Arc<GraphicsPipeline>,
     command_buffer_builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
     instances: &Vec<I>,
     vertices: &Subbuffer<[V]>,
@@ -324,8 +323,6 @@ pub fn draw_instanced<V, I>(
     instance_buffer.write().unwrap().copy_from_slice(instances);
 
     command_buffer_builder
-        .bind_pipeline_graphics(pipeline)
-        .unwrap()
         .bind_vertex_buffers(0, (vertices.clone(), instance_buffer))
         .unwrap()
         .bind_index_buffer(indices.clone())
