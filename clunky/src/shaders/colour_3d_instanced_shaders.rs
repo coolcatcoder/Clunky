@@ -19,7 +19,7 @@ use vulkano::{
     render_pass::Subpass,
 };
 
-use crate::buffer_contents;
+use crate::{buffer_contents, math};
 
 pub mod vertex_shader {
     vulkano_shaders::shader! {
@@ -107,4 +107,29 @@ pub fn create_pipeline(device: Arc<Device>, subpass: Subpass) -> Arc<GraphicsPip
         },
     )
     .unwrap()
+}
+
+/// A more user friendly version of [vertex_shader::CameraData3D]
+pub struct Camera {
+    pub position: [f32; 3],
+
+    pub ambient_strength: f32,
+    pub specular_strength: f32,
+    pub light_colour: [f32; 3],
+    pub light_position: [f32; 3],
+}
+
+impl Camera {
+    /// Converts the Camera into the uniform representation, so that the shader can use it.
+    pub fn to_uniform(&self) -> vertex_shader::CameraData3D {
+        vertex_shader::CameraData3D {
+            position: math::neg_3d(self.position),
+            ambient_strength: self.ambient_strength,
+            specular_strength: self.specular_strength.into(),
+            light_colour: self.light_colour.into(),
+            light_position: self.light_position.into(),
+            camera_to_clip: todo!(),
+            world_to_camera: todo!(),
+        }
+    }
 }

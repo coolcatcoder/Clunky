@@ -12,6 +12,10 @@ use rand::{
     rngs::ThreadRng,
 };
 use vulkano::{
+    buffer::{
+        allocator::{SubbufferAllocator, SubbufferAllocatorCreateInfo},
+        BufferUsage,
+    },
     command_buffer::{
         allocator::StandardCommandBufferAllocator, AutoCommandBufferBuilder, CommandBufferUsage,
         RenderPassBeginInfo,
@@ -19,7 +23,7 @@ use vulkano::{
     device::Device,
     format::{ClearValue, Format},
     image::{view::ImageView, Image, ImageCreateInfo, ImageType, ImageUsage},
-    memory::allocator::AllocationCreateInfo,
+    memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator},
     pipeline::GraphicsPipeline,
     render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass, Subpass},
 };
@@ -69,7 +73,7 @@ fn main() {
     .unwrap();
 
     let pipelines = create_pipelines(context.device(), &render_pass);
-    let allocators = create_allocators(context.device());
+    let allocators = create_allocators(context.device(), context.memory_allocator());
 
     let mut fps_tracker = FpsTracker::<f64>::new();
 
@@ -97,7 +101,14 @@ fn main() {
             }
 
             Event::MainEventsCleared => {
-                render(&context, &mut windows_manager, window_id, &allocators, &render_pass);
+                render(
+                    &context,
+                    &mut windows_manager,
+                    window_id,
+                    &allocators,
+                    &render_pass,
+                    &game,
+                );
                 fps_tracker.update();
                 println!("{}", fps_tracker.average_fps());
             }
@@ -128,6 +139,7 @@ fn render(
     window_id: WindowId,
     allocators: &Allocators,
     render_pass: &Arc<RenderPass>,
+    game: &Game,
 ) {
     let window_renderer = windows_manager.get_renderer_mut(window_id).unwrap();
     let future = window_renderer.acquire().unwrap();
@@ -138,6 +150,8 @@ fn render(
         CommandBufferUsage::OneTimeSubmit,
     )
     .unwrap();
+
+    // Creating a depth buffer and a frame buffer every frame is very very bad. Not avoidable until next vulkano version.
 
     let depth_buffer_view = ImageView::new_default(
         Image::new(
@@ -160,36 +174,49 @@ fn render(
         FramebufferCreateInfo {
             attachments: vec![window_renderer.swapchain_image_view(), depth_buffer_view],
             ..Default::default()
-        }
-    );
+        },
+    )
+    .unwrap();
 
-    /*
     command_buffer_builder
         .begin_render_pass(
             RenderPassBeginInfo {
                 clear_values: vec![
+                    // Sets background colour.
                     Some([0.0, 0.0, 1.0, 1.0].into()),
                     Some(ClearValue::Depth(1.0)),
                 ],
-                ..RenderPassBeginInfo::framebuffer(
-                    window_renderer.,
-                )
+                ..RenderPassBeginInfo::framebuffer(framebuffer)
             },
             Default::default(),
         )
         .unwrap();
-    */
 }
 
 struct Allocators {
     command_buffer_allocator: StandardCommandBufferAllocator,
+    subbuffer_allocator: SubbufferAllocator,
 }
 
-fn create_allocators(device: &Arc<Device>) -> Allocators {
+fn create_allocators(
+    device: &Arc<Device>,
+    memory_allocator: &Arc<StandardMemoryAllocator>,
+) -> Allocators {
     Allocators {
         command_buffer_allocator: StandardCommandBufferAllocator::new(
             device.clone(),
             Default::default(),
+        ),
+        subbuffer_allocator: SubbufferAllocator::new(
+            memory_allocator.clone(),
+            SubbufferAllocatorCreateInfo {
+                buffer_usage: BufferUsage::UNIFORM_BUFFER
+                    | BufferUsage::VERTEX_BUFFER
+                    | BufferUsage::INDEX_BUFFER,
+                memory_type_filter: MemoryTypeFilter::PREFER_DEVICE
+                    | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
+                ..Default::default()
+            },
         ),
     }
 }
@@ -242,6 +269,7 @@ fn window_size_dependent_setup(context: &VulkanoContext, window_renderer: &mut V
 struct Game {
     rooms: Vec<Room>,
     physics: CpuSolver<f32, CommonBody<f32>>,
+    //camera: colour_3d_instanced_shaders::vertex_shader::CameraData3D {}
 }
 
 fn create_game() -> Game {
@@ -357,50 +385,66 @@ fn generate_room(
     // Doors:
 
     // +x
-    if room_position[0] != DUNGEON_SIZE-1 {
+    if room_position[0] != DUNGEON_SIZE - 1 {
         room.cuboid_instances.push(Colour3DInstance::new(
             [1.0, 1.0, 1.0, 1.0],
             Matrix4::from_translation([
                 real_room_position[0] + ROOM_SIZE[0] as f32 + 0.5,
                 ROOM_SIZE[1] as f32 * -0.5,
                 real_room_position[2] + ROOM_SIZE[2] as f32 * 0.5,
-            ]) * Matrix4::from_scale([DOOR_WIDTH_HEIGHT_AND_THICKNESS[2], DOOR_WIDTH_HEIGHT_AND_THICKNESS[1], DOOR_WIDTH_HEIGHT_AND_THICKNESS[0]]),
+            ]) * Matrix4::from_scale([
+                DOOR_WIDTH_HEIGHT_AND_THICKNESS[2],
+                DOOR_WIDTH_HEIGHT_AND_THICKNESS[1],
+                DOOR_WIDTH_HEIGHT_AND_THICKNESS[0],
+            ]),
         ));
     }
 
     // -x
-    if room_position[0] != DUNGEON_SIZE-1 {
+    if room_position[0] != DUNGEON_SIZE - 1 {
         room.cuboid_instances.push(Colour3DInstance::new(
             [1.0, 1.0, 1.0, 1.0],
             Matrix4::from_translation([
                 real_room_position[0] - 0.5,
                 ROOM_SIZE[1] as f32 * -0.5,
                 real_room_position[2] + ROOM_SIZE[2] as f32 * 0.5,
-            ]) * Matrix4::from_scale([DOOR_WIDTH_HEIGHT_AND_THICKNESS[2], DOOR_WIDTH_HEIGHT_AND_THICKNESS[1], DOOR_WIDTH_HEIGHT_AND_THICKNESS[0]]),
+            ]) * Matrix4::from_scale([
+                DOOR_WIDTH_HEIGHT_AND_THICKNESS[2],
+                DOOR_WIDTH_HEIGHT_AND_THICKNESS[1],
+                DOOR_WIDTH_HEIGHT_AND_THICKNESS[0],
+            ]),
         ));
     }
 
     // +z
-    if room_position[0] != DUNGEON_SIZE-1 {
+    if room_position[0] != DUNGEON_SIZE - 1 {
         room.cuboid_instances.push(Colour3DInstance::new(
             [0.0, 0.0, 0.0, 1.0],
             Matrix4::from_translation([
                 real_room_position[0] + ROOM_SIZE[0] as f32 * 0.5,
                 ROOM_SIZE[1] as f32 * -0.5,
                 real_room_position[2] + ROOM_SIZE[2] as f32 + 0.5,
-            ]) * Matrix4::from_scale([DOOR_WIDTH_HEIGHT_AND_THICKNESS[0], DOOR_WIDTH_HEIGHT_AND_THICKNESS[1], DOOR_WIDTH_HEIGHT_AND_THICKNESS[2]]),
+            ]) * Matrix4::from_scale([
+                DOOR_WIDTH_HEIGHT_AND_THICKNESS[0],
+                DOOR_WIDTH_HEIGHT_AND_THICKNESS[1],
+                DOOR_WIDTH_HEIGHT_AND_THICKNESS[2],
+            ]),
         ));
     }
 
     // -z
-    if room_position[0] != DUNGEON_SIZE-1 {
+    if room_position[0] != DUNGEON_SIZE - 1 {
         room.cuboid_instances.push(Colour3DInstance::new(
             [0.0, 0.0, 0.0, 1.0],
             Matrix4::from_translation([
                 real_room_position[0] + ROOM_SIZE[0] as f32 * 0.5,
                 ROOM_SIZE[1] as f32 * -0.5,
                 real_room_position[2] - 0.5,
-            ]) * Matrix4::from_scale([DOOR_WIDTH_HEIGHT_AND_THICKNESS[0], DOOR_WIDTH_HEIGHT_AND_THICKNESS[1], DOOR_WIDTH_HEIGHT_AND_THICKNESS[2]]),
+            ]) * Matrix4::from_scale([
+                DOOR_WIDTH_HEIGHT_AND_THICKNESS[0],
+                DOOR_WIDTH_HEIGHT_AND_THICKNESS[1],
+                DOOR_WIDTH_HEIGHT_AND_THICKNESS[2],
+            ]),
         ));
     }
 
