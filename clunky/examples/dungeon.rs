@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use clunky::{
     buffer_contents::{self, Colour3DInstance},
-    lost_code::{FixedUpdate, FpsTracker},
+    lost_code::{is_pressed, FixedUpdate, FpsTracker},
     math::{self, Matrix4, Radians},
     meshes,
-    physics::physics_3d::verlet::{bodies::CommonBody, CpuSolver, OutsideOfGridBoundsBehaviour},
+    physics::physics_3d::{aabb::AabbCentredOrigin, verlet::{bodies::{CommonBody, ImmovableCuboid, Player}, CpuSolver, OutsideOfGridBoundsBehaviour, Particle}},
     rendering::draw_instanced,
     shaders::colour_3d_instanced_shaders::{self, Camera},
 };
@@ -39,7 +39,10 @@ use vulkano_util::{
     window::VulkanoWindows,
 };
 use winit::{
-    dpi::PhysicalPosition, event::{DeviceEvent, Event, WindowEvent}, event_loop::{ControlFlow, EventLoop}, window::WindowId
+    dpi::PhysicalPosition,
+    event::{DeviceEvent, Event, KeyboardInput, VirtualKeyCode, WindowEvent},
+    event_loop::{ControlFlow, EventLoop},
+    window::{Fullscreen, WindowId},
 };
 
 use vulkano::sync::GpuFuture;
@@ -55,13 +58,13 @@ fn main() {
     let context = VulkanoContext::new(VulkanoConfig::default());
     let event_loop = EventLoop::new();
     let mut windows_manager = VulkanoWindows::default();
-    let mut window_renderer = windows_manager.get_renderer_mut(windows_manager.create_window(&event_loop, &context, &Default::default(), |_| {})).unwrap();
+    windows_manager.create_window(&event_loop, &context, &Default::default(), |_| {});
 
     let render_pass = vulkano::single_pass_renderpass!(
         context.device().clone(),
         attachments: {
             color: {
-                format: window_renderer.swapchain_format(),
+                format: windows_manager.get_primary_renderer().unwrap().swapchain_format(),
                 samples: 1,
                 load_op: Clear,
                 store_op: Store,
@@ -116,16 +119,13 @@ fn main() {
         }
 
         Event::MainEventsCleared => {
-            fixed_update_runner.update(MAX_SUBSTEPS, || {
-                fixed_update()
-            });
+            fixed_update_runner.update(MAX_SUBSTEPS, || fixed_update(&mut game));
 
-            update();
+            update(&mut game);
 
             render(
                 &context,
                 &mut windows_manager,
-                window_renderer,
                 &allocators,
                 &render_pass,
                 &game,
@@ -140,26 +140,39 @@ fn main() {
             event: WindowEvent::KeyboardInput { input, .. },
             ..
         } => {
-            on_keyboard_input(input, control_flow, &fps_tracker, &mut window_renderer);
+            on_keyboard_input(
+                input,
+                control_flow,
+                &fps_tracker,
+                &mut windows_manager.get_primary_renderer_mut().unwrap(),
+                &mut game,
+            );
         }
 
         Event::DeviceEvent {
             event: DeviceEvent::Motion { axis, value },
             ..
         } => {
+            let window_renderer = windows_manager.get_primary_renderer_mut().unwrap();
             if !window_renderer.window().has_focus() {
                 return;
             }
 
             match axis {
                 0 => game.camera.rotation[1] += value as f32 * game.mouse_sensitivity,
-                1 => game.camera.rotation[0] += value as f32 * game.mouse_sensitivity,
+                1 => game.camera.rotation[0] -= value as f32 * game.mouse_sensitivity,
+                _ => (),
             }
 
-            window_renderer.window().set_cursor_position(PhysicalPosition::new(
-                window_extent.width / 2,
-                window_extent.height / 2,
-            )).unwrap();
+            let window_extent = window_renderer.window_size();
+
+            window_renderer
+                .window()
+                .set_cursor_position(PhysicalPosition::new(
+                    window_extent[0] / 2.0,
+                    window_extent[1] / 2.0,
+                ))
+                .unwrap();
             window_renderer.window().set_cursor_visible(false);
         }
 
@@ -175,14 +188,14 @@ fn main() {
 fn render(
     context: &VulkanoContext,
     windows_manager: &mut VulkanoWindows,
-    window_renderer: &mut VulkanoWindowRenderer,
     allocators: &Allocators,
     render_pass: &Arc<RenderPass>,
     game: &Game,
     viewport: &Viewport,
     pipelines: &Pipelines,
 ) {
-    let window_renderer = windows_manager.get_renderer_mut(window_id).unwrap();
+    let window_renderer = windows_manager.get_primary_renderer_mut().unwrap();
+
     let future = window_renderer.acquire().unwrap();
 
     let mut command_buffer_builder = AutoCommandBufferBuilder::primary(
@@ -361,6 +374,8 @@ fn window_size_dependent_setup(context: &VulkanoContext, window_renderer: &mut V
 */
 
 struct Game {
+    mouse_sensitivity: f32,
+    wasd_held: [bool;4],
     camera: Camera,
     rooms: Vec<Room>,
     physics: CpuSolver<f32, CommonBody<f32>>,
@@ -368,10 +383,21 @@ struct Game {
     cuboid_buffers: ColourBuffers,
 }
 
+impl Game {
+    fn player(&mut self) -> &mut Player<f32> {
+        let CommonBody::Player(ref mut player) = self.physics.bodies[0] else {
+            unreachable!("The player will always be index 0 of bodies.")
+        };
+        player
+    }
+}
+
 fn create_game(memory_allocator: &Arc<StandardMemoryAllocator>) -> Game {
     let mut game = Game {
+        mouse_sensitivity: 1.0,
+        wasd_held: [false;4],
         camera: Camera {
-            position: [0.0; 3],
+            position: [2.0, -2.0, 2.0],
             rotation: [0.0; 3],
 
             ambient_strength: 0.3,
@@ -427,6 +453,16 @@ fn create_game(memory_allocator: &Arc<StandardMemoryAllocator>) -> Game {
         },
     };
 
+    game.physics.bodies.push(CommonBody::Player(Player {
+        particle: Particle::from_position([2.0, 0.0, 2.0]),
+        mass: 0.0,
+        friction: 0.0,
+        restitution: 0.0,
+        half_size: [0.5, 1.0, 0.5],
+        dampening: [0.8, 0.0, 0.8],
+        grounded: false,
+    }));
+
     let mut rng = rand::thread_rng();
     let variety_range = Uniform::from(0..10);
 
@@ -462,20 +498,28 @@ fn generate_room(
     };
 
     // bottom
+    let temp_position = [
+        real_room_position[0] + ROOM_SIZE[0] as f32 * 0.5,
+        0.5,
+        real_room_position[1] + ROOM_SIZE[2] as f32 * 0.5,
+    ];
+    let temp_scale = [ROOM_SIZE[0] as f32, 1.0, ROOM_SIZE[2] as f32];
     room.cuboid_instances.push(Colour3DInstance::new(
         [1.0, 1.0, 1.0, 1.0],
-        Matrix4::from_translation([
-            real_room_position[0] + ROOM_SIZE[0] as f32 * 0.5,
-            0.5,
-            real_room_position[1] + ROOM_SIZE[2] as f32 * 0.5,
-        ]) * Matrix4::from_scale([ROOM_SIZE[0] as f32, 1.0, ROOM_SIZE[2] as f32]),
+        Matrix4::from_translation(temp_position) * Matrix4::from_scale(temp_scale),
     ));
+    physics.bodies.push(CommonBody::ImmovableCuboid(ImmovableCuboid {
+        aabb: AabbCentredOrigin {
+            position: temp_position,
+            half_size: temp_scale,
+        }
+    }));
 
     // Walls:
 
     // top
     room.cuboid_instances.push(Colour3DInstance::new(
-        [1.0, 1.0, 1.0, 1.0],
+        [1.0, 0.0, 1.0, 1.0],
         Matrix4::from_translation([
             real_room_position[0] + ROOM_SIZE[0] as f32 * 0.5,
             -(ROOM_SIZE[1] as f32) - 0.5,
@@ -528,10 +572,10 @@ fn generate_room(
     // +x
     if room_position[0] != DUNGEON_SIZE - 1 {
         room.cuboid_instances.push(Colour3DInstance::new(
-            [1.0, 1.0, 1.0, 1.0],
+            [0.0, 0.0, 0.0, 1.0],
             Matrix4::from_translation([
                 real_room_position[0] + ROOM_SIZE[0] as f32 + 0.5,
-                ROOM_SIZE[1] as f32 * -0.5,
+                DOOR_WIDTH_HEIGHT_AND_THICKNESS[1] as f32 * -0.5,
                 real_room_position[1] + ROOM_SIZE[2] as f32 * 0.5,
             ]) * Matrix4::from_scale([
                 DOOR_WIDTH_HEIGHT_AND_THICKNESS[2],
@@ -542,12 +586,12 @@ fn generate_room(
     }
 
     // -x
-    if room_position[0] != DUNGEON_SIZE - 1 {
+    if room_position[0] != 0 {
         room.cuboid_instances.push(Colour3DInstance::new(
-            [1.0, 1.0, 1.0, 1.0],
+            [0.0, 0.0, 0.0, 1.0],
             Matrix4::from_translation([
                 real_room_position[0] - 0.5,
-                ROOM_SIZE[1] as f32 * -0.5,
+                DOOR_WIDTH_HEIGHT_AND_THICKNESS[1] as f32 * -0.5,
                 real_room_position[1] + ROOM_SIZE[2] as f32 * 0.5,
             ]) * Matrix4::from_scale([
                 DOOR_WIDTH_HEIGHT_AND_THICKNESS[2],
@@ -558,12 +602,12 @@ fn generate_room(
     }
 
     // +z
-    if room_position[0] != DUNGEON_SIZE - 1 {
+    if room_position[1] != DUNGEON_SIZE - 1 {
         room.cuboid_instances.push(Colour3DInstance::new(
             [0.0, 0.0, 0.0, 1.0],
             Matrix4::from_translation([
                 real_room_position[0] + ROOM_SIZE[0] as f32 * 0.5,
-                ROOM_SIZE[1] as f32 * -0.5,
+                DOOR_WIDTH_HEIGHT_AND_THICKNESS[1] as f32 * -0.5,
                 real_room_position[1] + ROOM_SIZE[2] as f32 + 0.5,
             ]) * Matrix4::from_scale([
                 DOOR_WIDTH_HEIGHT_AND_THICKNESS[0],
@@ -574,12 +618,12 @@ fn generate_room(
     }
 
     // -z
-    if room_position[0] != DUNGEON_SIZE - 1 {
+    if room_position[1] != 0 {
         room.cuboid_instances.push(Colour3DInstance::new(
             [0.0, 0.0, 0.0, 1.0],
             Matrix4::from_translation([
                 real_room_position[0] + ROOM_SIZE[0] as f32 * 0.5,
-                ROOM_SIZE[1] as f32 * -0.5,
+                DOOR_WIDTH_HEIGHT_AND_THICKNESS[1] as f32 * -0.5,
                 real_room_position[1] - 0.5,
             ]) * Matrix4::from_scale([
                 DOOR_WIDTH_HEIGHT_AND_THICKNESS[0],
@@ -604,10 +648,70 @@ struct ColourBuffers {
     instance_buffer: Vec<buffer_contents::Colour3DInstance>,
 }
 
-fn fixed_update() {
+fn fixed_update(game: &mut Game) {
+    game.physics.update(FIXED_DELTA_TIME);
+    game.camera.position = math::add_3d(game.player().particle.position, [0.0,-1.0,0.0]);
 
+    game.camera.light_position[0] = game.camera.position[0];
+    game.camera.light_position[2] = game.camera.position[2];
 }
 
-fn update() {
+fn update(game: &mut Game) {
+    let current_room_position = [
+        game.camera.position[0] as usize / ROOM_SIZE[0],
+        game.camera.position[2] as usize / ROOM_SIZE[2],
+    ];
 
+    game.cuboid_buffers.instance_buffer = game.rooms
+        [math::index_from_position_2d(current_room_position, DUNGEON_SIZE)]
+    .cuboid_instances
+    .clone();
+}
+
+fn on_keyboard_input(
+    input: KeyboardInput,
+    control_flow: &mut ControlFlow,
+    fps_tracker: &FpsTracker<f64>,
+    window_renderer: &mut VulkanoWindowRenderer,
+    game: &mut Game,
+) {
+    if let Some(key_code) = input.virtual_keycode {
+        match key_code {
+            VirtualKeyCode::W => game.wasd_held[0] = is_pressed(input.state),
+            VirtualKeyCode::A => game.wasd_held[1] = is_pressed(input.state),
+            VirtualKeyCode::S => game.wasd_held[2] = is_pressed(input.state),
+            VirtualKeyCode::D => game.wasd_held[3] = is_pressed(input.state),
+
+            VirtualKeyCode::Backslash => {
+                if is_pressed(input.state) {
+                    if let None = window_renderer.window().fullscreen() {
+                        window_renderer.window().set_fullscreen(Some(Fullscreen::Borderless(None)));
+                    } else {
+                        window_renderer.window().set_fullscreen(None);
+                    }
+                }
+            }
+
+            VirtualKeyCode::F => {
+                if is_pressed(input.state) {
+                    //*sprinting = !*sprinting;
+                }
+            }
+
+            //VirtualKeyCode::Space => *jump_held = is_pressed(input.state),
+
+            VirtualKeyCode::Delete => {
+                if is_pressed(input.state) {
+                    *control_flow = ControlFlow::Exit;
+                }
+            }
+
+            VirtualKeyCode::X => {
+                if is_pressed(input.state) {
+                    //println!("{average_fps}");
+                }
+            }
+            _ => (),
+        }
+    }
 }
