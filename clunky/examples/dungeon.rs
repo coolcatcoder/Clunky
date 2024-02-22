@@ -133,7 +133,7 @@ fn main() {
                 &pipelines,
             );
             fps_tracker.update();
-            println!("{}", fps_tracker.average_fps());
+            //println!("{}", fps_tracker.average_fps());
         }
 
         Event::WindowEvent {
@@ -397,7 +397,7 @@ fn create_game(memory_allocator: &Arc<StandardMemoryAllocator>) -> Game {
         mouse_sensitivity: 1.0,
         wasd_held: [false;4],
         camera: Camera {
-            position: [2.0, -2.0, 2.0],
+            position: [2.0, -3.0, 2.0],
             rotation: [0.0; 3],
 
             ambient_strength: 0.3,
@@ -454,12 +454,12 @@ fn create_game(memory_allocator: &Arc<StandardMemoryAllocator>) -> Game {
     };
 
     game.physics.bodies.push(CommonBody::Player(Player {
-        particle: Particle::from_position([2.0, 0.0, 2.0]),
-        mass: 0.0,
-        friction: 0.0,
-        restitution: 0.0,
+        particle: Particle::from_position([2.0, -1.0, 2.0]),
+        mass: 30.0,
+        friction: 5.0,
+        restitution: 0.5,
         half_size: [0.5, 1.0, 0.5],
-        dampening: [0.8, 0.0, 0.8],
+        dampening: [0.0, 0.0, 0.0],
         grounded: false,
     }));
 
@@ -496,6 +496,8 @@ fn generate_room(
     let mut room = Room {
         cuboid_instances: Vec::with_capacity(15), // 15 instances per room?
     };
+    
+    // Walls:
 
     // bottom
     let temp_position = [
@@ -511,11 +513,9 @@ fn generate_room(
     physics.bodies.push(CommonBody::ImmovableCuboid(ImmovableCuboid {
         aabb: AabbCentredOrigin {
             position: temp_position,
-            half_size: temp_scale,
+            half_size: math::mul_3d_by_1d(temp_scale, 0.5),
         }
     }));
-
-    // Walls:
 
     // top
     room.cuboid_instances.push(Colour3DInstance::new(
@@ -649,7 +649,70 @@ struct ColourBuffers {
 }
 
 fn fixed_update(game: &mut Game) {
+    let motion = match game.wasd_held {
+        [true, false, false, false] => (0.0, -1.0),
+        [false, false, true, false] => (0.0, 1.0),
+        [false, false, false, true] => (1.0, 0.0),
+        [false, true, false, false] => (-1.0, 0.0),
+
+        [true, true, false, false] => (-0.7, -0.7),
+        [true, false, false, true] => (0.7, -0.7),
+
+        [false, true, true, false] => (-0.7, 0.7),
+        [false, false, true, true] => (0.7, 0.7),
+
+        _ => (0.0, 0.0),
+    };
+
+    /*
+    let speed = match (sprinting, *jump_held, player.grounded) {
+        (false, true, true) | (false, false, true) | (false, true, false) => 25.0,
+        (true, true, true) | (true, false, true) | (false, false, false) | (true, true, false) => {
+            50.0
+        }
+        (true, false, false) => 100.0,
+    };
+    */
+
+    let speed = 50.0;
+
+    let real_motion = (motion.0 * speed, motion.1 * speed);
+
+    let y_rotation_cos = game.camera.rotation[1].to_radians().cos();
+    let y_rotation_sin = game.camera.rotation[1].to_radians().sin();
+
+    let real_motion = (
+        real_motion.0 * y_rotation_cos - real_motion.1 * y_rotation_sin,
+        real_motion.1 * y_rotation_cos + real_motion.0 * y_rotation_sin,
+    );
+
+    game.player()
+        .particle
+        .accelerate([real_motion.0, 0.0, real_motion.1]);
+
+    let horizontal_dampening = if game.player().grounded { 0.8 } else { 0.95 }; // grounded originally 0.8
+
+    game.player().dampening = [horizontal_dampening, 1.0, horizontal_dampening]; // y 0.98 originally
+
+    //verlet_solver.update(FIXED_DELTA_TIME);
+
+    /*
+    if *jump_held {
+        if player.grounded {
+            player.particle.accelerate([0.0, -1000.0, 0.0]);
+        } else {
+            if wasd_held[0] || wasd_held[1] || wasd_held[2] || wasd_held[3] {
+                player.particle.accelerate([0.0, -50.0, 0.0]);
+            } else {
+                player.particle.accelerate([0.0, -300.0, 0.0]);
+            }
+        }
+    }
+    */
+
     game.physics.update(FIXED_DELTA_TIME);
+    game.player().particle.position[0] = game.player().particle.position[0].clamp(0.0, DUNGEON_SIZE as f32 * ROOM_SIZE[0] as f32 - 0.01);
+    game.player().particle.position[2] = game.player().particle.position[2].clamp(0.0, DUNGEON_SIZE as f32 * ROOM_SIZE[2] as f32 - 0.01);
     game.camera.position = math::add_3d(game.player().particle.position, [0.0,-1.0,0.0]);
 
     game.camera.light_position[0] = game.camera.position[0];

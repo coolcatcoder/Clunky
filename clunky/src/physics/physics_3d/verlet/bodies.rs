@@ -81,6 +81,7 @@ where
                     half_size: lhs_player.half_size,
                 };
                 if lhs_player_aabb.is_intersected_by_aabb(rhs_immovable_cuboid.aabb) {
+                    println!("???");
                     let previous_player_aabb = AabbCentredOrigin {
                         position: lhs_player.particle.previous_position,
                         half_size: lhs_player.half_size,
@@ -91,7 +92,7 @@ where
                     //println!("direction: {:?}", previous_collision_direction);
 
                     // TODO: investigate stepping up onto small ledges
-                    let step_up = true;
+                    let step_up = false;
 
                     if CollisionEnum::Positive == previous_collision_direction[0] && !step_up {
                         lhs_player.particle.position[0] = rhs_immovable_cuboid.aabb.position[0]
@@ -109,9 +110,10 @@ where
                     {
                         lhs_player.particle.position[1] = rhs_immovable_cuboid.aabb.position[1]
                             - rhs_immovable_cuboid.aabb.half_size[1]
-                            - lhs_player.half_size[1];
-                            //- T::from_f32(0.001);
+                            - lhs_player.half_size[1]
+                            - T::from_f32(0.01);
 
+                        println!("This won't happen");
                         lhs_player.grounded = true;
                     } else if CollisionEnum::Negative == previous_collision_direction[1] {
                         lhs_player.particle.position[1] = rhs_immovable_cuboid.aabb.position[1]
