@@ -5,7 +5,13 @@ use clunky::{
     lost_code::{is_pressed, FixedUpdate, FpsTracker},
     math::{self, Matrix4, Radians},
     meshes,
-    physics::physics_3d::{aabb::AabbCentredOrigin, verlet::{bodies::{CommonBody, ImmovableCuboid, Player}, CpuSolver, OutsideOfGridBoundsBehaviour, Particle}},
+    physics::physics_3d::{
+        aabb::AabbCentredOrigin,
+        verlet::{
+            bodies::{CommonBody, ImmovableCuboid, Player},
+            CpuSolver, OutsideOfGridBoundsBehaviour, Particle,
+        },
+    },
     rendering::draw_instanced,
     shaders::colour_3d_instanced_shaders::{self, Camera},
 };
@@ -375,7 +381,7 @@ fn window_size_dependent_setup(context: &VulkanoContext, window_renderer: &mut V
 
 struct Game {
     mouse_sensitivity: f32,
-    wasd_held: [bool;4],
+    wasd_held: [bool; 4],
     jump_held: bool,
     sprinting: bool,
     paused: bool,
@@ -398,7 +404,7 @@ impl Game {
 fn create_game(memory_allocator: &Arc<StandardMemoryAllocator>) -> Game {
     let mut game = Game {
         mouse_sensitivity: 1.0,
-        wasd_held: [false;4],
+        wasd_held: [false; 4],
         jump_held: false,
         sprinting: true,
         paused: false,
@@ -422,7 +428,7 @@ fn create_game(memory_allocator: &Arc<StandardMemoryAllocator>) -> Game {
             [0.8, 1.0, 0.8],
             [DUNGEON_SIZE + 2, 1, DUNGEON_SIZE + 2],
             [-1.0, -(ROOM_SIZE[1] as f32) - 1.0, -1.0],
-            [ROOM_SIZE[0], ROOM_SIZE[1] + 2, ROOM_SIZE[2],],
+            [ROOM_SIZE[0], ROOM_SIZE[1] + 2, ROOM_SIZE[2]],
             OutsideOfGridBoundsBehaviour::ContinueUpdating,
             Vec::with_capacity(DUNGEON_SIZE * DUNGEON_SIZE * 10), // Around 10 bodies per room seems reasonable.
         ),
@@ -472,7 +478,7 @@ fn create_game(memory_allocator: &Arc<StandardMemoryAllocator>) -> Game {
     let mut rng = rand::thread_rng();
     let variety_range = Uniform::from(0..10);
 
-    let linked_rooms = Vec::with_capacity(10); // 10 linked rooms at a time seems reasonable.
+    let mut linked_rooms = Vec::with_capacity(10); // 10 linked rooms at a time seems reasonable. IMPORTANT linked rooms shouldn't contain anything. They basically shouldn't exist. The root room is the one that contains everything!
 
     for i in 0..DUNGEON_SIZE * DUNGEON_SIZE {
         game.rooms.push(generate_room(
@@ -495,7 +501,7 @@ fn generate_room(
     room_index: usize,
     variety: u8,
     physics: &mut CpuSolver<f32, CommonBody<f32>>,
-    linked_rooms: &mut Vec<(usize,usize)>,
+    linked_rooms: &mut Vec<(usize, usize)>,
 ) -> Room {
     let room_position = math::position_from_index_2d(room_index, DUNGEON_SIZE);
     let real_room_position = [
@@ -506,7 +512,7 @@ fn generate_room(
     let mut room = Room {
         cuboid_instances: Vec::with_capacity(15), // 15 instances per room?
     };
-    
+
     // Walls:
 
     // bottom
@@ -520,12 +526,14 @@ fn generate_room(
         [1.0, 1.0, 1.0, 1.0],
         Matrix4::from_translation(temp_position) * Matrix4::from_scale(temp_scale),
     ));
-    physics.bodies.push(CommonBody::ImmovableCuboid(ImmovableCuboid {
-        aabb: AabbCentredOrigin {
-            position: temp_position,
-            half_size: math::mul_3d_by_1d(temp_scale, 0.5),
-        }
-    }));
+    physics
+        .bodies
+        .push(CommonBody::ImmovableCuboid(ImmovableCuboid {
+            aabb: AabbCentredOrigin {
+                position: temp_position,
+                half_size: math::mul_3d_by_1d(temp_scale, 0.5),
+            },
+        }));
 
     // top
     room.cuboid_instances.push(Colour3DInstance::new(
@@ -538,7 +546,7 @@ fn generate_room(
     ));
 
     // +x
-    if room_position[0] == DUNGEON_SIZE - 1 {
+    let positive_x_instance_count = if room_position[0] == DUNGEON_SIZE - 1 {
         temp_position = [
             real_room_position[0] + ROOM_SIZE[0] as f32,
             ROOM_SIZE[1] as f32 * -0.5,
@@ -549,70 +557,96 @@ fn generate_room(
             [1.0, 1.0, 1.0, 1.0],
             Matrix4::from_translation(temp_position) * Matrix4::from_scale(temp_scale),
         ));
-        physics.bodies.push(CommonBody::ImmovableCuboid(ImmovableCuboid {
-            aabb: AabbCentredOrigin {
-                position: temp_position,
-                half_size: math::mul_3d_by_1d(temp_scale, 0.5),
-            }
-        }));
+        physics
+            .bodies
+            .push(CommonBody::ImmovableCuboid(ImmovableCuboid {
+                aabb: AabbCentredOrigin {
+                    position: temp_position,
+                    half_size: math::mul_3d_by_1d(temp_scale, 0.5),
+                },
+            }));
+        1
     } else {
         // left
         temp_position = [
             real_room_position[0] + ROOM_SIZE[0] as f32,
             ROOM_SIZE[1] as f32 * -0.5,
-            real_room_position[1] + ROOM_SIZE[2] as f32 * 0.25 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.25,
+            real_room_position[1] + ROOM_SIZE[2] as f32 * 0.25
+                - DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.25,
         ];
-        temp_scale = [1.0, ROOM_SIZE[1] as f32, ROOM_SIZE[2] as f32 * 0.5 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.5];
+        temp_scale = [
+            1.0,
+            ROOM_SIZE[1] as f32,
+            ROOM_SIZE[2] as f32 * 0.5 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.5,
+        ];
         room.cuboid_instances.push(Colour3DInstance::new(
             [1.0, 0.0, 0.0, 1.0],
             Matrix4::from_translation(temp_position) * Matrix4::from_scale(temp_scale),
         ));
-        physics.bodies.push(CommonBody::ImmovableCuboid(ImmovableCuboid {
-            aabb: AabbCentredOrigin {
-                position: temp_position,
-                half_size: math::mul_3d_by_1d(temp_scale, 0.5),
-            }
-        }));
-        
+        physics
+            .bodies
+            .push(CommonBody::ImmovableCuboid(ImmovableCuboid {
+                aabb: AabbCentredOrigin {
+                    position: temp_position,
+                    half_size: math::mul_3d_by_1d(temp_scale, 0.5),
+                },
+            }));
+
         // right
         temp_position = [
             real_room_position[0] + ROOM_SIZE[0] as f32,
             ROOM_SIZE[1] as f32 * -0.5,
-            real_room_position[1] + ROOM_SIZE[2] as f32 * 0.75 + DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.25,
+            real_room_position[1]
+                + ROOM_SIZE[2] as f32 * 0.75
+                + DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.25,
         ];
-        temp_scale = [1.0, ROOM_SIZE[1] as f32, ROOM_SIZE[2] as f32 * 0.5 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.5];
+        temp_scale = [
+            1.0,
+            ROOM_SIZE[1] as f32,
+            ROOM_SIZE[2] as f32 * 0.5 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.5,
+        ];
         room.cuboid_instances.push(Colour3DInstance::new(
             [0.0, 1.0, 0.0, 1.0],
             Matrix4::from_translation(temp_position) * Matrix4::from_scale(temp_scale),
         ));
-        physics.bodies.push(CommonBody::ImmovableCuboid(ImmovableCuboid {
-            aabb: AabbCentredOrigin {
-                position: temp_position,
-                half_size: math::mul_3d_by_1d(temp_scale, 0.5),
-            }
-        }));
+        physics
+            .bodies
+            .push(CommonBody::ImmovableCuboid(ImmovableCuboid {
+                aabb: AabbCentredOrigin {
+                    position: temp_position,
+                    half_size: math::mul_3d_by_1d(temp_scale, 0.5),
+                },
+            }));
 
         // top
         temp_position = [
             real_room_position[0] + ROOM_SIZE[0] as f32,
-            ROOM_SIZE[1] as f32 * -1.0 + (ROOM_SIZE[1] as f32 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[1]) * 0.5,
+            ROOM_SIZE[1] as f32 * -1.0
+                + (ROOM_SIZE[1] as f32 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[1]) * 0.5,
             real_room_position[1] + ROOM_SIZE[2] as f32 * 0.5,
         ];
-        temp_scale = [1.0, ROOM_SIZE[1] as f32 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[1], DOOR_WIDTH_HEIGHT_AND_THICKNESS[0]];
+        temp_scale = [
+            1.0,
+            ROOM_SIZE[1] as f32 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[1],
+            DOOR_WIDTH_HEIGHT_AND_THICKNESS[0],
+        ];
         room.cuboid_instances.push(Colour3DInstance::new(
             [0.0, 1.0, 1.0, 1.0],
             Matrix4::from_translation(temp_position) * Matrix4::from_scale(temp_scale),
         ));
-        physics.bodies.push(CommonBody::ImmovableCuboid(ImmovableCuboid {
-            aabb: AabbCentredOrigin {
-                position: temp_position,
-                half_size: math::mul_3d_by_1d(temp_scale, 0.5),
-            }
-        }));
-    }
+        physics
+            .bodies
+            .push(CommonBody::ImmovableCuboid(ImmovableCuboid {
+                aabb: AabbCentredOrigin {
+                    position: temp_position,
+                    half_size: math::mul_3d_by_1d(temp_scale, 0.5),
+                },
+            }));
+        2
+    };
 
     // -x (No aabbs usually because +x will supply.)
-    if room_position[0] == 0 {
+    let negative_x_instance_count = if room_position[0] == 0 {
         temp_position = [
             real_room_position[0],
             ROOM_SIZE[1] as f32 * -0.5,
@@ -623,12 +657,15 @@ fn generate_room(
             [1.0, 1.0, 1.0, 1.0],
             Matrix4::from_translation(temp_position) * Matrix4::from_scale(temp_scale),
         ));
-        physics.bodies.push(CommonBody::ImmovableCuboid(ImmovableCuboid {
-            aabb: AabbCentredOrigin {
-                position: temp_position,
-                half_size: math::mul_3d_by_1d(temp_scale, 0.5),
-            }
-        }));
+        physics
+            .bodies
+            .push(CommonBody::ImmovableCuboid(ImmovableCuboid {
+                aabb: AabbCentredOrigin {
+                    position: temp_position,
+                    half_size: math::mul_3d_by_1d(temp_scale, 0.5),
+                },
+            }));
+        1
     } else {
         // right
         room.cuboid_instances.push(Colour3DInstance::new(
@@ -636,18 +673,29 @@ fn generate_room(
             Matrix4::from_translation([
                 real_room_position[0],
                 ROOM_SIZE[1] as f32 * -0.5,
-                real_room_position[1] + ROOM_SIZE[2] as f32 * 0.25 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.25,
-            ]) * Matrix4::from_scale([1.0, ROOM_SIZE[1] as f32, ROOM_SIZE[2] as f32 * 0.5 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.5]),
+                real_room_position[1] + ROOM_SIZE[2] as f32 * 0.25
+                    - DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.25,
+            ]) * Matrix4::from_scale([
+                1.0,
+                ROOM_SIZE[1] as f32,
+                ROOM_SIZE[2] as f32 * 0.5 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.5,
+            ]),
         ));
-        
+
         // left
         room.cuboid_instances.push(Colour3DInstance::new(
             [0.0, 1.0, 0.0, 1.0],
             Matrix4::from_translation([
                 real_room_position[0],
                 ROOM_SIZE[1] as f32 * -0.5,
-                real_room_position[1] + ROOM_SIZE[2] as f32 * 0.75 + DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.25,
-            ]) * Matrix4::from_scale([1.0, ROOM_SIZE[1] as f32, ROOM_SIZE[2] as f32 * 0.5 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.5]),
+                real_room_position[1]
+                    + ROOM_SIZE[2] as f32 * 0.75
+                    + DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.25,
+            ]) * Matrix4::from_scale([
+                1.0,
+                ROOM_SIZE[1] as f32,
+                ROOM_SIZE[2] as f32 * 0.5 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.5,
+            ]),
         ));
 
         // top
@@ -655,14 +703,20 @@ fn generate_room(
             [0.0, 1.0, 1.0, 1.0],
             Matrix4::from_translation([
                 real_room_position[0],
-                ROOM_SIZE[1] as f32 * -1.0 + (ROOM_SIZE[1] as f32 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[1]) * 0.5,
+                ROOM_SIZE[1] as f32 * -1.0
+                    + (ROOM_SIZE[1] as f32 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[1]) * 0.5,
                 real_room_position[1] + ROOM_SIZE[2] as f32 * 0.5,
-            ]) * Matrix4::from_scale([1.0, ROOM_SIZE[1] as f32 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[1], DOOR_WIDTH_HEIGHT_AND_THICKNESS[0]]),
+            ]) * Matrix4::from_scale([
+                1.0,
+                ROOM_SIZE[1] as f32 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[1],
+                DOOR_WIDTH_HEIGHT_AND_THICKNESS[0],
+            ]),
         ));
-    }
+        2
+    };
 
     // +z
-    if room_position[1] == DUNGEON_SIZE - 1 {
+    let positive_z_instance_count = if room_position[1] == DUNGEON_SIZE - 1 {
         temp_position = [
             real_room_position[0] + ROOM_SIZE[0] as f32 * 0.5,
             ROOM_SIZE[1] as f32 * -0.5,
@@ -673,70 +727,96 @@ fn generate_room(
             [1.0, 1.0, 1.0, 1.0],
             Matrix4::from_translation(temp_position) * Matrix4::from_scale(temp_scale),
         ));
-        physics.bodies.push(CommonBody::ImmovableCuboid(ImmovableCuboid {
-            aabb: AabbCentredOrigin {
-                position: temp_position,
-                half_size: math::mul_3d_by_1d(temp_scale, 0.5),
-            }
-        }));
+        physics
+            .bodies
+            .push(CommonBody::ImmovableCuboid(ImmovableCuboid {
+                aabb: AabbCentredOrigin {
+                    position: temp_position,
+                    half_size: math::mul_3d_by_1d(temp_scale, 0.5),
+                },
+            }));
+        1
     } else {
         // right
         temp_position = [
-            real_room_position[0] + ROOM_SIZE[0] as f32 * 0.25 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.25,
+            real_room_position[0] + ROOM_SIZE[0] as f32 * 0.25
+                - DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.25,
             ROOM_SIZE[1] as f32 * -0.5,
             real_room_position[1] + ROOM_SIZE[2] as f32,
         ];
-        temp_scale = [ROOM_SIZE[0] as f32 * 0.5 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.5, ROOM_SIZE[1] as f32, 1.0];
+        temp_scale = [
+            ROOM_SIZE[0] as f32 * 0.5 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.5,
+            ROOM_SIZE[1] as f32,
+            1.0,
+        ];
         room.cuboid_instances.push(Colour3DInstance::new(
             [1.0, 0.0, 0.0, 1.0],
             Matrix4::from_translation(temp_position) * Matrix4::from_scale(temp_scale),
         ));
-        physics.bodies.push(CommonBody::ImmovableCuboid(ImmovableCuboid {
-            aabb: AabbCentredOrigin {
-                position: temp_position,
-                half_size: math::mul_3d_by_1d(temp_scale, 0.5),
-            }
-        }));
-        
+        physics
+            .bodies
+            .push(CommonBody::ImmovableCuboid(ImmovableCuboid {
+                aabb: AabbCentredOrigin {
+                    position: temp_position,
+                    half_size: math::mul_3d_by_1d(temp_scale, 0.5),
+                },
+            }));
+
         // left
         temp_position = [
-            real_room_position[0] + ROOM_SIZE[0] as f32 * 0.75 + DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.25,
+            real_room_position[0]
+                + ROOM_SIZE[0] as f32 * 0.75
+                + DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.25,
             ROOM_SIZE[1] as f32 * -0.5,
             real_room_position[1] + ROOM_SIZE[2] as f32,
         ];
-        temp_scale = [ROOM_SIZE[0] as f32 * 0.5 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.5, ROOM_SIZE[1] as f32, 1.0];
+        temp_scale = [
+            ROOM_SIZE[0] as f32 * 0.5 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.5,
+            ROOM_SIZE[1] as f32,
+            1.0,
+        ];
         room.cuboid_instances.push(Colour3DInstance::new(
             [0.0, 1.0, 0.0, 1.0],
             Matrix4::from_translation(temp_position) * Matrix4::from_scale(temp_scale),
         ));
-        physics.bodies.push(CommonBody::ImmovableCuboid(ImmovableCuboid {
-            aabb: AabbCentredOrigin {
-                position: temp_position,
-                half_size: math::mul_3d_by_1d(temp_scale, 0.5),
-            }
-        }));
+        physics
+            .bodies
+            .push(CommonBody::ImmovableCuboid(ImmovableCuboid {
+                aabb: AabbCentredOrigin {
+                    position: temp_position,
+                    half_size: math::mul_3d_by_1d(temp_scale, 0.5),
+                },
+            }));
 
         // top
         temp_position = [
             real_room_position[0] + ROOM_SIZE[0] as f32 * 0.5,
-            ROOM_SIZE[1] as f32 * -1.0 + (ROOM_SIZE[1] as f32 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[1]) * 0.5,
+            ROOM_SIZE[1] as f32 * -1.0
+                + (ROOM_SIZE[1] as f32 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[1]) * 0.5,
             real_room_position[1] + ROOM_SIZE[2] as f32,
         ];
-        temp_scale = [DOOR_WIDTH_HEIGHT_AND_THICKNESS[0], ROOM_SIZE[1] as f32 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[1], 1.0];
+        temp_scale = [
+            DOOR_WIDTH_HEIGHT_AND_THICKNESS[0],
+            ROOM_SIZE[1] as f32 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[1],
+            1.0,
+        ];
         room.cuboid_instances.push(Colour3DInstance::new(
             [0.0, 1.0, 1.0, 1.0],
             Matrix4::from_translation(temp_position) * Matrix4::from_scale(temp_scale),
         ));
-        physics.bodies.push(CommonBody::ImmovableCuboid(ImmovableCuboid {
-            aabb: AabbCentredOrigin {
-                position: temp_position,
-                half_size: math::mul_3d_by_1d(temp_scale, 0.5),
-            }
-        }));
-    }
+        physics
+            .bodies
+            .push(CommonBody::ImmovableCuboid(ImmovableCuboid {
+                aabb: AabbCentredOrigin {
+                    position: temp_position,
+                    half_size: math::mul_3d_by_1d(temp_scale, 0.5),
+                },
+            }));
+        2
+    };
 
     // -z
-    if room_position[1] == 0 {
+    let negative_z_instance_count = if room_position[1] == 0 {
         temp_position = [
             real_room_position[0] + ROOM_SIZE[0] as f32 * 0.5,
             ROOM_SIZE[1] as f32 * -0.5,
@@ -747,31 +827,45 @@ fn generate_room(
             [1.0, 1.0, 0.0, 1.0],
             Matrix4::from_translation(temp_position) * Matrix4::from_scale(temp_scale),
         ));
-        physics.bodies.push(CommonBody::ImmovableCuboid(ImmovableCuboid {
-            aabb: AabbCentredOrigin {
-                position: temp_position,
-                half_size: math::mul_3d_by_1d(temp_scale, 0.5),
-            }
-        }));
+        physics
+            .bodies
+            .push(CommonBody::ImmovableCuboid(ImmovableCuboid {
+                aabb: AabbCentredOrigin {
+                    position: temp_position,
+                    half_size: math::mul_3d_by_1d(temp_scale, 0.5),
+                },
+            }));
+        1
     } else {
         // right
         room.cuboid_instances.push(Colour3DInstance::new(
             [1.0, 0.0, 0.0, 1.0],
             Matrix4::from_translation([
-                real_room_position[0] + ROOM_SIZE[0] as f32 * 0.25 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.25,
+                real_room_position[0] + ROOM_SIZE[0] as f32 * 0.25
+                    - DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.25,
                 ROOM_SIZE[1] as f32 * -0.5,
                 real_room_position[1],
-            ]) * Matrix4::from_scale([ROOM_SIZE[0] as f32 * 0.5 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.5, ROOM_SIZE[1] as f32, 1.0]),
+            ]) * Matrix4::from_scale([
+                ROOM_SIZE[0] as f32 * 0.5 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.5,
+                ROOM_SIZE[1] as f32,
+                1.0,
+            ]),
         ));
-        
+
         // left
         room.cuboid_instances.push(Colour3DInstance::new(
             [0.0, 1.0, 0.0, 1.0],
             Matrix4::from_translation([
-                real_room_position[0] + ROOM_SIZE[0] as f32 * 0.75 + DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.25,
+                real_room_position[0]
+                    + ROOM_SIZE[0] as f32 * 0.75
+                    + DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.25,
                 ROOM_SIZE[1] as f32 * -0.5,
                 real_room_position[1],
-            ]) * Matrix4::from_scale([ROOM_SIZE[0] as f32 * 0.5 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.5, ROOM_SIZE[1] as f32, 1.0]),
+            ]) * Matrix4::from_scale([
+                ROOM_SIZE[0] as f32 * 0.5 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.5,
+                ROOM_SIZE[1] as f32,
+                1.0,
+            ]),
         ));
 
         // top
@@ -779,13 +873,24 @@ fn generate_room(
             [0.0, 1.0, 1.0, 1.0],
             Matrix4::from_translation([
                 real_room_position[0] + ROOM_SIZE[0] as f32 * 0.5,
-                ROOM_SIZE[1] as f32 * -1.0 + (ROOM_SIZE[1] as f32 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[1]) * 0.5,
+                ROOM_SIZE[1] as f32 * -1.0
+                    + (ROOM_SIZE[1] as f32 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[1]) * 0.5,
                 real_room_position[1],
-            ]) * Matrix4::from_scale([DOOR_WIDTH_HEIGHT_AND_THICKNESS[0], ROOM_SIZE[1] as f32 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[1], 1.0]),
+            ]) * Matrix4::from_scale([
+                DOOR_WIDTH_HEIGHT_AND_THICKNESS[0],
+                ROOM_SIZE[1] as f32 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[1],
+                1.0,
+            ]),
         ));
-    }
+        2
+    };
 
     match variety {
+        0..=5 => {
+            for instance in &mut room.cuboid_instances {
+                instance.colour = [0.0, 0.0, 1.0, 1.0];
+            }
+        }
         _ => {
             //unreachable!();
         }
@@ -857,9 +962,11 @@ fn fixed_update(game: &mut Game) {
         }
     }
 
-    game.player().particle.position[0] = game.player().particle.position[0].clamp(0.0, DUNGEON_SIZE as f32 * ROOM_SIZE[0] as f32 - 0.01);
-    game.player().particle.position[2] = game.player().particle.position[2].clamp(0.0, DUNGEON_SIZE as f32 * ROOM_SIZE[2] as f32 - 0.01);
-    game.camera.position = math::add_3d(game.player().particle.position, [0.0,-1.0,0.0]);
+    game.player().particle.position[0] = game.player().particle.position[0]
+        .clamp(0.0, DUNGEON_SIZE as f32 * ROOM_SIZE[0] as f32 - 0.01);
+    game.player().particle.position[2] = game.player().particle.position[2]
+        .clamp(0.0, DUNGEON_SIZE as f32 * ROOM_SIZE[2] as f32 - 0.01);
+    game.camera.position = math::add_3d(game.player().particle.position, [0.0, -1.0, 0.0]);
 
     game.camera.light_position[0] = game.camera.position[0];
     game.camera.light_position[2] = game.camera.position[2];
@@ -894,7 +1001,9 @@ fn on_keyboard_input(
             VirtualKeyCode::Backslash => {
                 if is_pressed(input.state) {
                     if let None = window_renderer.window().fullscreen() {
-                        window_renderer.window().set_fullscreen(Some(Fullscreen::Borderless(None)));
+                        window_renderer
+                            .window()
+                            .set_fullscreen(Some(Fullscreen::Borderless(None)));
                     } else {
                         window_renderer.window().set_fullscreen(None);
                     }
@@ -917,7 +1026,7 @@ fn on_keyboard_input(
 
             VirtualKeyCode::X => {
                 if is_pressed(input.state) {
-                    println!("{}",fps_tracker.average_fps());
+                    println!("{}", fps_tracker.average_fps());
                 }
             }
 

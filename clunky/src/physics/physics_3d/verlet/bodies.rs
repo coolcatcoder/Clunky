@@ -92,14 +92,18 @@ where
                     //println!("direction: {:?}", previous_collision_direction);
 
                     // TODO: investigate stepping up onto small ledges.
-                    let step_up = ((lhs_player.particle.position[1]+lhs_player.half_size[1])-(rhs_immovable_cuboid.aabb.position[1]-rhs_immovable_cuboid.aabb.half_size[1])) < T::from_f32(0.5);
+                    let step_up = ((lhs_player.particle.position[1] + lhs_player.half_size[1])
+                        - (rhs_immovable_cuboid.aabb.position[1]
+                            - rhs_immovable_cuboid.aabb.half_size[1]))
+                        < T::from_f32(0.5);
 
                     if CollisionEnum::Positive == previous_collision_direction[0] && !step_up {
                         lhs_player.particle.position[0] = rhs_immovable_cuboid.aabb.position[0]
                             - rhs_immovable_cuboid.aabb.half_size[0]
                             - lhs_player.half_size[0]
                             - T::from_f32(0.01);
-                    } else if CollisionEnum::Negative == previous_collision_direction[0] && !step_up {
+                    } else if CollisionEnum::Negative == previous_collision_direction[0] && !step_up
+                    {
                         lhs_player.particle.position[0] = rhs_immovable_cuboid.aabb.position[0]
                             + rhs_immovable_cuboid.aabb.half_size[0]
                             + lhs_player.half_size[0]
