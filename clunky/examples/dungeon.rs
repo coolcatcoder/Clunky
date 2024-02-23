@@ -48,7 +48,7 @@ use winit::{
 use vulkano::sync::GpuFuture;
 
 const DUNGEON_SIZE: usize = 10;
-const ROOM_SIZE: [usize; 3] = [20, 10, 20]; // Something wrong.
+const ROOM_SIZE: [usize; 3] = [25, 30, 25];
 const DOOR_WIDTH_HEIGHT_AND_THICKNESS: [f32; 3] = [2.0, 3.0, 1.5];
 
 const FIXED_DELTA_TIME: f32 = 0.04;
@@ -420,9 +420,9 @@ fn create_game(memory_allocator: &Arc<StandardMemoryAllocator>) -> Game {
         physics: CpuSolver::new(
             [0.0, 50.0, 0.0],
             [0.8, 1.0, 0.8],
-            [DUNGEON_SIZE, 1, DUNGEON_SIZE],
+            [DUNGEON_SIZE + 2, 1, DUNGEON_SIZE + 2],
             [-1.0, -(ROOM_SIZE[1] as f32) - 1.0, -1.0],
-            [ROOM_SIZE[0] + 2, ROOM_SIZE[1] + 2, ROOM_SIZE[2] + 2,], // MESS WITH
+            [ROOM_SIZE[0], ROOM_SIZE[1] + 2, ROOM_SIZE[2],],
             OutsideOfGridBoundsBehaviour::ContinueUpdating,
             Vec::with_capacity(DUNGEON_SIZE * DUNGEON_SIZE * 10), // Around 10 bodies per room seems reasonable.
         ),
@@ -472,11 +472,14 @@ fn create_game(memory_allocator: &Arc<StandardMemoryAllocator>) -> Game {
     let mut rng = rand::thread_rng();
     let variety_range = Uniform::from(0..10);
 
+    let linked_rooms = Vec::with_capacity(10); // 10 linked rooms at a time seems reasonable.
+
     for i in 0..DUNGEON_SIZE * DUNGEON_SIZE {
         game.rooms.push(generate_room(
             i,
             variety_range.sample(&mut rng),
             &mut game.physics,
+            &mut linked_rooms,
         ));
     }
 
@@ -492,11 +495,12 @@ fn generate_room(
     room_index: usize,
     variety: u8,
     physics: &mut CpuSolver<f32, CommonBody<f32>>,
+    linked_rooms: &mut Vec<(usize,usize)>,
 ) -> Room {
     let room_position = math::position_from_index_2d(room_index, DUNGEON_SIZE);
     let real_room_position = [
         room_position[0] as f32 * ROOM_SIZE[0] as f32,
-        room_position[1] as f32 * ROOM_SIZE[1] as f32,
+        room_position[1] as f32 * ROOM_SIZE[2] as f32,
     ];
 
     let mut room = Room {
@@ -738,7 +742,7 @@ fn generate_room(
             ROOM_SIZE[1] as f32 * -0.5,
             real_room_position[1],
         ];
-        temp_scale = [ROOM_SIZE[2] as f32, ROOM_SIZE[1] as f32, 1.0];
+        temp_scale = [ROOM_SIZE[0] as f32, ROOM_SIZE[1] as f32, 1.0];
         room.cuboid_instances.push(Colour3DInstance::new(
             [1.0, 1.0, 0.0, 1.0],
             Matrix4::from_translation(temp_position) * Matrix4::from_scale(temp_scale),
