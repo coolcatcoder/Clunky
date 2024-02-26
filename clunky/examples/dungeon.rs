@@ -567,18 +567,38 @@ struct BasicRoom {
 }
 
 impl BasicRoom {
-    fn create_wall(
+    fn create_cuboid(
         &mut self,
         physics: &mut CpuSolver<f32, CommonBody<f32>>,
         room_position: [usize; 2],
         room_size: [usize; 2],
         // Position is the actual f32 position relative to room position and room size. The room is always [1.0,1.0,1.0,] sized no matter what.
-        position: [f32; 2],
-        // This has a problem. Outside wall thickness is always 1. Perhaps enum so we can have relative and constant size?
-        // RelativeOrConstant
-        size: [RelativeOrConstantF32; 2],
+        position: [f32; 3],
+        // RelativeOrConstantF32 allows outside wall thickness to always be 1, while everything else can be relative.
+        size: [RelativeOrConstantF32; 3],
+        has_collision: bool,
+        colour: [f32; 4]
     ) {
-        todo!()
+        //todo!();
+        let mut temp_position = [
+            position[0] * room_position[0] as f32 * room_size[0] as f32 * ROOM_SIZE[0] as f32,
+            position[1] * ROOM_SIZE[1] as f32,
+            position[2] * room_position[1] as f32 * room_size[1] as f32 * ROOM_SIZE[2] as f32,
+        ];
+        let mut temp_scale = [ROOM_SIZE[0] as f32, 1.0, ROOM_SIZE[2] as f32]; // still gotta fix
+        self.cuboid_instances.push(Colour3DInstance::new(
+            [1.0, 1.0, 1.0, 1.0],
+            Matrix4::from_translation(temp_position) * Matrix4::from_scale(temp_scale),
+        ));
+        physics
+            .bodies
+            .push(CommonBody::ImmovableCuboid(ImmovableCuboid {
+                aabb: AabbCentredOrigin {
+                    position: temp_position,
+                    half_size: math::mul_3d_by_1d(temp_scale, 0.5),
+                },
+            }));
+        self.cuboid_instances.push(Colour3DInstance::new(colour, model_to_world))
     }
 
     fn create_walls_and_floor(
