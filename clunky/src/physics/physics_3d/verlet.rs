@@ -112,6 +112,10 @@ where
         for (verlet_body_index, verlet_body) in
             (0..self.bodies.len()).into_iter().zip(&mut self.bodies)
         {
+            if verlet_body.is_none() {
+                continue;
+            }
+
             let verlet_body_position =
                 verlet_body.update_and_get_position(self.gravity, self.dampening, delta_time);
 
@@ -341,6 +345,28 @@ mod tests {
 
                 half_size: [0.5, 0.5, 0.5],
             }));
+        }
+
+        let mut solver = CpuSolver::new(
+            [0.0, 50.0, 0.0],
+            [0.8, 1.0, 0.8],
+            [10, 10, 10],
+            [-50.0, -50.0, -50.0],
+            [10, 10, 10],
+            OutsideOfGridBoundsBehaviour::ContinueUpdating,
+            verlet_bodies,
+        );
+        b.iter(|| {
+            solver.update(0.04);
+        })
+    }
+
+    #[bench]
+    fn bench_single_threaded_solver_1000_none_particles(b: &mut Bencher) {
+        let mut verlet_bodies = Vec::with_capacity(1000);
+
+        for _ in 0..1000 {
+            verlet_bodies.push(CommonBody::None);
         }
 
         let mut solver = CpuSolver::new(

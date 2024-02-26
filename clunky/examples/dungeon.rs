@@ -3,7 +3,7 @@ use std::sync::Arc;
 use clunky::{
     buffer_contents::{self, Colour3DInstance},
     lost_code::{is_pressed, FixedUpdate, FpsTracker},
-    math::{self, Matrix4, Radians},
+    math::{self, index_from_position_2d, Matrix4, Radians},
     meshes,
     physics::physics_3d::{
         aabb::AabbCentredOrigin,
@@ -489,9 +489,25 @@ fn create_game(memory_allocator: &Arc<StandardMemoryAllocator>) -> Game {
         match variety {
             0..=50 => {
                 let position = [position_range.sample(&mut rng), position_range.sample(&mut rng)];
-
-                if enough_space_for_room(position, [3,3]) {
-                    link_area_to_room(position, [3,3]);
+                println!("position: {:?}", position);
+                if enough_space_for_room(&game, position, [3,3]) {
+                    link_area_to_room(&mut game, position, [3,3]);
+                    let mut room = BasicRoom { cuboid_instances: Vec::with_capacity(15*9) };
+                    for x in position[0]..(position[0]+3) {
+                        for y in position[1]..(position[1]+3) {
+                            let real_room_position = [
+                                x as f32 * ROOM_SIZE[0] as f32,
+                                y as f32 * ROOM_SIZE[2] as f32,
+                            ];
+                            let i = index_from_position_2d([x,y], DUNGEON_SIZE);
+                            room.create_walls_and_floor([x,y], real_room_position, &mut game.physics);
+                        }
+                    }
+                    for instance in &mut room.cuboid_instances {
+                        instance.colour = [0.0, 1.0, 0.0, 1.0];
+                    }
+                    game.rooms[index_from_position_2d(position, DUNGEON_SIZE)] = Room::BasicRoom(room);
+                    println!("worked?")
                 }
             }
             _ => (),
@@ -539,16 +555,39 @@ impl Room {
     }
 }
 
+// bad name. Perhaps relativity or something?
+enum RelativeOrConstantF32 {
+    Relative(f32),
+    Constant(f32),
+}
+
 #[derive(Clone)]
 struct BasicRoom {
     cuboid_instances: Vec<buffer_contents::Colour3DInstance>,
 }
 
 impl BasicRoom {
+    fn create_wall(
+        &mut self,
+        physics: &mut CpuSolver<f32, CommonBody<f32>>,
+        room_position: [usize; 2],
+        room_size: [usize; 2],
+        // Position is the actual f32 position relative to room position and room size. The room is always [1.0,1.0,1.0,] sized no matter what.
+        position: [f32; 2],
+        // This has a problem. Outside wall thickness is always 1. Perhaps enum so we can have relative and constant size?
+        // RelativeOrConstant
+        size: [RelativeOrConstantF32; 2],
+    ) {
+        todo!()
+    }
+
     fn create_walls_and_floor(
         &mut self,
         room_position: [usize; 2],
         real_room_position: [f32; 2],
+        //position: [usize; 2],
+        //size: [usize; 2],
+        //real_position: [f32; 2],
         physics: &mut CpuSolver<f32, CommonBody<f32>>,
     ) {
         // Walls:
@@ -995,17 +1034,39 @@ fn generate_room(
     }
 }
 
-// Position is centred.
-fn enough_space_for_room(position: [usize; 2], size: [usize; 2]) -> bool {
-    if position[0]+1 < half_size[0] || position[1]+1 < half_size[1] {
+// Position is corner.
+fn enough_space_for_room(game: &Game, position: [usize; 2], size: [usize; 2]) -> bool {
+    if position[0] + size[0] > DUNGEON_SIZE || position[1] + size[1] > DUNGEON_SIZE {
         return false;
     }
 
-    if position[0] + half_size[0] >= DUNGEON_SIZE || position[1] + half_size[1] >= DUNGEON_SIZE {
-        return false;
+    for x in position[0]..(position[0]+size[0]) {
+        for y in position[1]..(position[1]+size[1]) {
+            println!("(x,y): {:?}", (x,y));
+            if let Room::Empty = game.rooms[math::index_from_position_2d([x,y], DUNGEON_SIZE)] {
+
+            } else {
+                return false;
+            }
+        }
     }
 
     true
+}
+
+fn link_area_to_room(game: &mut Game, root: [usize; 2], size: [usize; 2]) {
+    let root_index = index_from_position_2d(root, DUNGEON_SIZE);
+
+    for x in root[0]..(root[0]+size[0]) {
+        for y in root[1]..(root[1]+size[1]) {
+            let i = math::index_from_position_2d([x,y], DUNGEON_SIZE);
+            if let Room::Empty = game.rooms[i] {
+                game.rooms[i] = Room::LinkedRoom(LinkedRoom { real_room: root_index });
+            } else {
+                unreachable!("Empty rooms are the only replaceable rooms.");
+            }
+        }
+    }
 }
 
 struct ColourBuffers {

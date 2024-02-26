@@ -18,6 +18,9 @@ where
         dampening: [T; 3],
         delta_time: T,
     ) -> [T; 3];
+    /// If the body is nothing. It won't even bother to place this thing in the grid.
+    /// This is useful for when you don't want to disturb the indices of bodies, but still want to remove bodies.
+    fn is_none(&self) -> bool;
     fn collide_with_others(&self) -> bool;
     fn collide(&mut self, other: &mut Self, other_index: usize, delta_time: T);
 }
@@ -32,6 +35,7 @@ where
     Player(Player<T>),
     Cuboid(Cuboid<T>),
     ImmovableCuboid(ImmovableCuboid<T>),
+    None,
 }
 
 impl<T> Body<T> for CommonBody<T>
@@ -52,6 +56,16 @@ where
             CommonBody::ImmovableCuboid(immovable_cuboid) => {
                 immovable_cuboid.update_and_get_position(gravity, dampening, delta_time)
             }
+            CommonBody::None => unreachable!()
+        }
+    }
+
+    fn is_none(&self) -> bool {
+        match self {
+            CommonBody::Player(_) => false,
+            CommonBody::Cuboid(_) => false,
+            CommonBody::ImmovableCuboid(_) => false,
+            CommonBody::None => true,
         }
     }
 
@@ -61,6 +75,7 @@ where
             CommonBody::Player(_) => true,
             CommonBody::Cuboid(_) => true,
             CommonBody::ImmovableCuboid(_) => false,
+            CommonBody::None => unreachable!(),
         }
     }
 
@@ -184,6 +199,9 @@ where
             (CommonBody::ImmovableCuboid(_), CommonBody::ImmovableCuboid(_)) => {
                 unreachable!()
             }
+
+            (CommonBody::None,_) => unreachable!(),
+            (_,CommonBody::None) => unreachable!(),
         }
     }
 }
