@@ -60,6 +60,21 @@ where
         self.acceleration[1] += acceleration[1];
         self.acceleration[2] += acceleration[2];
     }
+
+    /// Applies an impulse to the verlet particle.
+    pub fn apply_impulse(&mut self, impulse: [T; 3], delta_time: T) {
+        self.previous_position = math::sub_3d(
+            self.previous_position,
+            math::mul_3d_by_1d(impulse, delta_time),
+        );
+    }
+
+    /// Moves both position and previous_position.
+    /// This avoids accidental velocity and displacement changes.
+    pub fn apply_uniform_position_change(&mut self, translation: [T; 3]) {
+        self.position = math::add_3d(self.position, translation);
+        self.previous_position = math::add_3d(self.previous_position, translation);
+    }
 }
 
 // This solver should not be in verlet.rs as it could be easilly generalised to work with any integration technique, or even multiple different ones at once.

@@ -11,6 +11,7 @@ use const_soft_float::soft_f32::SoftF32;
 use std::ops;
 extern crate test;
 
+/// A basic number.
 pub trait Number:
     Copy
     + Clone
@@ -24,17 +25,26 @@ pub trait Number:
     + ops::Rem<Output = Self>
     + PartialOrd
     + std::fmt::Debug
-    + From<u16>
+    + From<u16> // I don't even remember why this specifically is required lol.
 {
     const ZERO: Self;
     const ONE: Self;
-    fn abs(self) -> Self;
+    const MAX: Self;
     fn to_usize(self) -> usize; // TODO: all number should be able to convert to all other numbers, but this will take a few minutes, and I'm lazy
-    fn to_isize(self) -> isize;
-    fn is_sign_positive(self) -> bool;
 }
 
-pub trait Float: Number + ops::Neg<Output = Self> {
+/// A number with a sign.
+pub trait SignedNumber: Number + ops::Neg<Output = Self> {
+    fn abs(self) -> Self;
+    fn is_sign_positive(self) -> bool;
+
+    fn to_isize(self) -> isize;
+
+    fn from_direction(direction: Direction) -> Self;
+}
+
+/// A floating point number.
+pub trait Float: SignedNumber {
     fn sqrt(self) -> Self;
     fn sin(self) -> Self;
     fn cos(self) -> Self;
@@ -46,22 +56,36 @@ pub trait Float: Number + ops::Neg<Output = Self> {
 impl Number for f32 {
     const ZERO: Self = 0.0;
     const ONE: Self = 1.0;
+    const MAX: Self = f32::MAX;
+    #[inline]
+    fn to_usize(self) -> usize {
+        self as usize
+    }
+}
+
+impl SignedNumber for f32 {
     #[inline]
     fn abs(self) -> Self {
         self.abs()
     }
 
     #[inline]
-    fn to_usize(self) -> usize {
-        self as usize
+    fn is_sign_positive(self) -> bool {
+        self.is_sign_positive()
     }
+
     #[inline]
     fn to_isize(self) -> isize {
         self as isize
     }
+
     #[inline]
-    fn is_sign_positive(self) -> bool {
-        self.is_sign_positive()
+    fn from_direction(direction: Direction) -> Self {
+        match direction {
+            Direction::Positive => 1.0,
+            Direction::None => 0.0,
+            Direction::Negative => -1.0,
+        }
     }
 }
 
@@ -100,22 +124,36 @@ impl Float for f32 {
 impl Number for f64 {
     const ZERO: Self = 0.0;
     const ONE: Self = 1.0;
-    #[inline]
-    fn abs(self) -> Self {
-        self.abs()
-    }
+    const MAX: Self = f64::MAX;
 
     #[inline]
     fn to_usize(self) -> usize {
         self as usize
     }
+}
+
+impl SignedNumber for f64 {
     #[inline]
-    fn to_isize(self) -> isize {
-        self as isize
+    fn abs(self) -> Self {
+        self.abs()
     }
     #[inline]
     fn is_sign_positive(self) -> bool {
         self.is_sign_positive()
+    }
+
+    #[inline]
+    fn to_isize(self) -> isize {
+        self as isize
+    }
+
+    #[inline]
+    fn from_direction(direction: Direction) -> Self {
+        match direction {
+            Direction::Positive => 1.0,
+            Direction::None => 0.0,
+            Direction::Negative => -1.0,
+        }
     }
 }
 
@@ -154,24 +192,11 @@ impl Float for f64 {
 impl Number for usize {
     const ZERO: Self = 0;
     const ONE: Self = 1;
-    #[inline]
-    fn abs(self) -> Self {
-        self
-    }
+    const MAX: Self = usize::MAX;
 
     #[inline]
     fn to_usize(self) -> usize {
         self
-    }
-
-    #[inline]
-    fn to_isize(self) -> isize {
-        self as isize
-    }
-
-    #[inline]
-    fn is_sign_positive(self) -> bool {
-        true
     }
 }
 
@@ -613,6 +638,33 @@ pub fn rotate_2d<T: Float>(position: [T; 2], theta: T) -> [T; 2] {
 /// Calculates the dot product of 2 3d numbers.
 pub fn dot<T: Number>(lhs: [T; 3], rhs: [T; 3]) -> T {
     lhs[0] * rhs[0] + lhs[1] * rhs[1] + lhs[2] * rhs[2]
+}
+
+/// Converts from [f32; 3] to [f64; 3].
+pub fn f32_3d_to_f64_3d(value: [f32; 3]) -> [f64; 3] {
+    [value[0] as f64, value[1] as f64, value[2] as f64]
+}
+
+/// Converts from [f64; 3] to [f32; 3].
+pub fn f64_3d_to_f32_3d(value: [f64; 3]) -> [f32; 3] {
+    [value[0] as f32, value[1] as f32, value[2] as f32]
+}
+
+/// The direction something happened.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Direction {
+    None,
+    Positive,
+    Negative,
+}
+
+/// Sadness. This should be better.
+pub fn direction_3d_to_signed_number_3d<T: SignedNumber>(direction: [Direction; 3]) -> [T; 3] {
+    [
+        T::from_direction(direction[0]),
+        T::from_direction(direction[1]),
+        T::from_direction(direction[2]),
+    ]
 }
 
 #[cfg(test)]

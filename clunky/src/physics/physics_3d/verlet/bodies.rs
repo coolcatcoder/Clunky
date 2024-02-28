@@ -1,6 +1,6 @@
 use crate::{
-    math,
-    physics::physics_3d::aabb::{AabbCentredOrigin, CollisionEnum},
+    math::{self, Direction},
+    physics::physics_3d::{self, aabb::AabbCentredOrigin},
 };
 
 use super::Particle;
@@ -38,6 +38,28 @@ where
     None,
 }
 
+impl<T> CommonBody<T>
+where
+    T: math::Float,
+{
+    /// Returns the position of the common body, should it have a position. If it doesn't it returns an error.
+    pub fn position(&self) -> Result<[T; 3], &'static str> {
+        match self {
+            CommonBody::Player(player) => Ok(player.particle.position),
+            CommonBody::Cuboid(cuboid) => Ok(cuboid.particle.position),
+            CommonBody::ImmovableCuboid(immovable_cuboid) => Ok(immovable_cuboid.aabb.position),
+            CommonBody::None => Err("CommonBody::None does not have a position."),
+        }
+    }
+
+    pub fn size(&self) -> [T; 3] {
+        todo!()
+    }
+    pub fn half_size(&self) -> [T; 3] {
+        todo!()
+    }
+}
+
 impl<T> Body<T> for CommonBody<T>
 where
     T: math::Float,
@@ -56,7 +78,7 @@ where
             CommonBody::ImmovableCuboid(immovable_cuboid) => {
                 immovable_cuboid.update_and_get_position(gravity, dampening, delta_time)
             }
-            CommonBody::None => unreachable!()
+            CommonBody::None => unreachable!(),
         }
     }
 
@@ -88,7 +110,48 @@ where
                 todo!();
             }
             (CommonBody::Player(lhs_player), CommonBody::Cuboid(rhs_cuboid)) => {
-                todo!();
+                let lhs_player_aabb = AabbCentredOrigin {
+                    position: lhs_player.particle.position,
+                    half_size: lhs_player.half_size,
+                };
+                let rhs_cuboid_aabb = AabbCentredOrigin {
+                    position: rhs_cuboid.particle.position,
+                    half_size: rhs_cuboid.half_size,
+                };
+                if lhs_player_aabb.is_intersected_by_aabb(rhs_cuboid_aabb) {
+                    let (collision_normal, penetration) = lhs_player_aabb
+                        .get_collision_normal_and_penetration(&rhs_cuboid_aabb);
+                    let collision_normal_signed_number =
+                        math::direction_3d_to_signed_number_3d(collision_normal);
+                    let collision_translation =
+                        math::mul_3d_by_1d(collision_normal_signed_number, -penetration * T::from_f32(0.5));
+
+                    lhs_player
+                        .particle
+                        .apply_uniform_position_change(collision_translation);
+                    rhs_cuboid
+                        .particle
+                        .apply_uniform_position_change(math::neg_3d(collision_translation));
+
+                    if Direction::Positive == collision_normal[1] {
+                        lhs_player.grounded = true;
+                    }
+
+                    let impulse = physics_3d::calculate_collision_impulse(
+                        lhs_player.particle.calculate_velocity(delta_time),
+                        T::ONE,
+                        rhs_cuboid.particle.calculate_velocity(delta_time),
+                        T::ONE,
+                        collision_normal_signed_number,
+                        T::from_f32(0.5),
+                    );
+                    lhs_player
+                        .particle
+                        .apply_impulse(impulse, delta_time);
+                    rhs_cuboid
+                        .particle
+                        .apply_impulse(math::neg_3d(impulse), delta_time);
+                }
             }
             (CommonBody::Player(lhs_player), CommonBody::ImmovableCuboid(rhs_immovable_cuboid)) => {
                 let lhs_player_aabb = AabbCentredOrigin {
@@ -97,100 +160,116 @@ where
                 };
                 if lhs_player_aabb.is_intersected_by_aabb(rhs_immovable_cuboid.aabb) {
                     //println!("lhs: {:?}\nrhs: {:?}",lhs_player, rhs_immovable_cuboid.aabb);
-                    let previous_player_aabb = AabbCentredOrigin {
-                        position: lhs_player.particle.previous_position,
-                        half_size: lhs_player.half_size,
-                    };
-                    let previous_collision_direction = rhs_immovable_cuboid
-                        .aabb
-                        .get_collision_axis_with_direction(previous_player_aabb);
-                    //println!("direction: {:?}", previous_collision_direction);
 
-                    // TODO: investigate stepping up onto small ledges.
+                    let (collision_normal, penetration) = lhs_player_aabb
+                        .get_collision_normal_and_penetration(&rhs_immovable_cuboid.aabb);
+                    let collision_normal_signed_number =
+                        math::direction_3d_to_signed_number_3d(collision_normal);
+                    let collision_translation =
+                        math::mul_3d_by_1d(collision_normal_signed_number, -penetration);
+                    println!("normal: {:?}", collision_normal);
+
+                    lhs_player
+                        .particle
+                        .apply_uniform_position_change(collision_translation);
+
+                    if Direction::Positive == collision_normal[1] {
+                        lhs_player.grounded = true;
+                    }
+
+                    // TODO: investigate stepping up onto small ledges. This could react unpredictably with collision_normal and penetration.
+                    /*
                     let step_up = ((lhs_player.particle.position[1] + lhs_player.half_size[1])
                         - (rhs_immovable_cuboid.aabb.position[1]
                             - rhs_immovable_cuboid.aabb.half_size[1]))
                         < T::from_f32(0.5);
+                    */
 
-                    if CollisionEnum::Positive == previous_collision_direction[0] && !step_up {
-                        lhs_player.particle.position[0] = rhs_immovable_cuboid.aabb.position[0]
-                            - rhs_immovable_cuboid.aabb.half_size[0]
-                            - lhs_player.half_size[0]
-                            - T::from_f32(0.01);
-                    } else if CollisionEnum::Negative == previous_collision_direction[0] && !step_up
-                    {
-                        lhs_player.particle.position[0] = rhs_immovable_cuboid.aabb.position[0]
-                            + rhs_immovable_cuboid.aabb.half_size[0]
-                            + lhs_player.half_size[0]
-                            + T::from_f32(0.01);
-                    }
-
-                    if CollisionEnum::Positive == previous_collision_direction[1]
-                        || (step_up && CollisionEnum::None == previous_collision_direction[1])
-                    {
-                        lhs_player.particle.position[1] = rhs_immovable_cuboid.aabb.position[1]
-                            - rhs_immovable_cuboid.aabb.half_size[1]
-                            - lhs_player.half_size[1]
-                            - T::from_f32(0.01);
-
-                        //println!("Landed!");
-                        lhs_player.grounded = true;
-                    } else if CollisionEnum::Negative == previous_collision_direction[1] {
-                        lhs_player.particle.position[1] = rhs_immovable_cuboid.aabb.position[1]
-                            + rhs_immovable_cuboid.aabb.half_size[1]
-                            + lhs_player.half_size[1]
-                            + T::from_f32(0.01);
-                    }
-
-                    if CollisionEnum::Positive == previous_collision_direction[2] && !step_up {
-                        lhs_player.particle.position[2] = rhs_immovable_cuboid.aabb.position[2]
-                            - rhs_immovable_cuboid.aabb.half_size[2]
-                            - lhs_player.half_size[2]
-                            - T::from_f32(0.01);
-                    } else if CollisionEnum::Negative == previous_collision_direction[2] && !step_up
-                    {
-                        lhs_player.particle.position[2] = rhs_immovable_cuboid.aabb.position[2]
-                            + rhs_immovable_cuboid.aabb.half_size[2]
-                            + lhs_player.half_size[2]
-                            + T::from_f32(0.01);
-                    }
+                    let impulse = physics_3d::calculate_collision_impulse_with_immovable_rhs(
+                        lhs_player.particle.calculate_velocity(delta_time),
+                        T::ONE,
+                        collision_normal_signed_number,
+                        T::from_f32(0.5),
+                    );
+                    println!("impulse: {:?}", impulse);
+                    lhs_player
+                        .particle
+                        .apply_impulse(impulse, delta_time);
                 }
             }
 
             // cuboid
             (CommonBody::Cuboid(lhs_cuboid), CommonBody::Player(rhs_player)) => {
-                todo!();
+                //todo!();
+                println!("whoops");
             }
             (CommonBody::Cuboid(lhs_cuboid), CommonBody::Cuboid(rhs_cuboid)) => {
-                // TODO: Mess with ref mut and mut and all that, and you will gain and lose 70x performance, somehow.
-                // if lhs_cuboid
-                //     .aabb
-                //     .is_intersected_by_aabb(rhs_cuboid.aabb)
-                // {
-                //     lhs_cuboid.particle.position = lhs_cuboid.particle.previous_position; // these lines in particular are slow
-                //     rhs_cuboid.particle.position = rhs_cuboid.particle.previous_position;
-                // }
-                todo!();
+                let lhs_cuboid_aabb = AabbCentredOrigin {
+                    position: lhs_cuboid.particle.position,
+                    half_size: lhs_cuboid.half_size,
+                };
+                let rhs_cuboid_aabb = AabbCentredOrigin {
+                    position: rhs_cuboid.particle.position,
+                    half_size: rhs_cuboid.half_size,
+                };
+                if lhs_cuboid_aabb.is_intersected_by_aabb(rhs_cuboid_aabb) {
+                    let (collision_normal, penetration) = lhs_cuboid_aabb
+                        .get_collision_normal_and_penetration(&rhs_cuboid_aabb);
+                    let collision_normal_signed_number =
+                        math::direction_3d_to_signed_number_3d(collision_normal);
+                    let collision_translation =
+                        math::mul_3d_by_1d(collision_normal_signed_number, -penetration * T::from_f32(0.5));
+
+                    lhs_cuboid
+                        .particle
+                        .apply_uniform_position_change(collision_translation);
+                    rhs_cuboid
+                        .particle
+                        .apply_uniform_position_change(math::neg_3d(collision_translation));
+
+                    let impulse = physics_3d::calculate_collision_impulse(
+                        lhs_cuboid.particle.calculate_velocity(delta_time),
+                        T::ONE,
+                        rhs_cuboid.particle.calculate_velocity(delta_time),
+                        T::ONE,
+                        collision_normal_signed_number,
+                        T::from_f32(0.5),
+                    );
+                    lhs_cuboid
+                        .particle
+                        .apply_impulse(impulse, delta_time);
+                    rhs_cuboid
+                        .particle
+                        .apply_impulse(math::neg_3d(impulse), delta_time);
+                }
             }
             (CommonBody::Cuboid(lhs_cuboid), CommonBody::ImmovableCuboid(rhs_immovable_cuboid)) => {
-                todo!()
-                // if lhs_cuboid
-                //     .aabb
-                //     .is_intersected_by_aabb(rhs_immovable_cuboid.aabb)
-                // {
-                //     let collision_axis = rhs_immovable_cuboid
-                //         .aabb
-                //         .get_collision_axis_with_direction(AabbCentredOrigin {
-                //             position: lhs_cuboid.particle.previous_position,
-                //             half_size: lhs_cuboid.aabb.half_size,
-                //         });
+                let lhs_cuboid_aabb = AabbCentredOrigin {
+                    position: lhs_cuboid.particle.position,
+                    half_size: lhs_cuboid.half_size,
+                };
+                if lhs_cuboid_aabb.is_intersected_by_aabb(rhs_immovable_cuboid.aabb) {
+                    let (collision_normal, penetration) = lhs_cuboid_aabb
+                        .get_collision_normal_and_penetration(&rhs_immovable_cuboid.aabb);
+                    let collision_normal_signed_number =
+                        math::direction_3d_to_signed_number_3d(collision_normal);
+                    let collision_translation =
+                        math::mul_3d_by_1d(collision_normal_signed_number, -penetration);
 
-                //     //println!("collision axis: {:?}", collision_axis);
+                    lhs_cuboid
+                        .particle
+                        .apply_uniform_position_change(collision_translation);
 
-                //     lhs_cuboid.particle.position = lhs_cuboid.particle.previous_position;
-
-                //     //println!("Collision!");
-                // }
+                    let impulse = physics_3d::calculate_collision_impulse_with_immovable_rhs(
+                        lhs_cuboid.particle.calculate_velocity(delta_time),
+                        T::ONE,
+                        collision_normal_signed_number,
+                        T::from_f32(0.5),
+                    );
+                    lhs_cuboid
+                        .particle
+                        .apply_impulse(impulse, delta_time);
+                }
             }
 
             // immovable simple cuboid (This cannot happen, as immovable simple cuboides don't check to see if they have collided with others.)
@@ -200,8 +279,8 @@ where
                 unreachable!()
             }
 
-            (CommonBody::None,_) => unreachable!(),
-            (_,CommonBody::None) => unreachable!(),
+            (CommonBody::None, _) => unreachable!(),
+            (_, CommonBody::None) => unreachable!(),
         }
     }
 }

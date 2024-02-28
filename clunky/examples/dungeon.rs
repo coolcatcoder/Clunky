@@ -3,7 +3,7 @@ use std::sync::Arc;
 use clunky::{
     buffer_contents::{self, Colour3DInstance},
     lost_code::{is_pressed, FixedUpdate, FpsTracker},
-    math::{self, index_from_position_2d, Matrix4, Radians},
+    math::{self, f32_3d_to_f64_3d, f64_3d_to_f32_3d, index_from_position_2d, Matrix4, Radians},
     meshes,
     physics::physics_3d::{
         aabb::AabbCentredOrigin,
@@ -17,7 +17,8 @@ use clunky::{
 };
 use rand::{
     distributions::{Distribution, Uniform},
-    rngs::ThreadRng, Rng,
+    rngs::ThreadRng,
+    Rng,
 };
 use vulkano::{
     buffer::{
@@ -57,7 +58,7 @@ const DUNGEON_SIZE: usize = 10;
 const ROOM_SIZE: [usize; 3] = [25, 30, 25];
 const DOOR_WIDTH_HEIGHT_AND_THICKNESS: [f32; 3] = [2.0, 3.0, 1.5];
 
-const FIXED_DELTA_TIME: f32 = 0.04;
+const FIXED_DELTA_TIME: f64 = 0.04;
 const MAX_SUBSTEPS: u32 = 200;
 
 fn main() {
@@ -104,7 +105,7 @@ fn main() {
 
     let mut game = create_game(&context.memory_allocator());
 
-    let mut fixed_update_runner = FixedUpdate::new(FIXED_DELTA_TIME);
+    let mut fixed_update_runner = FixedUpdate::new(FIXED_DELTA_TIME as f32);
 
     event_loop.run(move |event, _, control_flow| match event {
         Event::WindowEvent {
@@ -387,13 +388,13 @@ struct Game {
     paused: bool,
     camera: Camera,
     rooms: Vec<Room>,
-    physics: CpuSolver<f32, CommonBody<f32>>,
+    physics: CpuSolver<f64, CommonBody<f64>>,
 
     cuboid_buffers: ColourBuffers,
 }
 
 impl Game {
-    fn player(&mut self) -> &mut Player<f32> {
+    fn player(&mut self) -> &mut Player<f64> {
         let CommonBody::Player(ref mut player) = self.physics.bodies[0] else {
             unreachable!("The player will always be index 0 of bodies.")
         };
@@ -427,7 +428,7 @@ fn create_game(memory_allocator: &Arc<StandardMemoryAllocator>) -> Game {
             [0.0, 50.0, 0.0],
             [0.8, 1.0, 0.8],
             [DUNGEON_SIZE + 2, 1, DUNGEON_SIZE + 2],
-            [-1.0, -(ROOM_SIZE[1] as f32) - 1.0, -1.0],
+            [-1.0, -(ROOM_SIZE[1] as f64) - 1.0, -1.0],
             [ROOM_SIZE[0], ROOM_SIZE[1] + 2, ROOM_SIZE[2]],
             OutsideOfGridBoundsBehaviour::ContinueUpdating,
             Vec::with_capacity(DUNGEON_SIZE * DUNGEON_SIZE * 10), // Around 10 bodies per room seems reasonable.
@@ -488,25 +489,36 @@ fn create_game(memory_allocator: &Arc<StandardMemoryAllocator>) -> Game {
         let variety = linked_variety_range.sample(&mut rng);
         match variety {
             0..=50 => {
-                let position = [position_range.sample(&mut rng), position_range.sample(&mut rng)];
+                let position = [
+                    position_range.sample(&mut rng),
+                    position_range.sample(&mut rng),
+                ];
                 println!("position: {:?}", position);
-                if enough_space_for_room(&game, position, [3,3]) {
-                    link_area_to_room(&mut game, position, [3,3]);
-                    let mut room = BasicRoom { cuboid_instances: Vec::with_capacity(15*9) };
-                    for x in position[0]..(position[0]+3) {
-                        for y in position[1]..(position[1]+3) {
+                if enough_space_for_room(&game, position, [3, 3]) {
+                    link_area_to_room(&mut game, position, [3, 3]);
+                    let mut room = BasicRoom {
+                        cuboid_instances: Vec::with_capacity(15 * 9),
+                        bodies: vec![],
+                    };
+                    for x in position[0]..(position[0] + 3) {
+                        for y in position[1]..(position[1] + 3) {
                             let real_room_position = [
                                 x as f32 * ROOM_SIZE[0] as f32,
                                 y as f32 * ROOM_SIZE[2] as f32,
                             ];
-                            let i = index_from_position_2d([x,y], DUNGEON_SIZE);
-                            room.create_walls_and_floor([x,y], real_room_position, &mut game.physics);
+                            let i = index_from_position_2d([x, y], DUNGEON_SIZE);
+                            room.create_walls_and_floor(
+                                [x, y],
+                                real_room_position,
+                                &mut game.physics,
+                            );
                         }
                     }
                     for instance in &mut room.cuboid_instances {
                         instance.colour = [0.0, 1.0, 0.0, 1.0];
                     }
-                    game.rooms[index_from_position_2d(position, DUNGEON_SIZE)] = Room::BasicRoom(room);
+                    game.rooms[index_from_position_2d(position, DUNGEON_SIZE)] =
+                        Room::BasicRoom(room);
                     println!("worked?")
                 }
             }
@@ -550,12 +562,24 @@ impl Room {
         match self {
             Room::BasicRoom(room) => room.cuboid_instances.clone(),
             Room::LinkedRoom(room) => rooms[room.real_room].get_instances(rooms),
-            Room::Marker | Room::Empty => unreachable!("This room type should not exist after generation is finished."),
+            Room::Marker | Room::Empty => {
+                unreachable!("This room type should not exist after generation is finished.")
+            }
+        }
+    }
+    fn get_bodies(&self, rooms: &Vec<Room>) -> Vec<usize> {
+        match self {
+            Room::BasicRoom(room) => room.bodies.clone(),
+            Room::LinkedRoom(room) => rooms[room.real_room].get_bodies(rooms),
+            Room::Marker | Room::Empty => {
+                unreachable!("This room type should not exist after generation is finished.")
+            }
         }
     }
 }
 
 // bad name. Perhaps relativity or something?
+#[derive(Copy, Clone)]
 enum RelativeOrConstantF32 {
     Relative(f32),
     Constant(f32),
@@ -564,12 +588,13 @@ enum RelativeOrConstantF32 {
 #[derive(Clone)]
 struct BasicRoom {
     cuboid_instances: Vec<buffer_contents::Colour3DInstance>,
+    bodies: Vec<usize>,
 }
 
 impl BasicRoom {
     fn create_cuboid(
         &mut self,
-        physics: &mut CpuSolver<f32, CommonBody<f32>>,
+        physics: &mut CpuSolver<f64, CommonBody<f64>>,
         room_position: [usize; 2],
         room_size: [usize; 2],
         // Position is the actual f32 position relative to room position and room size. The room is always [1.0,1.0,1.0,] sized no matter what.
@@ -577,28 +602,59 @@ impl BasicRoom {
         // RelativeOrConstantF32 allows outside wall thickness to always be 1, while everything else can be relative.
         size: [RelativeOrConstantF32; 3],
         has_collision: bool,
-        colour: [f32; 4]
+        colour: [f32; 4],
     ) {
         //todo!();
-        let mut temp_position = [
-            position[0] * room_position[0] as f32 * room_size[0] as f32 * ROOM_SIZE[0] as f32,
+        let temp_position = [
+            ROOM_SIZE[0] as f32 * (position[0] * room_size[0] as f32 + room_position[0] as f32),
             position[1] * ROOM_SIZE[1] as f32,
-            position[2] * room_position[1] as f32 * room_size[1] as f32 * ROOM_SIZE[2] as f32,
+            ROOM_SIZE[2] as f32 * (position[2] * room_size[1] as f32 + room_position[1] as f32),
         ];
-        let mut temp_scale = [ROOM_SIZE[0] as f32, 1.0, ROOM_SIZE[2] as f32]; // still gotta fix
+        //let mut temp_scale = [ROOM_SIZE[0] as f32, 1.0, ROOM_SIZE[2] as f32]; // still gotta fix
+        let temp_scale = [
+            match size[0] {
+                RelativeOrConstantF32::Relative(value) => {
+                    value * room_size[0] as f32 * ROOM_SIZE[0] as f32
+                }
+                RelativeOrConstantF32::Constant(value) => value,
+            },
+            match size[1] {
+                RelativeOrConstantF32::Relative(value) => value * ROOM_SIZE[1] as f32,
+                RelativeOrConstantF32::Constant(value) => value,
+            },
+            match size[2] {
+                RelativeOrConstantF32::Relative(value) => {
+                    value * room_size[1] as f32 * ROOM_SIZE[2] as f32
+                }
+                RelativeOrConstantF32::Constant(value) => value,
+            },
+        ];
+
         self.cuboid_instances.push(Colour3DInstance::new(
-            [1.0, 1.0, 1.0, 1.0],
+            colour,
             Matrix4::from_translation(temp_position) * Matrix4::from_scale(temp_scale),
         ));
-        physics
-            .bodies
-            .push(CommonBody::ImmovableCuboid(ImmovableCuboid {
-                aabb: AabbCentredOrigin {
-                    position: temp_position,
-                    half_size: math::mul_3d_by_1d(temp_scale, 0.5),
-                },
-            }));
-        self.cuboid_instances.push(Colour3DInstance::new(colour, model_to_world))
+        if has_collision {
+            physics
+                .bodies
+                .push(CommonBody::ImmovableCuboid(ImmovableCuboid {
+                    aabb: AabbCentredOrigin {
+                        position: [
+                            temp_position[0] as f64,
+                            temp_position[1] as f64,
+                            temp_position[2] as f64,
+                        ],
+                        half_size: math::mul_3d_by_1d(
+                            [
+                                temp_scale[0] as f64,
+                                temp_scale[1] as f64,
+                                temp_scale[2] as f64,
+                            ],
+                            0.5,
+                        ),
+                    },
+                }));
+        }
     }
 
     fn create_walls_and_floor(
@@ -608,7 +664,7 @@ impl BasicRoom {
         //position: [usize; 2],
         //size: [usize; 2],
         //real_position: [f32; 2],
-        physics: &mut CpuSolver<f32, CommonBody<f32>>,
+        physics: &mut CpuSolver<f64, CommonBody<f64>>,
     ) {
         // Walls:
 
@@ -627,8 +683,8 @@ impl BasicRoom {
             .bodies
             .push(CommonBody::ImmovableCuboid(ImmovableCuboid {
                 aabb: AabbCentredOrigin {
-                    position: temp_position,
-                    half_size: math::mul_3d_by_1d(temp_scale, 0.5),
+                    position: f32_3d_to_f64_3d(temp_position),
+                    half_size: math::mul_3d_by_1d(f32_3d_to_f64_3d(temp_scale), 0.5),
                 },
             }));
 
@@ -658,8 +714,8 @@ impl BasicRoom {
                 .bodies
                 .push(CommonBody::ImmovableCuboid(ImmovableCuboid {
                     aabb: AabbCentredOrigin {
-                        position: temp_position,
-                        half_size: math::mul_3d_by_1d(temp_scale, 0.5),
+                        position: f32_3d_to_f64_3d(temp_position),
+                        half_size: math::mul_3d_by_1d(f32_3d_to_f64_3d(temp_scale), 0.5),
                     },
                 }));
             1
@@ -684,8 +740,8 @@ impl BasicRoom {
                 .bodies
                 .push(CommonBody::ImmovableCuboid(ImmovableCuboid {
                     aabb: AabbCentredOrigin {
-                        position: temp_position,
-                        half_size: math::mul_3d_by_1d(temp_scale, 0.5),
+                        position: f32_3d_to_f64_3d(temp_position),
+                        half_size: math::mul_3d_by_1d(f32_3d_to_f64_3d(temp_scale), 0.5),
                     },
                 }));
 
@@ -710,8 +766,8 @@ impl BasicRoom {
                 .bodies
                 .push(CommonBody::ImmovableCuboid(ImmovableCuboid {
                     aabb: AabbCentredOrigin {
-                        position: temp_position,
-                        half_size: math::mul_3d_by_1d(temp_scale, 0.5),
+                        position: f32_3d_to_f64_3d(temp_position),
+                        half_size: math::mul_3d_by_1d(f32_3d_to_f64_3d(temp_scale), 0.5),
                     },
                 }));
 
@@ -735,8 +791,8 @@ impl BasicRoom {
                 .bodies
                 .push(CommonBody::ImmovableCuboid(ImmovableCuboid {
                     aabb: AabbCentredOrigin {
-                        position: temp_position,
-                        half_size: math::mul_3d_by_1d(temp_scale, 0.5),
+                        position: f32_3d_to_f64_3d(temp_position),
+                        half_size: math::mul_3d_by_1d(f32_3d_to_f64_3d(temp_scale), 0.5),
                     },
                 }));
             2
@@ -758,8 +814,8 @@ impl BasicRoom {
                 .bodies
                 .push(CommonBody::ImmovableCuboid(ImmovableCuboid {
                     aabb: AabbCentredOrigin {
-                        position: temp_position,
-                        half_size: math::mul_3d_by_1d(temp_scale, 0.5),
+                        position: f32_3d_to_f64_3d(temp_position),
+                        half_size: math::mul_3d_by_1d(f32_3d_to_f64_3d(temp_scale), 0.5),
                     },
                 }));
             1
@@ -828,8 +884,8 @@ impl BasicRoom {
                 .bodies
                 .push(CommonBody::ImmovableCuboid(ImmovableCuboid {
                     aabb: AabbCentredOrigin {
-                        position: temp_position,
-                        half_size: math::mul_3d_by_1d(temp_scale, 0.5),
+                        position: f32_3d_to_f64_3d(temp_position),
+                        half_size: math::mul_3d_by_1d(f32_3d_to_f64_3d(temp_scale), 0.5),
                     },
                 }));
             1
@@ -854,8 +910,8 @@ impl BasicRoom {
                 .bodies
                 .push(CommonBody::ImmovableCuboid(ImmovableCuboid {
                     aabb: AabbCentredOrigin {
-                        position: temp_position,
-                        half_size: math::mul_3d_by_1d(temp_scale, 0.5),
+                        position: f32_3d_to_f64_3d(temp_position),
+                        half_size: math::mul_3d_by_1d(f32_3d_to_f64_3d(temp_scale), 0.5),
                     },
                 }));
 
@@ -880,8 +936,8 @@ impl BasicRoom {
                 .bodies
                 .push(CommonBody::ImmovableCuboid(ImmovableCuboid {
                     aabb: AabbCentredOrigin {
-                        position: temp_position,
-                        half_size: math::mul_3d_by_1d(temp_scale, 0.5),
+                        position: f32_3d_to_f64_3d(temp_position),
+                        half_size: math::mul_3d_by_1d(f32_3d_to_f64_3d(temp_scale), 0.5),
                     },
                 }));
 
@@ -905,8 +961,8 @@ impl BasicRoom {
                 .bodies
                 .push(CommonBody::ImmovableCuboid(ImmovableCuboid {
                     aabb: AabbCentredOrigin {
-                        position: temp_position,
-                        half_size: math::mul_3d_by_1d(temp_scale, 0.5),
+                        position: f32_3d_to_f64_3d(temp_position),
+                        half_size: math::mul_3d_by_1d(f32_3d_to_f64_3d(temp_scale), 0.5),
                     },
                 }));
             2
@@ -928,8 +984,8 @@ impl BasicRoom {
                 .bodies
                 .push(CommonBody::ImmovableCuboid(ImmovableCuboid {
                     aabb: AabbCentredOrigin {
-                        position: temp_position,
-                        half_size: math::mul_3d_by_1d(temp_scale, 0.5),
+                        position: f32_3d_to_f64_3d(temp_position),
+                        half_size: math::mul_3d_by_1d(f32_3d_to_f64_3d(temp_scale), 0.5),
                     },
                 }));
             1
@@ -992,7 +1048,7 @@ struct LinkedRoom {
 fn generate_room(
     room_index: usize,
     variety: u8,
-    physics: &mut CpuSolver<f32, CommonBody<f32>>,
+    physics: &mut CpuSolver<f64, CommonBody<f64>>,
     //marked_rooms: &mut Vec<usize>,
     //linked_rooms: &mut Vec<(usize, usize)>,
 ) -> Room {
@@ -1014,11 +1070,21 @@ fn generate_room(
         0..=25 => {
             let mut room = BasicRoom {
                 cuboid_instances: Vec::with_capacity(15),
+                bodies: vec![],
             };
             room.create_walls_and_floor(room_position, real_room_position, physics);
             for instance in &mut room.cuboid_instances {
                 instance.colour = [0.0, 0.0, 1.0, 1.0];
             }
+            room.create_cuboid(
+                physics,
+                room_position,
+                [1, 1],
+                [0.5, -0.5, 0.5],
+                [RelativeOrConstantF32::Constant(1.0); 3],
+                false,
+                [1.0, 0.0, 0.0, 1.0],
+            );
             Room::BasicRoom(room)
         }
         /*
@@ -1047,6 +1113,7 @@ fn generate_room(
         _ => {
             let mut room = BasicRoom {
                 cuboid_instances: Vec::with_capacity(15),
+                bodies: vec![],
             };
             room.create_walls_and_floor(room_position, real_room_position, physics);
             Room::BasicRoom(room)
@@ -1060,11 +1127,10 @@ fn enough_space_for_room(game: &Game, position: [usize; 2], size: [usize; 2]) ->
         return false;
     }
 
-    for x in position[0]..(position[0]+size[0]) {
-        for y in position[1]..(position[1]+size[1]) {
-            println!("(x,y): {:?}", (x,y));
-            if let Room::Empty = game.rooms[math::index_from_position_2d([x,y], DUNGEON_SIZE)] {
-
+    for x in position[0]..(position[0] + size[0]) {
+        for y in position[1]..(position[1] + size[1]) {
+            println!("(x,y): {:?}", (x, y));
+            if let Room::Empty = game.rooms[math::index_from_position_2d([x, y], DUNGEON_SIZE)] {
             } else {
                 return false;
             }
@@ -1077,11 +1143,13 @@ fn enough_space_for_room(game: &Game, position: [usize; 2], size: [usize; 2]) ->
 fn link_area_to_room(game: &mut Game, root: [usize; 2], size: [usize; 2]) {
     let root_index = index_from_position_2d(root, DUNGEON_SIZE);
 
-    for x in root[0]..(root[0]+size[0]) {
-        for y in root[1]..(root[1]+size[1]) {
-            let i = math::index_from_position_2d([x,y], DUNGEON_SIZE);
+    for x in root[0]..(root[0] + size[0]) {
+        for y in root[1]..(root[1] + size[1]) {
+            let i = math::index_from_position_2d([x, y], DUNGEON_SIZE);
             if let Room::Empty = game.rooms[i] {
-                game.rooms[i] = Room::LinkedRoom(LinkedRoom { real_room: root_index });
+                game.rooms[i] = Room::LinkedRoom(LinkedRoom {
+                    real_room: root_index,
+                });
             } else {
                 unreachable!("Empty rooms are the only replaceable rooms.");
             }
@@ -1138,7 +1206,7 @@ fn fixed_update(game: &mut Game) {
 
     game.player()
         .particle
-        .accelerate([real_motion.0, 0.0, real_motion.1]);
+        .accelerate([real_motion.0 as f64, 0.0, real_motion.1 as f64]);
 
     let horizontal_dampening = if game.player().grounded { 0.8 } else { 0.95 }; // grounded originally 0.8
 
@@ -1153,10 +1221,13 @@ fn fixed_update(game: &mut Game) {
     }
 
     game.player().particle.position[0] = game.player().particle.position[0]
-        .clamp(0.0, DUNGEON_SIZE as f32 * ROOM_SIZE[0] as f32 - 0.01);
+        .clamp(0.0, DUNGEON_SIZE as f64 * ROOM_SIZE[0] as f64 - 0.01);
     game.player().particle.position[2] = game.player().particle.position[2]
-        .clamp(0.0, DUNGEON_SIZE as f32 * ROOM_SIZE[2] as f32 - 0.01);
-    game.camera.position = math::add_3d(game.player().particle.position, [0.0, -1.0, 0.0]);
+        .clamp(0.0, DUNGEON_SIZE as f64 * ROOM_SIZE[2] as f64 - 0.01);
+    game.camera.position = math::add_3d(
+        f64_3d_to_f32_3d(game.player().particle.position),
+        [0.0, -1.0, 0.0],
+    );
 
     game.camera.light_position[0] = game.camera.position[0];
     game.camera.light_position[2] = game.camera.position[2];
@@ -1168,9 +1239,21 @@ fn update(game: &mut Game) {
         game.camera.position[2] as usize / ROOM_SIZE[2],
     ];
 
-    game.cuboid_buffers.instance_buffer = game.rooms
-        [math::index_from_position_2d(current_room_position, DUNGEON_SIZE)]
-    .get_instances(&game.rooms);
+    let current_room = &game.rooms[math::index_from_position_2d(current_room_position, DUNGEON_SIZE)];
+
+    game.cuboid_buffers.instance_buffer = current_room.get_instances(&game.rooms);
+    
+    for body_index in current_room.get_bodies(&game.rooms) {
+        let body = &game.physics.bodies[body_index];
+        if let CommonBody::None = body {
+            continue;
+        }
+
+        game.cuboid_buffers.instance_buffer.push(Colour3DInstance::new(
+            [1.0, 1.0, 0.0, 1.0], // Temp
+            Matrix4::from_translation(math::f64_3d_to_f32_3d(body.position().unwrap())) * Matrix4::from_scale(math::f64_3d_to_f32_3d(body.size())),
+        ));
+    }
 }
 
 fn on_keyboard_input(

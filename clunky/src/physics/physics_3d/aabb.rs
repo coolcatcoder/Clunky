@@ -1,6 +1,6 @@
 // TODO: Rename this to axis_aligned_shapes.rs perhaps? I want to have more than just aabb in here.
 
-use crate::math::Number;
+use crate::math::{Direction, Number, SignedNumber};
 extern crate test;
 
 pub struct AabbTopLeftOrigin<T>
@@ -45,7 +45,7 @@ where
 
 impl<T> AabbCentredOrigin<T>
 where
-    T: Number,
+    T: SignedNumber, // Need to split up properly. See 2d for more info.
 {
     pub fn is_intersected_by_point(&self, point: [T; 3]) -> bool {
         if (self.position[0] - point[0]).abs() > self.half_size[0] {
@@ -89,47 +89,96 @@ where
     pub fn get_collision_axis_with_direction(
         &self,
         previous_other: AabbCentredOrigin<T>,
-    ) -> [CollisionEnum; 3] {
+    ) -> [Direction; 3] {
         // Run this on previous position instead, so you can see what axis wasn't intersecting before the collision.
-        let mut collisions = [CollisionEnum::None; 3];
+        let mut collisions = [Direction::None; 3];
 
         let x_difference = self.position[0] - previous_other.position[0];
         if x_difference.abs() > self.half_size[0] + previous_other.half_size[0] {
             if x_difference.is_sign_positive() {
-                collisions[0] = CollisionEnum::Positive;
+                collisions[0] = Direction::Positive;
             } else {
-                collisions[0] = CollisionEnum::Negative;
+                collisions[0] = Direction::Negative;
             }
         }
 
         let y_difference = self.position[1] - previous_other.position[1];
         if y_difference.abs() > self.half_size[1] + previous_other.half_size[1] {
             if y_difference.is_sign_positive() {
-                collisions[1] = CollisionEnum::Positive;
+                collisions[1] = Direction::Positive;
             } else {
-                collisions[1] = CollisionEnum::Negative;
+                collisions[1] = Direction::Negative;
             }
         }
 
         let z_difference = self.position[2] - previous_other.position[2];
         if z_difference.abs() > self.half_size[2] + previous_other.half_size[2] {
             if z_difference.is_sign_positive() {
-                collisions[2] = CollisionEnum::Positive;
+                collisions[2] = Direction::Positive;
             } else {
-                collisions[2] = CollisionEnum::Negative;
+                collisions[2] = Direction::Negative;
             }
         }
 
         collisions
     }
-}
 
-/// The direction a collision happened.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum CollisionEnum {
-    None,
-    Positive,
-    Negative,
+    /// This won't work. Good luck.
+    pub fn get_collision_normal_and_penetration(
+        &self,
+        other: &AabbCentredOrigin<T>,
+    ) -> ([Direction; 3], T) {
+        let mut normal = [Direction::None; 3];
+        let mut smallest_penetration = T::MAX;
+        let mut temp;
+
+        temp = (self.position[0] + self.half_size[0]) - (other.position[0] - other.half_size[0]);
+        println!("+x penetration: {:?}", temp);
+        if temp < smallest_penetration {
+            normal = [Direction::Positive, Direction::None, Direction::None];
+            smallest_penetration = temp;
+        }
+
+        temp = (self.position[1] + self.half_size[1]) - (other.position[1] - other.half_size[1]);
+        println!("+y penetration: {:?}", temp);
+        if temp < smallest_penetration {
+            normal = [Direction::None, Direction::Positive, Direction::None];
+            smallest_penetration = temp;
+        }
+
+        temp = (self.position[2] + self.half_size[2]) - (other.position[2] - other.half_size[2]);
+        println!("+z penetration: {:?}", temp);
+        if temp < smallest_penetration {
+            normal = [Direction::None, Direction::None, Direction::Positive];
+            smallest_penetration = temp;
+        }
+
+        temp = ((self.position[0] - self.half_size[0]) - (other.position[0] + other.half_size[0]))
+            .abs();
+        println!("-x penetration: {:?}", temp);
+        if temp < smallest_penetration {
+            normal = [Direction::Negative, Direction::None, Direction::None];
+            smallest_penetration = temp;
+        }
+
+        temp = ((self.position[1] - self.half_size[1]) - (other.position[1] + other.half_size[1]))
+            .abs();
+        println!("-y penetration: {:?}", temp);
+        if temp < smallest_penetration {
+            normal = [Direction::None, Direction::Negative, Direction::None];
+            smallest_penetration = temp;
+        }
+
+        temp = ((self.position[2] - self.half_size[2]) - (other.position[2] + other.half_size[2]))
+            .abs();
+        println!("-z penetration: {:?}", temp);
+        if temp < smallest_penetration {
+            normal = [Direction::None, Direction::None, Direction::Negative];
+            smallest_penetration = temp;
+        }
+
+        (normal, smallest_penetration)
+    }
 }
 
 pub struct AabbMinMax<T>

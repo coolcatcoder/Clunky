@@ -94,3 +94,40 @@ pub fn calculate_velocities_during_elastic_collision_with_friction_and_restituti
         ),
     )
 }
+
+/// Calculates the collision impulse to move them outside each other.
+/// No idea what an impulse is. Good luck.
+pub fn calculate_collision_impulse<T: Float>(
+    lhs_velocity: [T; 3],
+    lhs_mass: T,
+
+    rhs_velocity: [T; 3],
+    rhs_mass: T,
+
+    collision_normal: [T; 3],
+    restitution: T,
+) -> [T; 3] {
+    let relative_velocity = math::sub_3d(lhs_velocity, rhs_velocity);
+
+    let impulse_magnitude = -(T::ONE + restitution)
+        * math::dot(relative_velocity, collision_normal)
+        / (T::ONE / lhs_mass + T::ONE / rhs_mass);
+
+    math::mul_3d_by_1d(collision_normal, impulse_magnitude)
+}
+
+pub fn calculate_collision_impulse_with_immovable_rhs<T: Float>(
+    lhs_velocity: [T; 3],
+    lhs_mass: T,
+
+    collision_normal: [T; 3],
+    restitution: T,
+) -> [T; 3] {
+    let relative_velocity = lhs_velocity;
+
+    let impulse_magnitude = -(T::ONE + restitution)
+        * math::dot(relative_velocity, collision_normal)
+        / (T::ONE / lhs_mass);
+
+    math::mul_3d_by_1d(collision_normal, impulse_magnitude)
+}

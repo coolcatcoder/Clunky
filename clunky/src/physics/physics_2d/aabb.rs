@@ -1,4 +1,4 @@
-use crate::math::Number;
+use crate::math::{Number, SignedNumber};
 extern crate test;
 
 pub struct AabbTopLeftOrigin<T>
@@ -39,7 +39,7 @@ where
 
 impl<T> AabbCentredOrigin<T>
 where
-    T: Number,
+    T: SignedNumber, // I need to split these up into signed and unsigned versions, that make use of abs sometimes.
 {
     pub fn is_intersected_by_point(&self, point: [T; 2]) -> bool {
         if (self.position[0] - point[0]).abs() > self.half_size[0] {
