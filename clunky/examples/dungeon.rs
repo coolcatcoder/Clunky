@@ -1246,12 +1246,15 @@ fn update(game: &mut Game) {
     for body_index in current_room.get_bodies(&game.rooms) {
         let body = &game.physics.bodies[body_index];
         if let CommonBody::None = body {
+            // Perhaps remove it if it is none?
             continue;
         }
 
+        // Don't forget to check if the body is within the room, and if not, don't render it, and instead pass to the correct room.
+
         game.cuboid_buffers.instance_buffer.push(Colour3DInstance::new(
             [1.0, 1.0, 0.0, 1.0], // Temp
-            Matrix4::from_translation(math::f64_3d_to_f32_3d(body.position().unwrap())) * Matrix4::from_scale(math::f64_3d_to_f32_3d(body.size())),
+            Matrix4::from_translation(math::f64_3d_to_f32_3d(body.position().unwrap())) * Matrix4::from_scale(math::f64_3d_to_f32_3d(body.size().unwrap())),
         ));
     }
 }

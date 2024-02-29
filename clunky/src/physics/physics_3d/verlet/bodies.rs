@@ -52,11 +52,23 @@ where
         }
     }
 
-    pub fn size(&self) -> [T; 3] {
-        todo!()
+    /// Returns the size of the common body, should it have a size (Or half size, we can just * 2.0). If it doesn't it returns an error.
+    pub fn size(&self) -> Result<[T; 3], &'static str> {
+        match self {
+            CommonBody::Player(player) => Ok(math::mul_3d_by_1d(player.half_size,T::from_f32(2.0))),
+            CommonBody::Cuboid(cuboid) => Ok(math::mul_3d_by_1d(cuboid.half_size,T::from_f32(2.0))),
+            CommonBody::ImmovableCuboid(immovable_cuboid) => Ok(math::mul_3d_by_1d(immovable_cuboid.aabb.half_size,T::from_f32(2.0))),
+            CommonBody::None => Err("CommonBody::None does not have a half_size."),
+        }
     }
-    pub fn half_size(&self) -> [T; 3] {
-        todo!()
+    /// Returns the half size of the common body, should it have a half size (Or size, we can just * 0.5). If it doesn't it returns an error.
+    pub fn half_size(&self) -> Result<[T; 3], &'static str> {
+        match self {
+            CommonBody::Player(player) => Ok(player.half_size),
+            CommonBody::Cuboid(cuboid) => Ok(cuboid.half_size),
+            CommonBody::ImmovableCuboid(immovable_cuboid) => Ok(immovable_cuboid.aabb.half_size),
+            CommonBody::None => Err("CommonBody::None does not have a half_size."),
+        }
     }
 }
 
