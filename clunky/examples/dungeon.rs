@@ -8,7 +8,7 @@ use clunky::{
     physics::physics_3d::{
         aabb::AabbCentredOrigin,
         verlet::{
-            bodies::{CommonBody, ImmovableCuboid, Player},
+            bodies::{CommonBody, Cuboid, ImmovableCuboid, Player},
             CpuSolver, OutsideOfGridBoundsBehaviour, Particle,
         },
     },
@@ -388,13 +388,13 @@ struct Game {
     paused: bool,
     camera: Camera,
     rooms: Vec<Room>,
-    physics: CpuSolver<f64, CommonBody<f64>>,
+    physics: CpuSolver<f32, CommonBody<f32>>,
 
     cuboid_buffers: ColourBuffers,
 }
 
 impl Game {
-    fn player(&mut self) -> &mut Player<f64> {
+    fn player(&mut self) -> &mut Player<f32> {
         let CommonBody::Player(ref mut player) = self.physics.bodies[0] else {
             unreachable!("The player will always be index 0 of bodies.")
         };
@@ -428,7 +428,7 @@ fn create_game(memory_allocator: &Arc<StandardMemoryAllocator>) -> Game {
             [0.0, 50.0, 0.0],
             [0.8, 1.0, 0.8],
             [DUNGEON_SIZE + 2, 1, DUNGEON_SIZE + 2],
-            [-1.0, -(ROOM_SIZE[1] as f64) - 1.0, -1.0],
+            [-1.0, -(ROOM_SIZE[1] as f32) - 1.0, -1.0],
             [ROOM_SIZE[0], ROOM_SIZE[1] + 2, ROOM_SIZE[2]],
             OutsideOfGridBoundsBehaviour::ContinueUpdating,
             Vec::with_capacity(DUNGEON_SIZE * DUNGEON_SIZE * 10), // Around 10 bodies per room seems reasonable.
@@ -545,6 +545,15 @@ fn create_game(memory_allocator: &Arc<StandardMemoryAllocator>) -> Game {
         game.rooms[linked_room.1] = Room::LinkedRoom(LinkedRoom{real_room:linked_room.0});
     }
     */
+    let room_index = get_non_linked_index(0, &game.rooms);
+
+    if let Room::BasicRoom(room) = &mut game.rooms[room_index] {
+        room.bodies.push(game.physics.bodies.len())
+    }
+    game.physics.bodies.push(CommonBody::Cuboid(Cuboid {
+        particle: Particle::from_position([5.0, -5.0, 5.0]),
+        half_size: [0.5; 3],
+    }));
 
     game
 }
@@ -558,24 +567,18 @@ enum Room {
 }
 
 impl Room {
-    fn get_instances(&self, rooms: &Vec<Room>) -> Vec<Colour3DInstance> {
-        match self {
-            Room::BasicRoom(room) => room.cuboid_instances.clone(),
-            Room::LinkedRoom(room) => rooms[room.real_room].get_instances(rooms),
-            Room::Marker | Room::Empty => {
-                unreachable!("This room type should not exist after generation is finished.")
-            }
-        }
+    //fn assume_basic_unchecked(&self) -> &BasicRoom
+}
+
+fn get_non_linked_index(index: usize, rooms: &Vec<Room>) -> usize {
+    let mut index = index;
+    while let Room::LinkedRoom(room) = &rooms[index] {
+        index = room.real_room;
     }
-    fn get_bodies(&self, rooms: &Vec<Room>) -> Vec<usize> {
-        match self {
-            Room::BasicRoom(room) => room.bodies.clone(),
-            Room::LinkedRoom(room) => rooms[room.real_room].get_bodies(rooms),
-            Room::Marker | Room::Empty => {
-                unreachable!("This room type should not exist after generation is finished.")
-            }
-        }
-    }
+    let Room::BasicRoom(_) = &rooms[index] else {
+        panic!()
+    };
+    index
 }
 
 // bad name. Perhaps relativity or something?
@@ -664,7 +667,7 @@ impl BasicRoom {
         //position: [usize; 2],
         //size: [usize; 2],
         //real_position: [f32; 2],
-        physics: &mut CpuSolver<f64, CommonBody<f64>>,
+        physics: &mut CpuSolver<f32, CommonBody<f32>>,
     ) {
         // Walls:
 
@@ -1239,24 +1242,67 @@ fn update(game: &mut Game) {
         game.camera.position[2] as usize / ROOM_SIZE[2],
     ];
 
-    let current_room = &game.rooms[math::index_from_position_2d(current_room_position, DUNGEON_SIZE)];
+    let current_room_index = get_non_linked_index(math::index_from_position_2d(current_room_position, DUNGEON_SIZE), &game.rooms);
 
-    game.cuboid_buffers.instance_buffer = current_room.get_instances(&game.rooms);
-    
-    for body_index in current_room.get_bodies(&game.rooms) {
-        let body = &game.physics.bodies[body_index];
+    let Room::BasicRoom(current_room) = &mut game.rooms[current_room_index] else {
+        unreachable!()
+    };
+
+    game.cuboid_buffers.instance_buffer = current_room.cuboid_instances.clone();
+
+    // (index in room.bodies, index to correct room, index into physics bodies)
+    let mut wrong_room_bodies: Vec<(usize, usize, usize)> = vec![];
+
+    for (i,body_index) in (0..current_room.bodies.len()).zip(&current_room.bodies) {
+        let body = &game.physics.bodies[*body_index];
         if let CommonBody::None = body {
-            // Perhaps remove it if it is none?
+            // TODO: Remove None bodies.
             continue;
         }
 
-        // Don't forget to check if the body is within the room, and if not, don't render it, and instead pass to the correct room.
+        let position = math::f64_3d_to_f32_3d(body.position().unwrap());
 
-        game.cuboid_buffers.instance_buffer.push(Colour3DInstance::new(
-            [1.0, 1.0, 0.0, 1.0], // Temp
-            Matrix4::from_translation(math::f64_3d_to_f32_3d(body.position().unwrap())) * Matrix4::from_scale(math::f64_3d_to_f32_3d(body.size().unwrap())),
-        ));
+        // Would this really work for linked rooms?
+        let room_position = [
+            position[0] as usize / ROOM_SIZE[0],
+            position[2] as usize / ROOM_SIZE[2],
+        ];
+
+        if room_position != current_room_position {
+            println!("wrong!");
+            wrong_room_bodies.push((i,index_from_position_2d(room_position, DUNGEON_SIZE),*body_index));
+        }
+
+        game.cuboid_buffers
+            .instance_buffer
+            .push(Colour3DInstance::new(
+                [1.0, 1.0, 0.0, 1.0], // Temp
+                Matrix4::from_translation(position)
+                    * Matrix4::from_scale(math::f64_3d_to_f32_3d(body.size().unwrap())),
+            ));
     }
+
+    /* Won't work due to the removal breaking the indicies. Oh no.
+    for (current_room_bodies_index, correct_room_index, physics_body_index) in wrong_room_bodies {
+        let correct_room_index = get_non_linked_index(correct_room_index, &game.rooms);
+        // A nasty solution, but it works.
+        if correct_room_index == current_room_index {
+            continue;
+        }
+
+        println!("fixed! {:?}", (current_room_bodies_index, correct_room_index, physics_body_index));
+        if let Room::BasicRoom(current_room) = &mut game.rooms[current_room_index] {
+            current_room.bodies.swap_remove(current_room_bodies_index);
+        } else {
+            unreachable!()
+        }
+        if let Room::BasicRoom(correct_room) = &mut game.rooms[correct_room_index] {
+            correct_room.bodies.push(physics_body_index);
+        } else {
+            unreachable!()
+        }
+    }
+    */
 }
 
 fn on_keyboard_input(
@@ -1308,6 +1354,25 @@ fn on_keyboard_input(
             VirtualKeyCode::Escape => {
                 if is_pressed(input.state) {
                     game.paused = !game.paused;
+                }
+            }
+
+            VirtualKeyCode::T => {
+                if is_pressed(input.state) {
+                    let current_room_position = [
+                        game.camera.position[0] as usize / ROOM_SIZE[0],
+                        game.camera.position[2] as usize / ROOM_SIZE[2],
+                    ];
+
+                    let current_room_index = get_non_linked_index(math::index_from_position_2d(current_room_position, DUNGEON_SIZE), &game.rooms);
+
+                    if let Room::BasicRoom(room) = &mut game.rooms[current_room_index] {
+                        room.bodies.push(game.physics.bodies.len())
+                    }
+                    game.physics.bodies.push(CommonBody::Cuboid(Cuboid {
+                        particle: Particle::from_position([game.camera.position[0] as f64, -5.0, game.camera.position[2] as f64]),
+                        half_size: [0.5; 3],
+                    }));
                 }
             }
             _ => (),

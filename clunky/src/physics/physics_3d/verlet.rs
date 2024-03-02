@@ -223,6 +223,7 @@ where
         }
 
         // TODO: How the hell can we multithread this?
+        // TODO: Consider having substeps that affect only collision?
         for cell_index in 0..self.grid.len() {
             let cell = &self.grid[cell_index];
             let cell_position =

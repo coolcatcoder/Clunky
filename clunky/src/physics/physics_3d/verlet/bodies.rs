@@ -55,9 +55,16 @@ where
     /// Returns the size of the common body, should it have a size (Or half size, we can just * 2.0). If it doesn't it returns an error.
     pub fn size(&self) -> Result<[T; 3], &'static str> {
         match self {
-            CommonBody::Player(player) => Ok(math::mul_3d_by_1d(player.half_size,T::from_f32(2.0))),
-            CommonBody::Cuboid(cuboid) => Ok(math::mul_3d_by_1d(cuboid.half_size,T::from_f32(2.0))),
-            CommonBody::ImmovableCuboid(immovable_cuboid) => Ok(math::mul_3d_by_1d(immovable_cuboid.aabb.half_size,T::from_f32(2.0))),
+            CommonBody::Player(player) => {
+                Ok(math::mul_3d_by_1d(player.half_size, T::from_f32(2.0)))
+            }
+            CommonBody::Cuboid(cuboid) => {
+                Ok(math::mul_3d_by_1d(cuboid.half_size, T::from_f32(2.0)))
+            }
+            CommonBody::ImmovableCuboid(immovable_cuboid) => Ok(math::mul_3d_by_1d(
+                immovable_cuboid.aabb.half_size,
+                T::from_f32(2.0),
+            )),
             CommonBody::None => Err("CommonBody::None does not have a half_size."),
         }
     }
@@ -131,12 +138,14 @@ where
                     half_size: rhs_cuboid.half_size,
                 };
                 if lhs_player_aabb.is_intersected_by_aabb(rhs_cuboid_aabb) {
-                    let (collision_normal, penetration) = lhs_player_aabb
-                        .get_collision_normal_and_penetration(&rhs_cuboid_aabb);
+                    let (collision_normal, penetration) =
+                        lhs_player_aabb.get_collision_normal_and_penetration(&rhs_cuboid_aabb);
                     let collision_normal_signed_number =
                         math::direction_3d_to_signed_number_3d(collision_normal);
-                    let collision_translation =
-                        math::mul_3d_by_1d(collision_normal_signed_number, -penetration * T::from_f32(0.5));
+                    let collision_translation = math::mul_3d_by_1d(
+                        collision_normal_signed_number,
+                        -penetration * T::from_f32(0.5),
+                    );
 
                     lhs_player
                         .particle
@@ -157,9 +166,7 @@ where
                         collision_normal_signed_number,
                         T::from_f32(0.5),
                     );
-                    lhs_player
-                        .particle
-                        .apply_impulse(impulse, delta_time);
+                    lhs_player.particle.apply_impulse(impulse, delta_time);
                     rhs_cuboid
                         .particle
                         .apply_impulse(math::neg_3d(impulse), delta_time);
@@ -179,7 +186,7 @@ where
                         math::direction_3d_to_signed_number_3d(collision_normal);
                     let collision_translation =
                         math::mul_3d_by_1d(collision_normal_signed_number, -penetration);
-                    println!("normal: {:?}", collision_normal);
+                    //println!("normal: {:?}", collision_normal);
 
                     lhs_player
                         .particle
@@ -203,17 +210,15 @@ where
                         collision_normal_signed_number,
                         T::from_f32(0.5),
                     );
-                    println!("impulse: {:?}", impulse);
-                    lhs_player
-                        .particle
-                        .apply_impulse(impulse, delta_time);
+                    //println!("impulse: {:?}", impulse);
+                    lhs_player.particle.apply_impulse(impulse, delta_time);
                 }
             }
 
             // cuboid
             (CommonBody::Cuboid(lhs_cuboid), CommonBody::Player(rhs_player)) => {
                 //todo!();
-                println!("whoops");
+                //println!("whoops");
             }
             (CommonBody::Cuboid(lhs_cuboid), CommonBody::Cuboid(rhs_cuboid)) => {
                 let lhs_cuboid_aabb = AabbCentredOrigin {
@@ -225,12 +230,14 @@ where
                     half_size: rhs_cuboid.half_size,
                 };
                 if lhs_cuboid_aabb.is_intersected_by_aabb(rhs_cuboid_aabb) {
-                    let (collision_normal, penetration) = lhs_cuboid_aabb
-                        .get_collision_normal_and_penetration(&rhs_cuboid_aabb);
+                    let (collision_normal, penetration) =
+                        lhs_cuboid_aabb.get_collision_normal_and_penetration(&rhs_cuboid_aabb);
                     let collision_normal_signed_number =
                         math::direction_3d_to_signed_number_3d(collision_normal);
-                    let collision_translation =
-                        math::mul_3d_by_1d(collision_normal_signed_number, -penetration * T::from_f32(0.5));
+                    let collision_translation = math::mul_3d_by_1d(
+                        collision_normal_signed_number,
+                        -penetration * T::from_f32(0.5),
+                    );
 
                     lhs_cuboid
                         .particle
@@ -247,9 +254,7 @@ where
                         collision_normal_signed_number,
                         T::from_f32(0.5),
                     );
-                    lhs_cuboid
-                        .particle
-                        .apply_impulse(impulse, delta_time);
+                    lhs_cuboid.particle.apply_impulse(impulse, delta_time);
                     rhs_cuboid
                         .particle
                         .apply_impulse(math::neg_3d(impulse), delta_time);
@@ -278,9 +283,7 @@ where
                         collision_normal_signed_number,
                         T::from_f32(0.5),
                     );
-                    lhs_cuboid
-                        .particle
-                        .apply_impulse(impulse, delta_time);
+                    lhs_cuboid.particle.apply_impulse(impulse, delta_time);
                 }
             }
 

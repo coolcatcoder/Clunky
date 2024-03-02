@@ -133,21 +133,21 @@ where
         let mut temp;
 
         temp = (self.position[0] + self.half_size[0]) - (other.position[0] - other.half_size[0]);
-        println!("+x penetration: {:?}", temp);
+        //println!("+x penetration: {:?}", temp);
         if temp < smallest_penetration {
             normal = [Direction::Positive, Direction::None, Direction::None];
             smallest_penetration = temp;
         }
 
         temp = (self.position[1] + self.half_size[1]) - (other.position[1] - other.half_size[1]);
-        println!("+y penetration: {:?}", temp);
+        //println!("+y penetration: {:?}", temp);
         if temp < smallest_penetration {
             normal = [Direction::None, Direction::Positive, Direction::None];
             smallest_penetration = temp;
         }
 
         temp = (self.position[2] + self.half_size[2]) - (other.position[2] - other.half_size[2]);
-        println!("+z penetration: {:?}", temp);
+        //println!("+z penetration: {:?}", temp);
         if temp < smallest_penetration {
             normal = [Direction::None, Direction::None, Direction::Positive];
             smallest_penetration = temp;
@@ -155,7 +155,7 @@ where
 
         temp = ((self.position[0] - self.half_size[0]) - (other.position[0] + other.half_size[0]))
             .abs();
-        println!("-x penetration: {:?}", temp);
+        //println!("-x penetration: {:?}", temp);
         if temp < smallest_penetration {
             normal = [Direction::Negative, Direction::None, Direction::None];
             smallest_penetration = temp;
@@ -163,7 +163,7 @@ where
 
         temp = ((self.position[1] - self.half_size[1]) - (other.position[1] + other.half_size[1]))
             .abs();
-        println!("-y penetration: {:?}", temp);
+        //println!("-y penetration: {:?}", temp);
         if temp < smallest_penetration {
             normal = [Direction::None, Direction::Negative, Direction::None];
             smallest_penetration = temp;
@@ -171,7 +171,7 @@ where
 
         temp = ((self.position[2] - self.half_size[2]) - (other.position[2] + other.half_size[2]))
             .abs();
-        println!("-z penetration: {:?}", temp);
+        //println!("-z penetration: {:?}", temp);
         if temp < smallest_penetration {
             normal = [Direction::None, Direction::None, Direction::Negative];
             smallest_penetration = temp;
