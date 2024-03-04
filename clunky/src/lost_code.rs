@@ -110,3 +110,9 @@ impl<T: Float> FpsTracker<T> {
         }
     }
 }
+
+impl<T: Float> Default for FpsTracker<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}

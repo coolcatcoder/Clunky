@@ -119,9 +119,8 @@ where
         let mut smallest_len = usize::MAX;
         let mut possibilities = &vec![];
 
-        for potential_cell_index in 0..cells.len() {
-            if let CellStateStorePossibilities::Undecided(potential_possibilities) =
-                &cells[potential_cell_index]
+        for (potential_cell_index, potential_cell) in cells.iter().enumerate() {
+            if let CellStateStorePossibilities::Undecided(potential_possibilities) = &potential_cell
             {
                 if potential_possibilities.len() < smallest_len {
                     cell_index = potential_cell_index;
@@ -135,7 +134,7 @@ where
 
         cells[cell_index] = CellStateStorePossibilities::Decided(pick_possibility(
             &cells,
-            &possibilities,
+            possibilities,
             cell_index,
         ));
 
@@ -244,8 +243,10 @@ mod tests {
         })
     }
 
-    ///#[bench] DON'T
+    #[bench]
     fn bench_100_by_100_generate_2d_unoptimized_with_no_assumptions(b: &mut Bencher) {
+        panic!("too slow");
+        /*
         b.iter(|| {
             return generate_2d_unoptimized_with_no_assumptions(
                 [100, 100],
@@ -255,5 +256,6 @@ mod tests {
                 pick_possibility,
             );
         })
+        */
     }
 }

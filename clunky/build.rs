@@ -20,7 +20,7 @@ fn main() {
     let out_dir = env::var_os("OUT_DIR").unwrap();
     let dest_path = Path::new(&out_dir).join("loaded_from_gltf.rs");
     fs::write(
-        &dest_path,
+        dest_path,
         format!(
             "
         pub const DEBUG: &str = \"{0}\";

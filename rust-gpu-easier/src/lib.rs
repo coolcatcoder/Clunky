@@ -49,7 +49,7 @@ pub fn wow(item: TokenStream) -> TokenStream {
     let run = Command::new(format!("./{}", crate_name))
         .current_dir(out_dir)
         .output()
-        .expect(format!("./{}", crate_name).as_str());
+        .unwrap_or_else(|_| panic!("./{}", crate_name));
 
     // Temp, please remove.
     format!(

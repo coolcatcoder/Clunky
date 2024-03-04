@@ -23,12 +23,11 @@ use rand::{
 use vulkano::{
     buffer::{
         allocator::{SubbufferAllocator, SubbufferAllocatorCreateInfo},
-        Buffer, BufferContents, BufferCreateInfo, BufferUsage, Subbuffer,
+        Buffer, BufferCreateInfo, BufferUsage, Subbuffer,
     },
     command_buffer::{
         allocator::StandardCommandBufferAllocator, AutoCommandBufferBuilder, CommandBufferUsage,
-        PrimaryAutoCommandBuffer, PrimaryCommandBufferAbstract, RenderPassBeginInfo,
-        SubpassContents,
+        PrimaryCommandBufferAbstract, RenderPassBeginInfo,
     },
     descriptor_set::{
         allocator::StandardDescriptorSetAllocator, PersistentDescriptorSet, WriteDescriptorSet,
@@ -75,7 +74,7 @@ const TESTING_BOX_AMOUNT: usize = 0; //2000;
 fn main() {
     //let pain = rust_gpu_easier::wow!(/home/coolcatcoder/Documents/GitHub/Clunky/clunky/src/test_out.rs);
     //println!("{}", pain);
-    let (event_loop, window, surface, device, queue, mut swapchain, swapchain_images) =
+    let (event_loop, window, _surface, device, queue, mut swapchain, swapchain_images) =
         rendering::initiate_general(
             QueueFlags::GRAPHICS | QueueFlags::COMPUTE,
             DeviceExtensions {

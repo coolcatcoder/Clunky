@@ -5,10 +5,7 @@ use vulkano::{
         allocator::SubbufferAllocator, Buffer, BufferContents, BufferCreateInfo, BufferUsage,
         Subbuffer,
     },
-    command_buffer::{
-        allocator::StandardCommandBufferAllocator, AutoCommandBufferBuilder, CommandBufferUsage,
-        CopyBufferToImageInfo, PrimaryAutoCommandBuffer,
-    },
+    command_buffer::{AutoCommandBufferBuilder, CopyBufferToImageInfo, PrimaryAutoCommandBuffer},
     device::{
         physical::PhysicalDeviceType, Device, DeviceCreateInfo, DeviceExtensions, Queue,
         QueueCreateInfo, QueueFlags,
@@ -18,9 +15,7 @@ use vulkano::{
     instance::{Instance, InstanceCreateFlags, InstanceCreateInfo},
     memory::allocator::{
         AllocationCreateInfo, FreeListAllocator, GenericMemoryAllocator, MemoryTypeFilter,
-        StandardMemoryAllocator,
     },
-    pipeline::GraphicsPipeline,
     swapchain::{Surface, Swapchain, SwapchainCreateInfo},
     DeviceSize, VulkanLibrary,
 };
@@ -133,11 +128,11 @@ pub fn create_swapchain(
 ) -> (Arc<Swapchain>, Vec<Arc<Image>>) {
     let surface_capabilities = device
         .physical_device()
-        .surface_capabilities(&surface, Default::default())
+        .surface_capabilities(surface, Default::default())
         .unwrap();
     let image_format = device
         .physical_device()
-        .surface_formats(&surface, Default::default())
+        .surface_formats(surface, Default::default())
         .unwrap()[0]
         .0;
 
@@ -219,7 +214,7 @@ pub fn initiate_general(
 /// The queue flags are basically what you want the device to be able to do. For example if you wanted the ability to render frames, you would use QueueFlags::GRAPHICS.
 ///
 /// The device extensions should be the extensions you want the device to support. For example if you wanted to render frames, you would set khr_swapchain to true.
-#[must_use]
+//#[must_use]
 pub fn initate_game() {
     todo!()
 }
@@ -309,7 +304,7 @@ pub enum ImageBytes<'a> {
 /// The name may change.
 pub fn draw_instanced<V, I>(
     command_buffer_builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
-    instances: &Vec<I>,
+    instances: &[I],
     vertices: &Subbuffer<[V]>,
     indices: &Subbuffer<[u32]>,
     subbuffer_allocator: &SubbufferAllocator,

@@ -57,6 +57,14 @@ pub struct Colour3DInstance {
 }
 
 impl Colour3DInstance {
+    pub fn clone_matrix(&self) -> math::Matrix4 {
+        math::Matrix4 {
+            x: self.model_to_world_0,
+            y: self.model_to_world_1,
+            z: self.model_to_world_2,
+            w: self.model_to_world_3,
+        }
+    }
     pub const fn new_with_cgmath_matrix(
         colour: [f32; 4],
         model_to_world: Matrix4<f32>,

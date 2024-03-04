@@ -1,4 +1,4 @@
-use std::mem::{self, MaybeUninit};
+use std::mem::MaybeUninit;
 
 use rayon::prelude::*;
 
@@ -124,9 +124,7 @@ where
         let real_grid_height = self.grid_size[1] * self.cell_size[1];
         let real_grid_length = self.grid_size[2] * self.cell_size[2];
 
-        for (verlet_body_index, verlet_body) in
-            (0..self.bodies.len()).into_iter().zip(&mut self.bodies)
-        {
+        for (verlet_body_index, verlet_body) in (0..self.bodies.len()).zip(&mut self.bodies) {
             if verlet_body.is_none() {
                 continue;
             }

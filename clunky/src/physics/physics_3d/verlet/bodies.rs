@@ -122,10 +122,10 @@ where
 
     // This function is insanely expensive, no clue why.
     #[inline]
-    fn collide(&mut self, other: &mut CommonBody<T>, other_index: usize, delta_time: T) {
+    fn collide(&mut self, other: &mut CommonBody<T>, _other_index: usize, delta_time: T) {
         match (self, other) {
             // player
-            (CommonBody::Player(lhs_player), CommonBody::Player(rhs_player)) => {
+            (CommonBody::Player(_lhs_player), CommonBody::Player(_rhs_player)) => {
                 todo!();
             }
             (CommonBody::Player(lhs_player), CommonBody::Cuboid(rhs_cuboid)) => {
@@ -216,7 +216,7 @@ where
             }
 
             // cuboid
-            (CommonBody::Cuboid(lhs_cuboid), CommonBody::Player(rhs_player)) => {
+            (CommonBody::Cuboid(_lhs_cuboid), CommonBody::Player(_rhs_player)) => {
                 //todo!();
                 //println!("whoops");
             }

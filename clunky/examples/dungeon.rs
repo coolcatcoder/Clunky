@@ -3,7 +3,7 @@ use std::sync::Arc;
 use clunky::{
     buffer_contents::{self, Colour3DInstance},
     lost_code::{is_pressed, FixedUpdate, FpsTracker},
-    math::{self, f32_3d_to_f64_3d, f64_3d_to_f32_3d, index_from_position_2d, Matrix4, Radians},
+    math::{self, index_from_position_2d, Matrix4, Radians},
     meshes,
     physics::physics_3d::{
         aabb::AabbCentredOrigin,
@@ -17,8 +17,7 @@ use clunky::{
 };
 use rand::{
     distributions::{Distribution, Uniform},
-    rngs::ThreadRng,
-    Rng,
+    thread_rng, Rng,
 };
 use vulkano::{
     buffer::{
@@ -30,8 +29,7 @@ use vulkano::{
         RenderPassBeginInfo,
     },
     descriptor_set::{
-        allocator::{DescriptorSetAllocator, StandardDescriptorSetAllocator},
-        PersistentDescriptorSet, WriteDescriptorSet,
+        allocator::StandardDescriptorSetAllocator, PersistentDescriptorSet, WriteDescriptorSet,
     },
     device::Device,
     format::{ClearValue, Format},
@@ -49,16 +47,17 @@ use winit::{
     dpi::PhysicalPosition,
     event::{DeviceEvent, Event, KeyboardInput, VirtualKeyCode, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
-    window::{Fullscreen, WindowId},
+    window::Fullscreen,
 };
 
 use vulkano::sync::GpuFuture;
 
 const DUNGEON_SIZE: usize = 10;
 const ROOM_SIZE: [usize; 3] = [25, 30, 25];
-const DOOR_WIDTH_HEIGHT_AND_THICKNESS: [f32; 3] = [2.0, 3.0, 1.5];
+// relative
+const DOOR_WIDTH_HEIGHT: [f32; 2] = [1.0 / 4.0, 0.25];
 
-const FIXED_DELTA_TIME: f64 = 0.04;
+const FIXED_DELTA_TIME: f32 = 0.04;
 const MAX_SUBSTEPS: u32 = 200;
 
 fn main() {
@@ -99,13 +98,13 @@ fn main() {
         depth_range: 0.0..=1.0,
     };
 
-    let mut fps_tracker = FpsTracker::<f64>::new();
+    let mut fps_tracker = FpsTracker::<f32>::new();
 
-    let fps_cap: Option<f64> = None;
+    //let fps_cap: Option<f32> = None;
 
     let mut game = create_game(&context.memory_allocator());
 
-    let mut fixed_update_runner = FixedUpdate::new(FIXED_DELTA_TIME as f32);
+    let mut fixed_update_runner = FixedUpdate::new(FIXED_DELTA_TIME);
 
     event_loop.run(move |event, _, control_flow| match event {
         Event::WindowEvent {
@@ -184,7 +183,7 @@ fn main() {
         }
 
         Event::DeviceEvent {
-            event: DeviceEvent::MouseWheel { delta },
+            event: DeviceEvent::MouseWheel { delta: _ },
             ..
         } => {}
 
@@ -419,7 +418,7 @@ fn create_game(memory_allocator: &Arc<StandardMemoryAllocator>) -> Game {
             light_position: [0.0, -10.0, 0.0],
 
             near_distance: 0.01,
-            far_distance: 50.0,
+            far_distance: 250.0,
             aspect_ratio: 0.0,
             fov_y: Radians(std::f32::consts::FRAC_PI_2),
         },
@@ -500,20 +499,20 @@ fn create_game(memory_allocator: &Arc<StandardMemoryAllocator>) -> Game {
                         cuboid_instances: Vec::with_capacity(15 * 9),
                         bodies: vec![],
                     };
-                    for x in position[0]..(position[0] + 3) {
-                        for y in position[1]..(position[1] + 3) {
-                            let real_room_position = [
-                                x as f32 * ROOM_SIZE[0] as f32,
-                                y as f32 * ROOM_SIZE[2] as f32,
-                            ];
-                            let i = index_from_position_2d([x, y], DUNGEON_SIZE);
-                            room.create_walls_and_floor(
-                                [x, y],
-                                real_room_position,
+                    for x in 0..3 {
+                        for z in 0..3 {
+                            room.create_cuboid(
                                 &mut game.physics,
+                                [position[0]+x,position[1]+z],
+                                [1, 1],
+                                [Relative(0.5), Constant(0.0), Relative(0.5)],
+                                [Relative(1.0), Constant(1.0), Relative(1.0)],
+                                true,
+                                [1.0, 1.0, 1.0, 1.0],
                             );
                         }
                     }
+                    room.create_walls(position, [3, 3], &mut game.physics);
                     for instance in &mut room.cuboid_instances {
                         instance.colour = [0.0, 1.0, 0.0, 1.0];
                     }
@@ -526,25 +525,16 @@ fn create_game(memory_allocator: &Arc<StandardMemoryAllocator>) -> Game {
         }
     }
 
-    // It seems a great waste to spend time generating a room, then just throwing it away cause it gets linked later... Multiple passes?
     for i in 0..DUNGEON_SIZE * DUNGEON_SIZE {
         if let Room::Empty = game.rooms[i] {
             game.rooms[i] = generate_room(
                 i,
                 variety_range.sample(&mut rng),
                 &mut game.physics,
-                //&mut marked_rooms,
-                //&mut linked_rooms,
             );
         }
     }
 
-    /*
-    // Todo, remove.
-    for linked_room in linked_rooms {
-        game.rooms[linked_room.1] = Room::LinkedRoom(LinkedRoom{real_room:linked_room.0});
-    }
-    */
     let room_index = get_non_linked_index(0, &game.rooms);
 
     if let Room::BasicRoom(room) = &mut game.rooms[room_index] {
@@ -562,7 +552,6 @@ fn create_game(memory_allocator: &Arc<StandardMemoryAllocator>) -> Game {
 enum Room {
     BasicRoom(BasicRoom),
     LinkedRoom(LinkedRoom),
-    Marker, // No room should have this after generation is finished. This is for stuff like linked rooms, that need to link afterwards.
     Empty, // No room should have this after generation is finished. This is the only room type that is safe to replace.
 }
 
@@ -587,6 +576,10 @@ enum RelativeOrConstantF32 {
     Relative(f32),
     Constant(f32),
 }
+//type Relative = RelativeOrConstantF32::Relative(f32);
+//type Constant = RelativeOrConstantF32::Constant(f32);
+use RelativeOrConstantF32::Constant;
+use RelativeOrConstantF32::Relative;
 
 #[derive(Clone)]
 struct BasicRoom {
@@ -597,23 +590,35 @@ struct BasicRoom {
 impl BasicRoom {
     fn create_cuboid(
         &mut self,
-        physics: &mut CpuSolver<f64, CommonBody<f64>>,
+        physics: &mut CpuSolver<f32, CommonBody<f32>>,
         room_position: [usize; 2],
         room_size: [usize; 2],
-        // Position is the actual f32 position relative to room position and room size. The room is always [1.0,1.0,1.0,] sized no matter what.
-        position: [f32; 3],
+        // Position when relative, is the actual f32 position relative to room position and room size. The room is always [1.0,1.0,1.0,] sized no matter what.
+        position: [RelativeOrConstantF32; 3],
         // RelativeOrConstantF32 allows outside wall thickness to always be 1, while everything else can be relative.
         size: [RelativeOrConstantF32; 3],
         has_collision: bool,
         colour: [f32; 4],
     ) {
-        //todo!();
         let temp_position = [
-            ROOM_SIZE[0] as f32 * (position[0] * room_size[0] as f32 + room_position[0] as f32),
-            position[1] * ROOM_SIZE[1] as f32,
-            ROOM_SIZE[2] as f32 * (position[2] * room_size[1] as f32 + room_position[1] as f32),
+            match position[0] {
+                Relative(value) => {
+                    ROOM_SIZE[0] as f32 * (value * room_size[0] as f32 + room_position[0] as f32)
+                }
+                Constant(value) => value,
+            },
+            match position[1] {
+                Relative(value) => value * ROOM_SIZE[1] as f32,
+                Constant(value) => value,
+            },
+            match position[2] {
+                Relative(value) => {
+                    ROOM_SIZE[2] as f32 * (value * room_size[1] as f32 + room_position[1] as f32)
+                }
+                Constant(value) => value,
+            },
         ];
-        //let mut temp_scale = [ROOM_SIZE[0] as f32, 1.0, ROOM_SIZE[2] as f32]; // still gotta fix
+
         let temp_scale = [
             match size[0] {
                 RelativeOrConstantF32::Relative(value) => {
@@ -642,19 +647,8 @@ impl BasicRoom {
                 .bodies
                 .push(CommonBody::ImmovableCuboid(ImmovableCuboid {
                     aabb: AabbCentredOrigin {
-                        position: [
-                            temp_position[0] as f64,
-                            temp_position[1] as f64,
-                            temp_position[2] as f64,
-                        ],
-                        half_size: math::mul_3d_by_1d(
-                            [
-                                temp_scale[0] as f64,
-                                temp_scale[1] as f64,
-                                temp_scale[2] as f64,
-                            ],
-                            0.5,
-                        ),
+                        position: temp_position,
+                        half_size: math::mul_3d_by_1d(temp_scale, 0.5),
                     },
                 }));
         }
@@ -663,382 +657,629 @@ impl BasicRoom {
     fn create_walls_and_floor(
         &mut self,
         room_position: [usize; 2],
-        real_room_position: [f32; 2],
-        //position: [usize; 2],
-        //size: [usize; 2],
-        //real_position: [f32; 2],
         physics: &mut CpuSolver<f32, CommonBody<f32>>,
     ) {
         // Walls:
 
         // bottom
-        let mut temp_position = [
-            real_room_position[0] + ROOM_SIZE[0] as f32 * 0.5,
-            0.5,
-            real_room_position[1] + ROOM_SIZE[2] as f32 * 0.5,
-        ];
-        let mut temp_scale = [ROOM_SIZE[0] as f32, 1.0, ROOM_SIZE[2] as f32];
-        self.cuboid_instances.push(Colour3DInstance::new(
+        self.create_cuboid(
+            physics,
+            room_position,
+            [1, 1],
+            [Relative(0.5), Constant(0.0), Relative(0.5)],
+            [Relative(1.0), Constant(1.0), Relative(1.0)],
+            true,
             [1.0, 1.0, 1.0, 1.0],
-            Matrix4::from_translation(temp_position) * Matrix4::from_scale(temp_scale),
-        ));
-        physics
-            .bodies
-            .push(CommonBody::ImmovableCuboid(ImmovableCuboid {
-                aabb: AabbCentredOrigin {
-                    position: f32_3d_to_f64_3d(temp_position),
-                    half_size: math::mul_3d_by_1d(f32_3d_to_f64_3d(temp_scale), 0.5),
-                },
-            }));
+        );
 
         // top
-        self.cuboid_instances.push(Colour3DInstance::new(
+        self.create_cuboid(
+            physics,
+            room_position,
+            [1, 1],
+            [Relative(0.5), Relative(-1.0), Relative(0.5)],
+            [Relative(1.0), Constant(1.0), Relative(1.0)],
+            true,
             [1.0, 0.0, 1.0, 1.0],
-            Matrix4::from_translation([
-                real_room_position[0] + ROOM_SIZE[0] as f32 * 0.5,
-                -(ROOM_SIZE[1] as f32) - 0.5,
-                real_room_position[1] + ROOM_SIZE[2] as f32 * 0.5,
-            ]) * Matrix4::from_scale([ROOM_SIZE[0] as f32, 1.0, ROOM_SIZE[2] as f32]),
-        ));
+        );
 
         // +x
-        let positive_x_instance_count = if room_position[0] == DUNGEON_SIZE - 1 {
-            temp_position = [
-                real_room_position[0] + ROOM_SIZE[0] as f32,
-                ROOM_SIZE[1] as f32 * -0.5,
-                real_room_position[1] + ROOM_SIZE[2] as f32 * 0.5,
-            ];
-            temp_scale = [1.0, ROOM_SIZE[1] as f32, ROOM_SIZE[2] as f32];
-            self.cuboid_instances.push(Colour3DInstance::new(
+        if room_position[0] == DUNGEON_SIZE - 1 {
+            self.create_cuboid(
+                physics,
+                room_position,
+                [1, 1],
+                [Relative(1.0), Relative(-0.5), Relative(0.5)],
+                [Constant(1.0), Relative(1.0), Relative(1.0)],
+                true,
                 [1.0, 1.0, 1.0, 1.0],
-                Matrix4::from_translation(temp_position) * Matrix4::from_scale(temp_scale),
-            ));
-            physics
-                .bodies
-                .push(CommonBody::ImmovableCuboid(ImmovableCuboid {
-                    aabb: AabbCentredOrigin {
-                        position: f32_3d_to_f64_3d(temp_position),
-                        half_size: math::mul_3d_by_1d(f32_3d_to_f64_3d(temp_scale), 0.5),
-                    },
-                }));
-            1
+            );
         } else {
             // left
-            temp_position = [
-                real_room_position[0] + ROOM_SIZE[0] as f32,
-                ROOM_SIZE[1] as f32 * -0.5,
-                real_room_position[1] + ROOM_SIZE[2] as f32 * 0.25
-                    - DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.25,
-            ];
-            temp_scale = [
-                1.0,
-                ROOM_SIZE[1] as f32,
-                ROOM_SIZE[2] as f32 * 0.5 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.5,
-            ];
-            self.cuboid_instances.push(Colour3DInstance::new(
-                [1.0, 0.0, 0.0, 1.0],
-                Matrix4::from_translation(temp_position) * Matrix4::from_scale(temp_scale),
-            ));
-            physics
-                .bodies
-                .push(CommonBody::ImmovableCuboid(ImmovableCuboid {
-                    aabb: AabbCentredOrigin {
-                        position: f32_3d_to_f64_3d(temp_position),
-                        half_size: math::mul_3d_by_1d(f32_3d_to_f64_3d(temp_scale), 0.5),
-                    },
-                }));
-
+            self.create_cuboid(
+                physics,
+                room_position,
+                [1, 1],
+                [
+                    Relative(1.0),
+                    Relative(-0.5),
+                    Relative((1.0 - DOOR_WIDTH_HEIGHT[0]) * 0.25),
+                ],
+                [
+                    Constant(1.0),
+                    Relative(1.0),
+                    Relative((1.0 - DOOR_WIDTH_HEIGHT[0]) * 0.5),
+                ],
+                true,
+                [1.0, 1.0, 1.0, 1.0],
+            );
             // right
-            temp_position = [
-                real_room_position[0] + ROOM_SIZE[0] as f32,
-                ROOM_SIZE[1] as f32 * -0.5,
-                real_room_position[1]
-                    + ROOM_SIZE[2] as f32 * 0.75
-                    + DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.25,
-            ];
-            temp_scale = [
-                1.0,
-                ROOM_SIZE[1] as f32,
-                ROOM_SIZE[2] as f32 * 0.5 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.5,
-            ];
-            self.cuboid_instances.push(Colour3DInstance::new(
-                [0.0, 1.0, 0.0, 1.0],
-                Matrix4::from_translation(temp_position) * Matrix4::from_scale(temp_scale),
-            ));
-            physics
-                .bodies
-                .push(CommonBody::ImmovableCuboid(ImmovableCuboid {
-                    aabb: AabbCentredOrigin {
-                        position: f32_3d_to_f64_3d(temp_position),
-                        half_size: math::mul_3d_by_1d(f32_3d_to_f64_3d(temp_scale), 0.5),
-                    },
-                }));
-
+            self.create_cuboid(
+                physics,
+                room_position,
+                [1, 1],
+                [
+                    Relative(1.0),
+                    Relative(-0.5),
+                    Relative(1.0 - (1.0 - DOOR_WIDTH_HEIGHT[0]) * 0.25),
+                ],
+                [
+                    Constant(1.0),
+                    Relative(1.0),
+                    Relative((1.0 - DOOR_WIDTH_HEIGHT[0]) * 0.5),
+                ],
+                true,
+                [1.0, 1.0, 1.0, 1.0],
+            );
             // top
-            temp_position = [
-                real_room_position[0] + ROOM_SIZE[0] as f32,
-                ROOM_SIZE[1] as f32 * -1.0
-                    + (ROOM_SIZE[1] as f32 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[1]) * 0.5,
-                real_room_position[1] + ROOM_SIZE[2] as f32 * 0.5,
-            ];
-            temp_scale = [
-                1.0,
-                ROOM_SIZE[1] as f32 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[1],
-                DOOR_WIDTH_HEIGHT_AND_THICKNESS[0],
-            ];
-            self.cuboid_instances.push(Colour3DInstance::new(
+            self.create_cuboid(
+                physics,
+                room_position,
+                [1, 1],
+                [
+                    Relative(1.0),
+                    Relative(-1.0 + (1.0 - DOOR_WIDTH_HEIGHT[1]) * 0.5),
+                    Relative(0.5),
+                ],
+                [
+                    Constant(1.0),
+                    Relative(1.0 - DOOR_WIDTH_HEIGHT[1]),
+                    Relative(DOOR_WIDTH_HEIGHT[0]),
+                ],
+                true,
                 [0.0, 1.0, 1.0, 1.0],
-                Matrix4::from_translation(temp_position) * Matrix4::from_scale(temp_scale),
-            ));
-            physics
-                .bodies
-                .push(CommonBody::ImmovableCuboid(ImmovableCuboid {
-                    aabb: AabbCentredOrigin {
-                        position: f32_3d_to_f64_3d(temp_position),
-                        half_size: math::mul_3d_by_1d(f32_3d_to_f64_3d(temp_scale), 0.5),
-                    },
-                }));
-            2
+            );
         };
 
-        // -x (No aabbs usually because +x will supply.)
-        let negative_x_instance_count = if room_position[0] == 0 {
-            temp_position = [
-                real_room_position[0],
-                ROOM_SIZE[1] as f32 * -0.5,
-                real_room_position[1] + ROOM_SIZE[2] as f32 * 0.5,
-            ];
-            temp_scale = [1.0, ROOM_SIZE[1] as f32, ROOM_SIZE[2] as f32];
-            self.cuboid_instances.push(Colour3DInstance::new(
+        // -x
+        if room_position[0] == 0 {
+            self.create_cuboid(
+                physics,
+                room_position,
+                [1, 1],
+                [Relative(0.0), Relative(-0.5), Relative(0.5)],
+                [Constant(1.0), Relative(1.0), Relative(1.0)],
+                true,
                 [1.0, 1.0, 1.0, 1.0],
-                Matrix4::from_translation(temp_position) * Matrix4::from_scale(temp_scale),
-            ));
-            physics
-                .bodies
-                .push(CommonBody::ImmovableCuboid(ImmovableCuboid {
-                    aabb: AabbCentredOrigin {
-                        position: f32_3d_to_f64_3d(temp_position),
-                        half_size: math::mul_3d_by_1d(f32_3d_to_f64_3d(temp_scale), 0.5),
-                    },
-                }));
-            1
+            );
         } else {
-            // right
-            self.cuboid_instances.push(Colour3DInstance::new(
-                [1.0, 0.0, 0.0, 1.0],
-                Matrix4::from_translation([
-                    real_room_position[0],
-                    ROOM_SIZE[1] as f32 * -0.5,
-                    real_room_position[1] + ROOM_SIZE[2] as f32 * 0.25
-                        - DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.25,
-                ]) * Matrix4::from_scale([
-                    1.0,
-                    ROOM_SIZE[1] as f32,
-                    ROOM_SIZE[2] as f32 * 0.5 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.5,
-                ]),
-            ));
-
             // left
-            self.cuboid_instances.push(Colour3DInstance::new(
-                [0.0, 1.0, 0.0, 1.0],
-                Matrix4::from_translation([
-                    real_room_position[0],
-                    ROOM_SIZE[1] as f32 * -0.5,
-                    real_room_position[1]
-                        + ROOM_SIZE[2] as f32 * 0.75
-                        + DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.25,
-                ]) * Matrix4::from_scale([
-                    1.0,
-                    ROOM_SIZE[1] as f32,
-                    ROOM_SIZE[2] as f32 * 0.5 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.5,
-                ]),
-            ));
-
+            self.create_cuboid(
+                physics,
+                room_position,
+                [1, 1],
+                [
+                    Relative(0.0),
+                    Relative(-0.5),
+                    Relative((1.0 - DOOR_WIDTH_HEIGHT[0]) * 0.25),
+                ],
+                [
+                    Constant(1.0),
+                    Relative(1.0),
+                    Relative((1.0 - DOOR_WIDTH_HEIGHT[0]) * 0.5),
+                ],
+                false,
+                [1.0, 1.0, 1.0, 1.0],
+            );
+            // right
+            self.create_cuboid(
+                physics,
+                room_position,
+                [1, 1],
+                [
+                    Relative(0.0),
+                    Relative(-0.5),
+                    Relative(1.0 - (1.0 - DOOR_WIDTH_HEIGHT[0]) * 0.25),
+                ],
+                [
+                    Constant(1.0),
+                    Relative(1.0),
+                    Relative((1.0 - DOOR_WIDTH_HEIGHT[0]) * 0.5),
+                ],
+                false,
+                [1.0, 1.0, 1.0, 1.0],
+            );
             // top
-            self.cuboid_instances.push(Colour3DInstance::new(
+            self.create_cuboid(
+                physics,
+                room_position,
+                [1, 1],
+                [
+                    Relative(0.0),
+                    Relative(-1.0 + (1.0 - DOOR_WIDTH_HEIGHT[1]) * 0.5),
+                    Relative(0.5),
+                ],
+                [
+                    Constant(1.0),
+                    Relative(1.0 - DOOR_WIDTH_HEIGHT[1]),
+                    Relative(DOOR_WIDTH_HEIGHT[0]),
+                ],
+                false,
                 [0.0, 1.0, 1.0, 1.0],
-                Matrix4::from_translation([
-                    real_room_position[0],
-                    ROOM_SIZE[1] as f32 * -1.0
-                        + (ROOM_SIZE[1] as f32 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[1]) * 0.5,
-                    real_room_position[1] + ROOM_SIZE[2] as f32 * 0.5,
-                ]) * Matrix4::from_scale([
-                    1.0,
-                    ROOM_SIZE[1] as f32 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[1],
-                    DOOR_WIDTH_HEIGHT_AND_THICKNESS[0],
-                ]),
-            ));
-            2
+            );
         };
 
         // +z
-        let positive_z_instance_count = if room_position[1] == DUNGEON_SIZE - 1 {
-            temp_position = [
-                real_room_position[0] + ROOM_SIZE[0] as f32 * 0.5,
-                ROOM_SIZE[1] as f32 * -0.5,
-                real_room_position[1] + ROOM_SIZE[2] as f32,
-            ];
-            temp_scale = [ROOM_SIZE[0] as f32, ROOM_SIZE[1] as f32, 1.0];
-            self.cuboid_instances.push(Colour3DInstance::new(
+        if room_position[1] == DUNGEON_SIZE - 1 {
+            self.create_cuboid(
+                physics,
+                room_position,
+                [1, 1],
+                [Relative(0.5), Relative(-0.5), Relative(1.0)],
+                [Relative(1.0), Relative(1.0), Constant(1.0)],
+                true,
                 [1.0, 1.0, 1.0, 1.0],
-                Matrix4::from_translation(temp_position) * Matrix4::from_scale(temp_scale),
-            ));
-            physics
-                .bodies
-                .push(CommonBody::ImmovableCuboid(ImmovableCuboid {
-                    aabb: AabbCentredOrigin {
-                        position: f32_3d_to_f64_3d(temp_position),
-                        half_size: math::mul_3d_by_1d(f32_3d_to_f64_3d(temp_scale), 0.5),
-                    },
-                }));
-            1
+            );
         } else {
-            // right
-            temp_position = [
-                real_room_position[0] + ROOM_SIZE[0] as f32 * 0.25
-                    - DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.25,
-                ROOM_SIZE[1] as f32 * -0.5,
-                real_room_position[1] + ROOM_SIZE[2] as f32,
-            ];
-            temp_scale = [
-                ROOM_SIZE[0] as f32 * 0.5 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.5,
-                ROOM_SIZE[1] as f32,
-                1.0,
-            ];
-            self.cuboid_instances.push(Colour3DInstance::new(
-                [1.0, 0.0, 0.0, 1.0],
-                Matrix4::from_translation(temp_position) * Matrix4::from_scale(temp_scale),
-            ));
-            physics
-                .bodies
-                .push(CommonBody::ImmovableCuboid(ImmovableCuboid {
-                    aabb: AabbCentredOrigin {
-                        position: f32_3d_to_f64_3d(temp_position),
-                        half_size: math::mul_3d_by_1d(f32_3d_to_f64_3d(temp_scale), 0.5),
-                    },
-                }));
-
             // left
-            temp_position = [
-                real_room_position[0]
-                    + ROOM_SIZE[0] as f32 * 0.75
-                    + DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.25,
-                ROOM_SIZE[1] as f32 * -0.5,
-                real_room_position[1] + ROOM_SIZE[2] as f32,
-            ];
-            temp_scale = [
-                ROOM_SIZE[0] as f32 * 0.5 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.5,
-                ROOM_SIZE[1] as f32,
-                1.0,
-            ];
-            self.cuboid_instances.push(Colour3DInstance::new(
-                [0.0, 1.0, 0.0, 1.0],
-                Matrix4::from_translation(temp_position) * Matrix4::from_scale(temp_scale),
-            ));
-            physics
-                .bodies
-                .push(CommonBody::ImmovableCuboid(ImmovableCuboid {
-                    aabb: AabbCentredOrigin {
-                        position: f32_3d_to_f64_3d(temp_position),
-                        half_size: math::mul_3d_by_1d(f32_3d_to_f64_3d(temp_scale), 0.5),
-                    },
-                }));
-
+            self.create_cuboid(
+                physics,
+                room_position,
+                [1, 1],
+                [
+                    Relative((1.0 - DOOR_WIDTH_HEIGHT[0]) * 0.25),
+                    Relative(-0.5),
+                    Relative(1.0),
+                ],
+                [
+                    Relative((1.0 - DOOR_WIDTH_HEIGHT[0]) * 0.5),
+                    Relative(1.0),
+                    Constant(1.0),
+                ],
+                true,
+                [1.0, 1.0, 1.0, 1.0],
+            );
+            // right
+            self.create_cuboid(
+                physics,
+                room_position,
+                [1, 1],
+                [
+                    Relative(1.0 - (1.0 - DOOR_WIDTH_HEIGHT[0]) * 0.25),
+                    Relative(-0.5),
+                    Relative(1.0),
+                ],
+                [
+                    Relative((1.0 - DOOR_WIDTH_HEIGHT[0]) * 0.5),
+                    Relative(1.0),
+                    Constant(1.0),
+                ],
+                true,
+                [1.0, 1.0, 1.0, 1.0],
+            );
             // top
-            temp_position = [
-                real_room_position[0] + ROOM_SIZE[0] as f32 * 0.5,
-                ROOM_SIZE[1] as f32 * -1.0
-                    + (ROOM_SIZE[1] as f32 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[1]) * 0.5,
-                real_room_position[1] + ROOM_SIZE[2] as f32,
-            ];
-            temp_scale = [
-                DOOR_WIDTH_HEIGHT_AND_THICKNESS[0],
-                ROOM_SIZE[1] as f32 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[1],
-                1.0,
-            ];
-            self.cuboid_instances.push(Colour3DInstance::new(
+            self.create_cuboid(
+                physics,
+                room_position,
+                [1, 1],
+                [
+                    Relative(0.5),
+                    Relative(-1.0 + (1.0 - DOOR_WIDTH_HEIGHT[1]) * 0.5),
+                    Relative(1.0),
+                ],
+                [
+                    Relative(DOOR_WIDTH_HEIGHT[0]),
+                    Relative(1.0 - DOOR_WIDTH_HEIGHT[1]),
+                    Constant(1.0),
+                ],
+                true,
                 [0.0, 1.0, 1.0, 1.0],
-                Matrix4::from_translation(temp_position) * Matrix4::from_scale(temp_scale),
-            ));
-            physics
-                .bodies
-                .push(CommonBody::ImmovableCuboid(ImmovableCuboid {
-                    aabb: AabbCentredOrigin {
-                        position: f32_3d_to_f64_3d(temp_position),
-                        half_size: math::mul_3d_by_1d(f32_3d_to_f64_3d(temp_scale), 0.5),
-                    },
-                }));
-            2
+            );
         };
 
         // -z
-        let negative_z_instance_count = if room_position[1] == 0 {
-            temp_position = [
-                real_room_position[0] + ROOM_SIZE[0] as f32 * 0.5,
-                ROOM_SIZE[1] as f32 * -0.5,
-                real_room_position[1],
-            ];
-            temp_scale = [ROOM_SIZE[0] as f32, ROOM_SIZE[1] as f32, 1.0];
+        if room_position[1] == 0 {
+            self.create_cuboid(
+                physics,
+                room_position,
+                [1, 1],
+                [Relative(0.5), Relative(-0.5), Relative(0.0)],
+                [Relative(1.0), Relative(1.0), Constant(1.0)],
+                true,
+                [1.0, 1.0, 1.0, 1.0],
+            );
+        } else {
+            // left
+            self.create_cuboid(
+                physics,
+                room_position,
+                [1, 1],
+                [
+                    Relative((1.0 - DOOR_WIDTH_HEIGHT[0]) * 0.25),
+                    Relative(-0.5),
+                    Relative(0.0),
+                ],
+                [
+                    Relative((1.0 - DOOR_WIDTH_HEIGHT[0]) * 0.5),
+                    Relative(1.0),
+                    Constant(1.0),
+                ],
+                false,
+                [1.0, 1.0, 1.0, 1.0],
+            );
+            // right
+            self.create_cuboid(
+                physics,
+                room_position,
+                [1, 1],
+                [
+                    Relative(1.0 - (1.0 - DOOR_WIDTH_HEIGHT[0]) * 0.25),
+                    Relative(-0.5),
+                    Relative(0.0),
+                ],
+                [
+                    Relative((1.0 - DOOR_WIDTH_HEIGHT[0]) * 0.5),
+                    Relative(1.0),
+                    Constant(1.0),
+                ],
+                false,
+                [1.0, 1.0, 1.0, 1.0],
+            );
+            // top
+            self.create_cuboid(
+                physics,
+                room_position,
+                [1, 1],
+                [
+                    Relative(0.5),
+                    Relative(-1.0 + (1.0 - DOOR_WIDTH_HEIGHT[1]) * 0.5),
+                    Relative(0.0),
+                ],
+                [
+                    Relative(DOOR_WIDTH_HEIGHT[0]),
+                    Relative(1.0 - DOOR_WIDTH_HEIGHT[1]),
+                    Constant(1.0),
+                ],
+                false,
+                [0.0, 1.0, 1.0, 1.0],
+            );
+        };
+    }
+
+    fn load_from_arrays(
+        &mut self,
+        room_position: [usize; 2],
+        instances: &[Colour3DInstance],
+        aabbs: &[AabbCentredOrigin<f32>],
+        physics_cuboids: &[AabbCentredOrigin<f32>],
+        physics: &mut CpuSolver<f32, CommonBody<f32>>,
+    ) {
+        let translation = [
+            room_position[0] as f32 * ROOM_SIZE[0] as f32,
+            0.0,
+            room_position[1] as f32 * ROOM_SIZE[2] as f32,
+        ];
+        for instance in instances {
+            let matrix = instance.clone_matrix();
             self.cuboid_instances.push(Colour3DInstance::new(
-                [1.0, 1.0, 0.0, 1.0],
-                Matrix4::from_translation(temp_position) * Matrix4::from_scale(temp_scale),
-            ));
+                instance.colour,
+                Matrix4::from_translation(translation) * matrix,
+            ))
+        }
+        for aabb in aabbs {
             physics
                 .bodies
                 .push(CommonBody::ImmovableCuboid(ImmovableCuboid {
                     aabb: AabbCentredOrigin {
-                        position: f32_3d_to_f64_3d(temp_position),
-                        half_size: math::mul_3d_by_1d(f32_3d_to_f64_3d(temp_scale), 0.5),
+                        position: math::add_3d(aabb.position, translation),
+                        half_size: aabb.half_size,
                     },
                 }));
-            1
+        }
+    }
+
+    fn create_walls(
+        &mut self,
+        room_position: [usize; 2],
+        room_size: [usize; 2],
+        physics: &mut CpuSolver<f32, CommonBody<f32>>,
+    ) {
+        // +x
+        if room_position[0] == DUNGEON_SIZE - 1 {
+            for z in room_position[1]..(room_position[1] + room_size[1]) {
+                self.create_cuboid(
+                    physics,
+                    [room_position[0]+room_size[0]-1, z],
+                    [1, 1],
+                    [Relative(1.0), Relative(-0.5), Relative(0.5)],
+                    [Constant(1.0), Relative(1.0), Relative(1.0)],
+                    true,
+                    [1.0, 1.0, 1.0, 1.0],
+                );
+            }
         } else {
-            // right
-            self.cuboid_instances.push(Colour3DInstance::new(
-                [1.0, 0.0, 0.0, 1.0],
-                Matrix4::from_translation([
-                    real_room_position[0] + ROOM_SIZE[0] as f32 * 0.25
-                        - DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.25,
-                    ROOM_SIZE[1] as f32 * -0.5,
-                    real_room_position[1],
-                ]) * Matrix4::from_scale([
-                    ROOM_SIZE[0] as f32 * 0.5 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.5,
-                    ROOM_SIZE[1] as f32,
-                    1.0,
-                ]),
-            ));
+            for z in room_position[1]..(room_position[1] + room_size[1]) {
+                // left
+                self.create_cuboid(
+                    physics,
+                    [room_position[0]+room_size[0]-1, z],
+                    [1, 1],
+                    [
+                        Relative(1.0),
+                        Relative(-0.5),
+                        Relative((1.0 - DOOR_WIDTH_HEIGHT[0]) * 0.25),
+                    ],
+                    [
+                        Constant(1.0),
+                        Relative(1.0),
+                        Relative((1.0 - DOOR_WIDTH_HEIGHT[0]) * 0.5),
+                    ],
+                    true,
+                    [1.0, 1.0, 1.0, 1.0],
+                );
+                // right
+                self.create_cuboid(
+                    physics,
+                    [room_position[0]+room_size[0]-1, z],
+                    [1, 1],
+                    [
+                        Relative(1.0),
+                        Relative(-0.5),
+                        Relative(1.0 - (1.0 - DOOR_WIDTH_HEIGHT[0]) * 0.25),
+                    ],
+                    [
+                        Constant(1.0),
+                        Relative(1.0),
+                        Relative((1.0 - DOOR_WIDTH_HEIGHT[0]) * 0.5),
+                    ],
+                    true,
+                    [1.0, 1.0, 1.0, 1.0],
+                );
+                // top
+                self.create_cuboid(
+                    physics,
+                    [room_position[0]+room_size[0]-1, z],
+                    [1, 1],
+                    [
+                        Relative(1.0),
+                        Relative(-1.0 + (1.0 - DOOR_WIDTH_HEIGHT[1]) * 0.5),
+                        Relative(0.5),
+                    ],
+                    [
+                        Constant(1.0),
+                        Relative(1.0 - DOOR_WIDTH_HEIGHT[1]),
+                        Relative(DOOR_WIDTH_HEIGHT[0]),
+                    ],
+                    true,
+                    [0.0, 1.0, 1.0, 1.0],
+                );
+            }
+        };
 
-            // left
-            self.cuboid_instances.push(Colour3DInstance::new(
-                [0.0, 1.0, 0.0, 1.0],
-                Matrix4::from_translation([
-                    real_room_position[0]
-                        + ROOM_SIZE[0] as f32 * 0.75
-                        + DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.25,
-                    ROOM_SIZE[1] as f32 * -0.5,
-                    real_room_position[1],
-                ]) * Matrix4::from_scale([
-                    ROOM_SIZE[0] as f32 * 0.5 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[0] * 0.5,
-                    ROOM_SIZE[1] as f32,
-                    1.0,
-                ]),
-            ));
+        // -x
+        if room_position[0] == 0 {
+            for z in room_position[1]..(room_position[1] + room_size[1]) {
+                self.create_cuboid(
+                    physics,
+                    [room_position[0], z],
+                    [1, 1],
+                    [Relative(0.0), Relative(-0.5), Relative(0.5)],
+                    [Constant(1.0), Relative(1.0), Relative(1.0)],
+                    true,
+                    [1.0, 1.0, 1.0, 1.0],
+                );
+            }
+        } else {
+            for z in room_position[1]..(room_position[1] + room_size[1]) {
+                // left
+                self.create_cuboid(
+                    physics,
+                    [room_position[0], z],
+                    [1, 1],
+                    [
+                        Relative(0.0),
+                        Relative(-0.5),
+                        Relative((1.0 - DOOR_WIDTH_HEIGHT[0]) * 0.25),
+                    ],
+                    [
+                        Constant(1.0),
+                        Relative(1.0),
+                        Relative((1.0 - DOOR_WIDTH_HEIGHT[0]) * 0.5),
+                    ],
+                    false,
+                    [1.0, 1.0, 1.0, 1.0],
+                );
+                // right
+                self.create_cuboid(
+                    physics,
+                    [room_position[0], z],
+                    [1, 1],
+                    [
+                        Relative(0.0),
+                        Relative(-0.5),
+                        Relative(1.0 - (1.0 - DOOR_WIDTH_HEIGHT[0]) * 0.25),
+                    ],
+                    [
+                        Constant(1.0),
+                        Relative(1.0),
+                        Relative((1.0 - DOOR_WIDTH_HEIGHT[0]) * 0.5),
+                    ],
+                    false,
+                    [1.0, 1.0, 1.0, 1.0],
+                );
+                // top
+                self.create_cuboid(
+                    physics,
+                    [room_position[0], z],
+                    [1, 1],
+                    [
+                        Relative(0.0),
+                        Relative(-1.0 + (1.0 - DOOR_WIDTH_HEIGHT[1]) * 0.5),
+                        Relative(0.5),
+                    ],
+                    [
+                        Constant(1.0),
+                        Relative(1.0 - DOOR_WIDTH_HEIGHT[1]),
+                        Relative(DOOR_WIDTH_HEIGHT[0]),
+                    ],
+                    false,
+                    [0.0, 1.0, 1.0, 1.0],
+                );
+            }
+        };
 
-            // top
-            self.cuboid_instances.push(Colour3DInstance::new(
-                [0.0, 1.0, 1.0, 1.0],
-                Matrix4::from_translation([
-                    real_room_position[0] + ROOM_SIZE[0] as f32 * 0.5,
-                    ROOM_SIZE[1] as f32 * -1.0
-                        + (ROOM_SIZE[1] as f32 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[1]) * 0.5,
-                    real_room_position[1],
-                ]) * Matrix4::from_scale([
-                    DOOR_WIDTH_HEIGHT_AND_THICKNESS[0],
-                    ROOM_SIZE[1] as f32 - DOOR_WIDTH_HEIGHT_AND_THICKNESS[1],
-                    1.0,
-                ]),
-            ));
-            2
+        // +z
+        if room_position[1] == DUNGEON_SIZE - 1 {
+            for x in room_position[0]..(room_position[0] + room_size[0]) {
+                self.create_cuboid(
+                    physics,
+                    [x, room_position[1]+room_size[1]-1],
+                    [1, 1],
+                    [Relative(0.5), Relative(-0.5), Relative(1.0)],
+                    [Relative(1.0), Relative(1.0), Constant(1.0)],
+                    true,
+                    [1.0, 1.0, 1.0, 1.0],
+                );
+            }
+        } else {
+            for x in room_position[0]..(room_position[0] + room_size[0]) {
+                // left
+                self.create_cuboid(
+                    physics,
+                    [x, room_position[1]+room_size[1]-1],
+                    [1, 1],
+                    [
+                        Relative((1.0 - DOOR_WIDTH_HEIGHT[0]) * 0.25),
+                        Relative(-0.5),
+                        Relative(1.0),
+                    ],
+                    [
+                        Relative((1.0 - DOOR_WIDTH_HEIGHT[0]) * 0.5),
+                        Relative(1.0),
+                        Constant(1.0),
+                    ],
+                    true,
+                    [1.0, 1.0, 1.0, 1.0],
+                );
+                // right
+                self.create_cuboid(
+                    physics,
+                    [x, room_position[1]+room_size[1]-1],
+                    [1, 1],
+                    [
+                        Relative(1.0 - (1.0 - DOOR_WIDTH_HEIGHT[0]) * 0.25),
+                        Relative(-0.5),
+                        Relative(1.0),
+                    ],
+                    [
+                        Relative((1.0 - DOOR_WIDTH_HEIGHT[0]) * 0.5),
+                        Relative(1.0),
+                        Constant(1.0),
+                    ],
+                    true,
+                    [1.0, 1.0, 1.0, 1.0],
+                );
+                // top
+                self.create_cuboid(
+                    physics,
+                    [x, room_position[1]+room_size[1]-1],
+                    [1, 1],
+                    [
+                        Relative(0.5),
+                        Relative(-1.0 + (1.0 - DOOR_WIDTH_HEIGHT[1]) * 0.5),
+                        Relative(1.0),
+                    ],
+                    [
+                        Relative(DOOR_WIDTH_HEIGHT[0]),
+                        Relative(1.0 - DOOR_WIDTH_HEIGHT[1]),
+                        Constant(1.0),
+                    ],
+                    true,
+                    [0.0, 1.0, 1.0, 1.0],
+                );
+            }
+        };
+
+        // -z
+        if room_position[1] == 0 {
+            for x in room_position[0]..(room_position[0] + room_size[0]) {
+                self.create_cuboid(
+                    physics,
+                    [x, room_position[1]],
+                    [1, 1],
+                    [Relative(0.5), Relative(-0.5), Relative(0.0)],
+                    [Relative(1.0), Relative(1.0), Constant(1.0)],
+                    true,
+                    [1.0, 1.0, 1.0, 1.0],
+                );
+            }
+        } else {
+            for x in room_position[0]..(room_position[0] + room_size[0]) {
+                // left
+                self.create_cuboid(
+                    physics,
+                    [x, room_position[1]],
+                    [1, 1],
+                    [
+                        Relative((1.0 - DOOR_WIDTH_HEIGHT[0]) * 0.25),
+                        Relative(-0.5),
+                        Relative(0.0),
+                    ],
+                    [
+                        Relative((1.0 - DOOR_WIDTH_HEIGHT[0]) * 0.5),
+                        Relative(1.0),
+                        Constant(1.0),
+                    ],
+                    false,
+                    [1.0, 1.0, 1.0, 1.0],
+                );
+                // right
+                self.create_cuboid(
+                    physics,
+                    [x, room_position[1]],
+                    [1, 1],
+                    [
+                        Relative(1.0 - (1.0 - DOOR_WIDTH_HEIGHT[0]) * 0.25),
+                        Relative(-0.5),
+                        Relative(0.0),
+                    ],
+                    [
+                        Relative((1.0 - DOOR_WIDTH_HEIGHT[0]) * 0.5),
+                        Relative(1.0),
+                        Constant(1.0),
+                    ],
+                    false,
+                    [1.0, 1.0, 1.0, 1.0],
+                );
+                // top
+                self.create_cuboid(
+                    physics,
+                    [x, room_position[1]],
+                    [1, 1],
+                    [
+                        Relative(0.5),
+                        Relative(-1.0 + (1.0 - DOOR_WIDTH_HEIGHT[1]) * 0.5),
+                        Relative(0.0),
+                    ],
+                    [
+                        Relative(DOOR_WIDTH_HEIGHT[0]),
+                        Relative(1.0 - DOOR_WIDTH_HEIGHT[1]),
+                        Constant(1.0),
+                    ],
+                    false,
+                    [0.0, 1.0, 1.0, 1.0],
+                );
+            }
         };
     }
 }
@@ -1051,7 +1292,7 @@ struct LinkedRoom {
 fn generate_room(
     room_index: usize,
     variety: u8,
-    physics: &mut CpuSolver<f64, CommonBody<f64>>,
+    physics: &mut CpuSolver<f32, CommonBody<f32>>,
     //marked_rooms: &mut Vec<usize>,
     //linked_rooms: &mut Vec<(usize, usize)>,
 ) -> Room {
@@ -1064,10 +1305,6 @@ fn generate_room(
     */
 
     let room_position = math::position_from_index_2d(room_index, DUNGEON_SIZE);
-    let real_room_position = [
-        room_position[0] as f32 * ROOM_SIZE[0] as f32,
-        room_position[1] as f32 * ROOM_SIZE[2] as f32,
-    ];
 
     match variety {
         0..=25 => {
@@ -1075,7 +1312,7 @@ fn generate_room(
                 cuboid_instances: Vec::with_capacity(15),
                 bodies: vec![],
             };
-            room.create_walls_and_floor(room_position, real_room_position, physics);
+            room.create_walls_and_floor(room_position, physics);
             for instance in &mut room.cuboid_instances {
                 instance.colour = [0.0, 0.0, 1.0, 1.0];
             }
@@ -1083,10 +1320,25 @@ fn generate_room(
                 physics,
                 room_position,
                 [1, 1],
-                [0.5, -0.5, 0.5],
+                [Relative(0.5), Relative(-0.5), Relative(0.5)],
                 [RelativeOrConstantF32::Constant(1.0); 3],
                 false,
                 [1.0, 0.0, 0.0, 1.0],
+            );
+            Room::BasicRoom(room)
+        }
+        26..=50 => {
+            let mut room = BasicRoom {
+                cuboid_instances: Vec::with_capacity(15),
+                bodies: vec![],
+            };
+            room.create_walls(room_position, [1, 1], physics);
+            room.load_from_arrays(
+                room_position,
+                meshes::ROOM_TEST_CUBE_COLOUR_3D_INSTANCES,
+                meshes::ROOM_TEST_AABBS,
+                &[],
+                physics,
             );
             Room::BasicRoom(room)
         }
@@ -1118,7 +1370,7 @@ fn generate_room(
                 cuboid_instances: Vec::with_capacity(15),
                 bodies: vec![],
             };
-            room.create_walls_and_floor(room_position, real_room_position, physics);
+            room.create_walls_and_floor(room_position, physics);
             Room::BasicRoom(room)
         }
     }
@@ -1209,7 +1461,7 @@ fn fixed_update(game: &mut Game) {
 
     game.player()
         .particle
-        .accelerate([real_motion.0 as f64, 0.0, real_motion.1 as f64]);
+        .accelerate([real_motion.0 as f32, 0.0, real_motion.1 as f32]);
 
     let horizontal_dampening = if game.player().grounded { 0.8 } else { 0.95 }; // grounded originally 0.8
 
@@ -1218,19 +1470,18 @@ fn fixed_update(game: &mut Game) {
     game.physics.update(FIXED_DELTA_TIME);
 
     if game.jump_held {
-        if game.player().grounded {
-            game.player().particle.accelerate([0.0, -500.0, 0.0]);
+        //if game.player().grounded {
+        if true {
+            //game.player().particle.accelerate([0.0, -500.0, 0.0]);
+            game.player().particle.accelerate([0.0, -100.0, 0.0]);
         }
     }
 
     game.player().particle.position[0] = game.player().particle.position[0]
-        .clamp(0.0, DUNGEON_SIZE as f64 * ROOM_SIZE[0] as f64 - 0.01);
+        .clamp(0.0, DUNGEON_SIZE as f32 * ROOM_SIZE[0] as f32 - 0.01);
     game.player().particle.position[2] = game.player().particle.position[2]
-        .clamp(0.0, DUNGEON_SIZE as f64 * ROOM_SIZE[2] as f64 - 0.01);
-    game.camera.position = math::add_3d(
-        f64_3d_to_f32_3d(game.player().particle.position),
-        [0.0, -1.0, 0.0],
-    );
+        .clamp(0.0, DUNGEON_SIZE as f32 * ROOM_SIZE[2] as f32 - 0.01);
+    game.camera.position = math::add_3d(game.player().particle.position, [0.0, -1.0, 0.0]);
 
     game.camera.light_position[0] = game.camera.position[0];
     game.camera.light_position[2] = game.camera.position[2];
@@ -1242,7 +1493,10 @@ fn update(game: &mut Game) {
         game.camera.position[2] as usize / ROOM_SIZE[2],
     ];
 
-    let current_room_index = get_non_linked_index(math::index_from_position_2d(current_room_position, DUNGEON_SIZE), &game.rooms);
+    let current_room_index = get_non_linked_index(
+        math::index_from_position_2d(current_room_position, DUNGEON_SIZE),
+        &game.rooms,
+    );
 
     let Room::BasicRoom(current_room) = &mut game.rooms[current_room_index] else {
         unreachable!()
@@ -1253,14 +1507,14 @@ fn update(game: &mut Game) {
     // (index in room.bodies, index to correct room, index into physics bodies)
     let mut wrong_room_bodies: Vec<(usize, usize, usize)> = vec![];
 
-    for (i,body_index) in (0..current_room.bodies.len()).zip(&current_room.bodies) {
+    for (i, body_index) in (0..current_room.bodies.len()).zip(&current_room.bodies) {
         let body = &game.physics.bodies[*body_index];
         if let CommonBody::None = body {
             // TODO: Remove None bodies.
             continue;
         }
 
-        let position = math::f64_3d_to_f32_3d(body.position().unwrap());
+        let position = body.position().unwrap();
 
         // Would this really work for linked rooms?
         let room_position = [
@@ -1269,16 +1523,18 @@ fn update(game: &mut Game) {
         ];
 
         if room_position != current_room_position {
-            println!("wrong!");
-            wrong_room_bodies.push((i,index_from_position_2d(room_position, DUNGEON_SIZE),*body_index));
+            wrong_room_bodies.push((
+                i,
+                index_from_position_2d(room_position, DUNGEON_SIZE),
+                *body_index,
+            ));
         }
 
         game.cuboid_buffers
             .instance_buffer
             .push(Colour3DInstance::new(
                 [1.0, 1.0, 0.0, 1.0], // Temp
-                Matrix4::from_translation(position)
-                    * Matrix4::from_scale(math::f64_3d_to_f32_3d(body.size().unwrap())),
+                Matrix4::from_translation(position) * Matrix4::from_scale(body.size().unwrap()),
             ));
     }
 
@@ -1303,12 +1559,34 @@ fn update(game: &mut Game) {
         }
     }
     */
+
+    // Temp fix:
+    if wrong_room_bodies.len() == 0 {
+        return;
+    }
+    let (current_room_bodies_index, correct_room_index, physics_body_index) = wrong_room_bodies[0];
+
+    let correct_room_index = get_non_linked_index(correct_room_index, &game.rooms);
+    if correct_room_index == current_room_index {
+        return;
+    }
+
+    if let Room::BasicRoom(current_room) = &mut game.rooms[current_room_index] {
+        current_room.bodies.swap_remove(current_room_bodies_index);
+    } else {
+        unreachable!()
+    }
+    if let Room::BasicRoom(correct_room) = &mut game.rooms[correct_room_index] {
+        correct_room.bodies.push(physics_body_index);
+    } else {
+        unreachable!()
+    }
 }
 
 fn on_keyboard_input(
     input: KeyboardInput,
     control_flow: &mut ControlFlow,
-    fps_tracker: &FpsTracker<f64>,
+    fps_tracker: &FpsTracker<f32>,
     window_renderer: &mut VulkanoWindowRenderer,
     game: &mut Game,
 ) {
@@ -1364,13 +1642,23 @@ fn on_keyboard_input(
                         game.camera.position[2] as usize / ROOM_SIZE[2],
                     ];
 
-                    let current_room_index = get_non_linked_index(math::index_from_position_2d(current_room_position, DUNGEON_SIZE), &game.rooms);
+                    let current_room_index = get_non_linked_index(
+                        math::index_from_position_2d(current_room_position, DUNGEON_SIZE),
+                        &game.rooms,
+                    );
 
                     if let Room::BasicRoom(room) = &mut game.rooms[current_room_index] {
                         room.bodies.push(game.physics.bodies.len())
+                    } else {
+                        unreachable!()
                     }
+                    let mut rng = thread_rng();
                     game.physics.bodies.push(CommonBody::Cuboid(Cuboid {
-                        particle: Particle::from_position([game.camera.position[0] as f64, -5.0, game.camera.position[2] as f64]),
+                        particle: Particle::from_position([
+                            game.camera.position[0] + rng.gen_range(-3.0..3.0),
+                            -10.0,
+                            game.camera.position[2] + rng.gen_range(-3.0..3.0),
+                        ]),
                         half_size: [0.5; 3],
                     }));
                 }
