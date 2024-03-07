@@ -2,80 +2,13 @@ use std::mem::MaybeUninit;
 
 use crate::math;
 
-use self::bodies::Body;
+use super::bodies::Body;
+
+use rayon::prelude::*;
+
 extern crate test;
 
-pub mod bodies;
-
-#[derive(Debug, Clone, Copy)]
-pub struct Particle<T>
-where
-    T: math::Number,
-{
-    pub position: [T; 3],
-    pub previous_position: [T; 3],
-    pub acceleration: [T; 3],
-}
-
-impl<T> Particle<T>
-where
-    T: math::Number,
-{
-    #[inline]
-    pub fn from_position(position: [T; 3]) -> Particle<T> {
-        Particle {
-            position,
-            previous_position: position,
-            acceleration: [T::ZERO; 3],
-        }
-    }
-
-    #[inline] // Add must use attributes.
-    pub fn calculate_displacement(&self) -> [T; 3] {
-        math::sub_3d(self.position, self.previous_position)
-    }
-
-    /// Calculates the velocity using the formula displacement / time.
-    #[inline]
-    #[must_use]
-    pub fn calculate_velocity(&self, delta_time: T) -> [T; 3] {
-        math::div_3d_by_1d(self.calculate_displacement(), delta_time)
-    }
-
-    pub fn update(&mut self, delta_time: T, displacement: [T; 3]) {
-        self.previous_position = self.position;
-
-        let acceleration = math::mul_3d_by_1d(self.acceleration, delta_time * delta_time);
-
-        self.position = math::add_3d(math::add_3d(self.position, displacement), acceleration);
-
-        self.acceleration = [T::ZERO; 3];
-    }
-
-    #[inline]
-    pub fn accelerate(&mut self, acceleration: [T; 3]) {
-        self.acceleration[0] += acceleration[0];
-        self.acceleration[1] += acceleration[1];
-        self.acceleration[2] += acceleration[2];
-    }
-
-    /// Applies an impulse to the verlet particle.
-    pub fn apply_impulse(&mut self, impulse: [T; 3], delta_time: T) {
-        self.previous_position = math::sub_3d(
-            self.previous_position,
-            math::mul_3d_by_1d(impulse, delta_time),
-        );
-    }
-
-    /// Moves both position and previous_position.
-    /// This avoids accidental velocity and displacement changes.
-    pub fn apply_uniform_position_change(&mut self, translation: [T; 3]) {
-        self.position = math::add_3d(self.position, translation);
-        self.previous_position = math::add_3d(self.previous_position, translation);
-    }
-}
-
-// This solver should not be in verlet.rs as it could be easilly generalised to work with any integration technique, or even multiple different ones at once.
+/// A generic solver capable of handling most basic physics simulations.
 pub struct CpuSolver<T, B>
 where
     T: math::Float,
@@ -122,13 +55,20 @@ where
         let real_grid_height = self.grid_size[1] * self.cell_size[1];
         let real_grid_length = self.grid_size[2] * self.cell_size[2];
 
-        for (verlet_body_index, verlet_body) in (0..self.bodies.len()).zip(&mut self.bodies) {
+        self.bodies.par_iter_mut().for_each(|body| {
+            if body.is_none() {
+                return;
+            }
+
+            body.update(self.gravity, self.dampening, delta_time);
+        });
+
+        for (verlet_body_index, verlet_body) in self.bodies.iter_mut().enumerate() {
             if verlet_body.is_none() {
                 continue;
             }
 
-            let verlet_body_position =
-                verlet_body.update_and_get_position(self.gravity, self.dampening, delta_time);
+            let verlet_body_position = verlet_body.position_unchecked();
 
             let corrected_position = [
                 verlet_body_position[0] - self.grid_origin[0], // + or - ????
@@ -167,12 +107,12 @@ where
                 //println!("corrected position: {:?}", corrected_position); // Very useful debug!
                 // Perhaps have this per verlet body?
                 match self.outside_of_grid_bounds_behaviour {
-                    OutsideOfGridBoundsBehaviour::DeleteParticle => {
+                    OutsideOfGridBoundsBehaviour::SwapDeleteParticle => {
                         todo!();
                         //self.particles.swap_remove(particle_index);
                         //continue;
                     }
-                    OutsideOfGridBoundsBehaviour::DeleteParticleButPreserveOrder => {
+                    OutsideOfGridBoundsBehaviour::DeleteParticle => {
                         todo!();
                         //self.particles.remove(particle_index);
                         //continue;
@@ -218,6 +158,24 @@ where
                 .push(verlet_body_index);
         }
 
+        self.collide_bodies(delta_time);
+
+        for cell in &mut self.grid {
+            if cell.capacity() == 0 {
+                continue;
+            }
+            // This is meant to keep memory usage low, with only a minor performance cost, but I'm not convinced.
+            // Even though we check for 0, this still seems dodgy. Perhaps this should be a choice for the user.
+            if cell.len() <= cell.capacity() / 2 {
+                //println!("len: {}, capacity: {}", cell.len(), cell.capacity());
+                cell.shrink_to_fit();
+            }
+            cell.clear();
+        }
+    }
+
+    #[inline]
+    fn collide_bodies(&mut self, delta_time: T) {
         // TODO: How the hell can we multithread this?
         // TODO: Consider having substeps that affect only collision?
         for cell_index in 0..self.grid.len() {
@@ -308,34 +266,24 @@ where
                 // cell is already part of the neighbours, so we don't have to worry about it.
             }
         }
-
-        for cell in &mut self.grid {
-            if cell.capacity() == 0 {
-                continue;
-            }
-            // This is meant to keep memory usage low, with only a minor performance cost, but I'm not convinced.
-            // Even though we check for 0, this still seems dodgy. Perhaps this should be a choice for the user.
-            if cell.len() <= cell.capacity() / 2 {
-                //println!("len: {}, capacity: {}", cell.len(), cell.capacity());
-                cell.shrink_to_fit();
-            }
-            cell.clear();
-        }
     }
 }
 
+/// If a body is outside of the grid, what should it do?
 pub enum OutsideOfGridBoundsBehaviour<T: math::Number> {
+    SwapDeleteParticle,
     DeleteParticle,
-    DeleteParticleButPreserveOrder,
     PutParticleInBounds,
     TeleportParticleToPosition([T; 3]),
     ContinueUpdating,
+    // replace with body?
 }
 
 #[cfg(test)]
 mod tests {
-    use self::bodies::CommonBody;
-    use self::bodies::Cuboid;
+    use crate::physics::physics_3d::bodies::CommonBody;
+    use crate::physics::physics_3d::bodies::Cuboid;
+    use crate::physics::physics_3d::verlet::Particle;
 
     use super::*;
     use rand::thread_rng;
@@ -343,7 +291,7 @@ mod tests {
     use test::Bencher;
 
     #[bench]
-    fn bench_single_threaded_solver_50000_particles(b: &mut Bencher) {
+    fn bench_cpu_solver_50000_particles(b: &mut Bencher) {
         let amount = 50000;
         let mut verlet_bodies = Vec::with_capacity(amount);
         let mut rng = thread_rng();
@@ -375,7 +323,7 @@ mod tests {
     }
 
     #[bench]
-    fn bench_single_threaded_solver_1000_none_particles(b: &mut Bencher) {
+    fn bench_cpu_solver_1000_none_particles(b: &mut Bencher) {
         let mut verlet_bodies = Vec::with_capacity(1000);
 
         for _ in 0..1000 {

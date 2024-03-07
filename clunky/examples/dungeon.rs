@@ -503,7 +503,7 @@ fn create_game(memory_allocator: &Arc<StandardMemoryAllocator>) -> Game {
                         for z in 0..3 {
                             room.create_cuboid(
                                 &mut game.physics,
-                                [position[0]+x,position[1]+z],
+                                [position[0] + x, position[1] + z],
                                 [1, 1],
                                 [Relative(0.5), Constant(0.0), Relative(0.5)],
                                 [Relative(1.0), Constant(1.0), Relative(1.0)],
@@ -527,11 +527,7 @@ fn create_game(memory_allocator: &Arc<StandardMemoryAllocator>) -> Game {
 
     for i in 0..DUNGEON_SIZE * DUNGEON_SIZE {
         if let Room::Empty = game.rooms[i] {
-            game.rooms[i] = generate_room(
-                i,
-                variety_range.sample(&mut rng),
-                &mut game.physics,
-            );
+            game.rooms[i] = generate_room(i, variety_range.sample(&mut rng), &mut game.physics);
         }
     }
 
@@ -999,7 +995,7 @@ impl BasicRoom {
             for z in room_position[1]..(room_position[1] + room_size[1]) {
                 self.create_cuboid(
                     physics,
-                    [room_position[0]+room_size[0]-1, z],
+                    [room_position[0] + room_size[0] - 1, z],
                     [1, 1],
                     [Relative(1.0), Relative(-0.5), Relative(0.5)],
                     [Constant(1.0), Relative(1.0), Relative(1.0)],
@@ -1012,7 +1008,7 @@ impl BasicRoom {
                 // left
                 self.create_cuboid(
                     physics,
-                    [room_position[0]+room_size[0]-1, z],
+                    [room_position[0] + room_size[0] - 1, z],
                     [1, 1],
                     [
                         Relative(1.0),
@@ -1030,7 +1026,7 @@ impl BasicRoom {
                 // right
                 self.create_cuboid(
                     physics,
-                    [room_position[0]+room_size[0]-1, z],
+                    [room_position[0] + room_size[0] - 1, z],
                     [1, 1],
                     [
                         Relative(1.0),
@@ -1048,7 +1044,7 @@ impl BasicRoom {
                 // top
                 self.create_cuboid(
                     physics,
-                    [room_position[0]+room_size[0]-1, z],
+                    [room_position[0] + room_size[0] - 1, z],
                     [1, 1],
                     [
                         Relative(1.0),
@@ -1143,7 +1139,7 @@ impl BasicRoom {
             for x in room_position[0]..(room_position[0] + room_size[0]) {
                 self.create_cuboid(
                     physics,
-                    [x, room_position[1]+room_size[1]-1],
+                    [x, room_position[1] + room_size[1] - 1],
                     [1, 1],
                     [Relative(0.5), Relative(-0.5), Relative(1.0)],
                     [Relative(1.0), Relative(1.0), Constant(1.0)],
@@ -1156,7 +1152,7 @@ impl BasicRoom {
                 // left
                 self.create_cuboid(
                     physics,
-                    [x, room_position[1]+room_size[1]-1],
+                    [x, room_position[1] + room_size[1] - 1],
                     [1, 1],
                     [
                         Relative((1.0 - DOOR_WIDTH_HEIGHT[0]) * 0.25),
@@ -1174,7 +1170,7 @@ impl BasicRoom {
                 // right
                 self.create_cuboid(
                     physics,
-                    [x, room_position[1]+room_size[1]-1],
+                    [x, room_position[1] + room_size[1] - 1],
                     [1, 1],
                     [
                         Relative(1.0 - (1.0 - DOOR_WIDTH_HEIGHT[0]) * 0.25),
@@ -1192,7 +1188,7 @@ impl BasicRoom {
                 // top
                 self.create_cuboid(
                     physics,
-                    [x, room_position[1]+room_size[1]-1],
+                    [x, room_position[1] + room_size[1] - 1],
                     [1, 1],
                     [
                         Relative(0.5),
@@ -1625,7 +1621,8 @@ fn on_keyboard_input(
 
             VirtualKeyCode::X => {
                 if is_pressed(input.state) {
-                    println!("{}", fps_tracker.average_fps());
+                    println!("fps: {}", fps_tracker.average_fps());
+                    println!("bodies: {}", game.physics.bodies.len());
                 }
             }
 
@@ -1637,30 +1634,32 @@ fn on_keyboard_input(
 
             VirtualKeyCode::T => {
                 if is_pressed(input.state) {
-                    let current_room_position = [
-                        game.camera.position[0] as usize / ROOM_SIZE[0],
-                        game.camera.position[2] as usize / ROOM_SIZE[2],
-                    ];
+                    for _ in 0..1000 {
+                        let current_room_position = [
+                            game.camera.position[0] as usize / ROOM_SIZE[0],
+                            game.camera.position[2] as usize / ROOM_SIZE[2],
+                        ];
 
-                    let current_room_index = get_non_linked_index(
-                        math::index_from_position_2d(current_room_position, DUNGEON_SIZE),
-                        &game.rooms,
-                    );
+                        let current_room_index = get_non_linked_index(
+                            math::index_from_position_2d(current_room_position, DUNGEON_SIZE),
+                            &game.rooms,
+                        );
 
-                    if let Room::BasicRoom(room) = &mut game.rooms[current_room_index] {
-                        room.bodies.push(game.physics.bodies.len())
-                    } else {
-                        unreachable!()
+                        if let Room::BasicRoom(room) = &mut game.rooms[current_room_index] {
+                            room.bodies.push(game.physics.bodies.len())
+                        } else {
+                            unreachable!()
+                        }
+                        let mut rng = thread_rng();
+                        game.physics.bodies.push(CommonBody::Cuboid(Cuboid {
+                            particle: Particle::from_position([
+                                game.camera.position[0] + rng.gen_range(-3.0..3.0),
+                                -10.0,
+                                game.camera.position[2] + rng.gen_range(-3.0..3.0),
+                            ]),
+                            half_size: [0.5; 3],
+                        }));
                     }
-                    let mut rng = thread_rng();
-                    game.physics.bodies.push(CommonBody::Cuboid(Cuboid {
-                        particle: Particle::from_position([
-                            game.camera.position[0] + rng.gen_range(-3.0..3.0),
-                            -10.0,
-                            game.camera.position[2] + rng.gen_range(-3.0..3.0),
-                        ]),
-                        half_size: [0.5; 3],
-                    }));
                 }
             }
             _ => (),

@@ -15,6 +15,8 @@ extern crate test;
 pub trait Number:
     Copy
     + Clone
+    + Sync
+    + Send
     + std::fmt::Debug
     + ops::Add<Output = Self>
     + ops::AddAssign

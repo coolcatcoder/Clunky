@@ -1,6 +1,8 @@
 use crate::math::{self, Float};
 
 pub mod aabb;
+pub mod bodies;
+pub mod solver;
 pub mod verlet;
 
 /// Calculates the final velocities when 2 rigid bodies collide elastically.
