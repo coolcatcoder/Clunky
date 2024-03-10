@@ -1,14 +1,16 @@
+use std::marker::PhantomData;
+
 use crate::{
     math::{self, Direction},
     physics::physics_3d::{self, aabb::AabbCentredOrigin},
 };
 
-use super::verlet::Particle;
+use super::verlet;
 
 /// Usually you want to implement this for an enum that has varients for each of the different body types you want to use with the verlet solver.
 ///
 /// For an example of an enum that implements this, check out [CommonBody].
-pub trait Body<T>: Send
+pub trait Body<T>: Send + std::fmt::Debug
 where
     T: math::Float,
 {
@@ -23,16 +25,18 @@ where
     fn collide(&mut self, other: &mut Self, other_index: usize, delta_time: T);
 }
 
-/// A premade enum for you to use as the body type for the verlet solver.
-///
+/// A premade enum for you to use as the body type for the [super::solver::CpuSolver].
+///Player
 /// The name might change.
+#[derive(Debug)]
 pub enum CommonBody<T>
 where
     T: math::Float,
 {
-    Player(Player<T>),
-    Cuboid(Cuboid<T>),
+    Player(verlet::bodies::Player<T>),
+    Cuboid(verlet::bodies::Cuboid<T>),
     ImmovableCuboid(ImmovableCuboid<T>),
+    TriggerCuboid(TriggerCuboid<T,CommonBody<T>>),
     None,
 }
 
@@ -46,6 +50,7 @@ where
             CommonBody::Player(player) => Ok(player.particle.position),
             CommonBody::Cuboid(cuboid) => Ok(cuboid.particle.position),
             CommonBody::ImmovableCuboid(immovable_cuboid) => Ok(immovable_cuboid.aabb.position),
+            CommonBody::TriggerCuboid(trigger_cuboid) => Ok(trigger_cuboid.aabb.position),
             CommonBody::None => Err("CommonBody::None does not have a position."),
         }
     }
@@ -63,6 +68,10 @@ where
                 immovable_cuboid.aabb.half_size,
                 T::from_f32(2.0),
             )),
+            CommonBody::TriggerCuboid(trigger_volume) => Ok(math::mul_3d_by_1d(
+                trigger_volume.aabb.half_size,
+                T::from_f32(2.0),
+            )),
             CommonBody::None => Err("CommonBody::None does not have a half_size."),
         }
     }
@@ -72,6 +81,7 @@ where
             CommonBody::Player(player) => Ok(player.half_size),
             CommonBody::Cuboid(cuboid) => Ok(cuboid.half_size),
             CommonBody::ImmovableCuboid(immovable_cuboid) => Ok(immovable_cuboid.aabb.half_size),
+            CommonBody::TriggerCuboid(trigger_cuboid) => Ok(trigger_cuboid.aabb.half_size),
             CommonBody::None => Err("CommonBody::None does not have a half_size."),
         }
     }
@@ -90,6 +100,7 @@ where
             CommonBody::ImmovableCuboid(immovable_cuboid) => {
                 immovable_cuboid.update(gravity, dampening, delta_time)
             }
+            CommonBody::TriggerCuboid(_) => (),
             CommonBody::None => unreachable!(),
         }
     }
@@ -99,33 +110,33 @@ where
             CommonBody::Player(player) => player.particle.position,
             CommonBody::Cuboid(cuboid) => cuboid.particle.position,
             CommonBody::ImmovableCuboid(immovable_cuboid) => immovable_cuboid.aabb.position,
+            CommonBody::TriggerCuboid(trigger_cuboid) => trigger_cuboid.aabb.position,
             CommonBody::None => unreachable!(),
         }
     }
 
     fn is_none(&self) -> bool {
         match self {
-            CommonBody::Player(_) => false,
-            CommonBody::Cuboid(_) => false,
-            CommonBody::ImmovableCuboid(_) => false,
             CommonBody::None => true,
+            _ => false,
         }
     }
 
-    // terribly named, but very useful. TODO: Replace with proper lhs and rhs bitwise values for checking how objects can interact perhaps.
+    // terribly named, but very useful.
     fn collide_with_others(&self) -> bool {
         match self {
             CommonBody::Player(_) => true,
             CommonBody::Cuboid(_) => true,
             CommonBody::ImmovableCuboid(_) => false,
+            CommonBody::TriggerCuboid(_) => false,
             CommonBody::None => unreachable!(),
         }
     }
 
-    // This function is insanely expensive, no clue why.
     #[inline]
     fn collide(&mut self, other: &mut CommonBody<T>, _other_index: usize, delta_time: T) {
-        match (self, other) {
+        let colliding_bodies = (self, other);
+        match colliding_bodies {
             // player
             (CommonBody::Player(_lhs_player), CommonBody::Player(_rhs_player)) => {
                 todo!();
@@ -216,6 +227,15 @@ where
                     lhs_player.particle.apply_impulse(impulse, delta_time);
                 }
             }
+            (CommonBody::Player(lhs_player), CommonBody::TriggerCuboid(rhs_trigger_cuboid)) => {
+                let lhs_player_aabb = AabbCentredOrigin {
+                    position: lhs_player.particle.position,
+                    half_size: lhs_player.half_size,
+                };
+                if lhs_player_aabb.is_intersected_by_aabb(rhs_trigger_cuboid.aabb) {
+                    (rhs_trigger_cuboid.on_collision)(colliding_bodies.1);
+                }
+            }
 
             // cuboid
             (CommonBody::Cuboid(_lhs_cuboid), CommonBody::Player(_rhs_player)) => {
@@ -288,13 +308,20 @@ where
                     lhs_cuboid.particle.apply_impulse(impulse, delta_time);
                 }
             }
+            (CommonBody::Cuboid(lhs_cuboid), CommonBody::TriggerCuboid(rhs_trigger_cuboid)) => {
+                let lhs_cuboid_aabb = AabbCentredOrigin {
+                    position: lhs_cuboid.particle.position,
+                    half_size: lhs_cuboid.half_size,
+                };
+                if lhs_cuboid_aabb.is_intersected_by_aabb(rhs_trigger_cuboid.aabb) {
+                    (rhs_trigger_cuboid.on_collision)(colliding_bodies.1);
+                }
+            }
 
             // immovable simple cuboid (This cannot happen, as immovable simple cuboides don't check to see if they have collided with others.)
-            (CommonBody::ImmovableCuboid(_), CommonBody::Player(_)) => unreachable!(),
-            (CommonBody::ImmovableCuboid(_), CommonBody::Cuboid(_)) => unreachable!(),
-            (CommonBody::ImmovableCuboid(_), CommonBody::ImmovableCuboid(_)) => {
-                unreachable!()
-            }
+            (CommonBody::ImmovableCuboid(_), _) => unreachable!(),
+
+            (CommonBody::TriggerCuboid(_),_) => unreachable!(),
 
             (CommonBody::None, _) => unreachable!(),
             (_, CommonBody::None) => unreachable!(),
@@ -303,56 +330,25 @@ where
 }
 
 #[derive(Debug)]
-pub struct Player<T>
+pub struct TriggerCuboid<T,B>
 where
     T: math::Float,
+    B: Body<T>,
 {
-    pub particle: Particle<T>,
-    pub mass: T,
-    pub friction: T,
-    pub restitution: T,
-    pub half_size: [T; 3],
-    pub dampening: [T; 3],
-    pub grounded: bool,
+    pub aabb: AabbCentredOrigin<T>,
+    pub on_collision: fn(&mut B),
 }
 
-impl<T> Player<T>
+impl<T,B> TriggerCuboid<T,B>
 where
     T: math::Float,
+    B: Body<T>,
 {
-    pub fn update(&mut self, gravity: [T; 3], delta_time: T) {
-        self.particle.accelerate(gravity);
-        self.particle.update(
-            delta_time,
-            math::mul_3d(self.particle.calculate_displacement(), self.dampening),
-        );
-
-        self.grounded = false;
-    }
+    #[inline]
+    pub fn update(&mut self, _gravity: [T; 3], _dampening: [T; 3], _delta_time: T) {}
 }
 
-//#[derive(Clone, Copy)]
-pub struct Cuboid<T>
-where
-    T: math::Float,
-{
-    pub particle: Particle<T>, // Do we even want to store particles with collision data?
-    pub half_size: [T; 3],
-}
-
-impl<T> Cuboid<T>
-where
-    T: math::Float,
-{
-    pub fn update(&mut self, gravity: [T; 3], dampening: [T; 3], delta_time: T) {
-        self.particle.accelerate(gravity);
-        self.particle.update(
-            delta_time,
-            math::mul_3d(self.particle.calculate_displacement(), dampening),
-        );
-    }
-}
-
+#[derive(Debug)]
 pub struct ImmovableCuboid<T>
 where
     T: math::Float,
@@ -364,6 +360,7 @@ impl<T> ImmovableCuboid<T>
 where
     T: math::Float,
 {
+    #[inline]
     pub fn update(&mut self, _gravity: [T; 3], _dampening: [T; 3], _delta_time: T) {}
 }
 

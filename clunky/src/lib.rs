@@ -1,5 +1,6 @@
 #![feature(const_fn_floating_point_arithmetic)] // Required for math for now.
 #![feature(test)]
+#![feature(vec_push_within_capacity)]
 #![doc = include_str!("../../README.md")]
 //#![warn(missing_docs)] // Uncomment this when you want to do some documenting. Otherwise leave commented.
 

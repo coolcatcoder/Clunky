@@ -6,11 +6,10 @@ use clunky::{
     math::{self, index_from_position_2d, Matrix4, Radians},
     meshes,
     physics::physics_3d::{
-        aabb::AabbCentredOrigin,
-        verlet::{
-            bodies::{CommonBody, Cuboid, ImmovableCuboid, Player},
-            CpuSolver, OutsideOfGridBoundsBehaviour, Particle,
-        },
+        aabb::AabbCentredOrigin, bodies::{CommonBody, ImmovableCuboid}, solver::{CpuSolver, OutsideOfGridBoundsBehaviour}, verlet::{
+            bodies::{Cuboid, Player},
+            Particle,
+        }
     },
     rendering::draw_instanced,
     shaders::colour_3d_instanced_shaders::{self, Camera},
@@ -51,6 +50,8 @@ use winit::{
 };
 
 use vulkano::sync::GpuFuture;
+
+mod gltf;
 
 const DUNGEON_SIZE: usize = 10;
 const ROOM_SIZE: [usize; 3] = [25, 30, 25];
@@ -1466,10 +1467,10 @@ fn fixed_update(game: &mut Game) {
     game.physics.update(FIXED_DELTA_TIME);
 
     if game.jump_held {
-        //if game.player().grounded {
-        if true {
-            //game.player().particle.accelerate([0.0, -500.0, 0.0]);
-            game.player().particle.accelerate([0.0, -100.0, 0.0]);
+        if game.player().grounded {
+        //if true {
+            game.player().particle.accelerate([0.0, -500.0, 0.0]);
+            //game.player().particle.accelerate([0.0, -100.0, 0.0]);
         }
     }
 

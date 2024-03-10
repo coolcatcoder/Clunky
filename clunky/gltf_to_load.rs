@@ -398,3 +398,49 @@ fn dungeon_3d_scene_to_a_3d_aabb_array(
     debug.push_str(&format!("{}\n", aabbs));
     aabbs
 }
+
+fn dungeon_3d_scene_to_common_body_arrays(
+    gltf: &Document,
+    debug: &mut String,
+    scene_prefix: &'static str,
+) -> String {
+    const BASE_TYPE: &str = "physics::physics_3d::bodies::CommonBody::<f32>";
+    const VERLET_BODY_MOD: &str = "physics::physics_3d::verlet::bodies";
+
+    let mut bodies = format!(
+        "pub const {}_BODIES: &[{}] = &[",
+        scene_prefix,
+        BASE_TYPE
+    );
+
+    for node in gltf.nodes() {
+        if let Some(node_name) = node.name() {
+            let transform_decomposed = node.transform().decomposed();
+
+            match node_name {
+                "cuboid" => {
+                    bodies.push_str(&format!(
+                        "
+                    {BASE_TYPE}::Cuboid({VERLET_BODY_MOD}::Cuboid{{
+                        position: [{:?}, -{:?}, -{:?}],
+                        half_size: [{:?}, {:?}, {:?}],
+                    }}),
+                    ",
+                        transform_decomposed.0[0],
+                        transform_decomposed.0[1],
+                        transform_decomposed.0[2],
+                        transform_decomposed.2[0] / 2.0,
+                        transform_decomposed.2[1] / 2.0,
+                        transform_decomposed.2[2] / 2.0,
+                    ));
+                }
+                _ => ()
+            }
+        }
+    }
+
+    bodies.push_str("];");
+
+    debug.push_str(&format!("{}\n", bodies));
+    bodies
+}
