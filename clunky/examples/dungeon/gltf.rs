@@ -3,17 +3,45 @@ use gltf::Gltf;
 
 const SCENES: &[&[u8]] = &[include_bytes!("./rooms/test.glb")];
 
-struct Nameless<'a> {
+pub struct Nameless<'a> {
     scenes: Scene<'a>,
 }
 
-struct Scene<'a> {
+pub struct Scene<'a> {
     cuboid_instances: &'a[Colour3DInstance]
 }
 
-fn load_scenes<'a>() -> Nameless<'a> {
+pub fn load_scenes<'a>() -> Nameless<'a> {
     for scene in SCENES {
         let gltf = Gltf::from_slice(scene).unwrap();
+
+        for node in gltf.nodes() {
+            let node_name = node.name().unwrap();
+            let transform_decomposed = node.transform().decomposed();
+            let colour = {
+                if let Some(temp_colour) = node.extras() {
+                    let temp_colour = temp_colour.get();
+
+                    //let temp_colour = temp_colour.get(10..temp_colour.len() - 1).unwrap();
+
+                    println!("{}",temp_colour);
+
+                    temp_colour
+                } else {
+                    "[1.0,1.0,1.0,1.0]"
+                }
+            };
+
+            if node_name.contains("(instance: cuboid)") {
+
+            }
+            if node_name.contains("(physics: cuboid)") {
+                
+            }
+            if node_name.contains("(physics: immovable cuboid)") {
+                
+            }
+        }
     };
     todo!()
 }

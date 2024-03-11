@@ -62,6 +62,7 @@ const FIXED_DELTA_TIME: f32 = 0.04;
 const MAX_SUBSTEPS: u32 = 200;
 
 fn main() {
+    gltf::load_scenes();
     let context = VulkanoContext::new(VulkanoConfig::default());
     let event_loop = EventLoop::new();
     let mut windows_manager = VulkanoWindows::default();
