@@ -6,10 +6,13 @@ use clunky::{
     math::{self, Degrees, Matrix4, Radians},
     meshes,
     physics::physics_3d::{
-        aabb::AabbCentredOrigin, bodies::{CommonBody, ImmovableCuboid}, solver::{CpuSolver, OutsideOfGridBoundsBehaviour}, verlet::{
+        aabb::AabbCentredOrigin,
+        bodies::{CommonBody, ImmovableCuboid},
+        solver::{CpuSolver, OutsideOfGridBoundsBehaviour},
+        verlet::{
             bodies::{Cuboid, Player},
             Particle,
-        }
+        },
     },
     rendering::{self, draw_instanced, load_images, ImageBytes},
     shaders,

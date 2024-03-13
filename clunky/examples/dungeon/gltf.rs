@@ -1,49 +1,110 @@
-use clunky::buffer_contents::Colour3DInstance;
+use clunky::{
+    buffer_contents::Colour3DInstance,
+    math::{mul_3d_by_1d, neg_3d, Matrix4},
+    physics::physics_3d::{
+        aabb::AabbCentredOrigin,
+        bodies::{CommonBody, ImmovableCuboid},
+    },
+};
 use gltf::Gltf;
 
-const SCENES: &[&[u8]] = &[include_bytes!("./rooms/test.glb")];
+const GLTF_SCENES: &[&[u8]] = &[
+    include_bytes!("./rooms/test.glb"),
+    include_bytes!("./rooms/experiment.glb"),
+];
 
-pub struct Nameless<'a> {
-    scenes: Scene<'a>,
+pub struct Nameless {
+    pub scenes: Vec<Scene>,
 }
 
-pub struct Scene<'a> {
-    cuboid_instances: &'a[Colour3DInstance]
+pub struct Scene {
+    pub cuboid_instances: Vec<Colour3DInstance>,
+    pub bodies: Vec<CommonBody<f32>>,
 }
 
-pub fn load_scenes<'a>() -> Nameless<'a> {
-    for scene in SCENES {
-        let gltf = Gltf::from_slice(scene).unwrap();
+pub fn load_scenes() -> Nameless {
+    let mut nameless = Nameless {
+        scenes: Vec::with_capacity(GLTF_SCENES.len()),
+    };
+
+    for gltf_scene in GLTF_SCENES {
+        let mut scene = Scene {
+            cuboid_instances: Vec::with_capacity(10),
+            bodies: Vec::with_capacity(15),
+        };
+
+        let gltf = Gltf::from_slice(gltf_scene).unwrap();
 
         for node in gltf.nodes() {
             let node_name = node.name().unwrap();
-            let transform_decomposed = node.transform().decomposed();
+
+            println!("{}", node_name);
+
+            let Some(properties) = node.extras() else {
+                continue;
+            };
+            if node_name.contains("single room") {
+                continue;
+            }
+
+            let transform_decomposed = {
+                let mut temp_transform_decomposed = node.transform().decomposed();
+
+                //println!("{:?}",temp_transform_decomposed);
+
+                //temp_transform_decomposed.0[0] = -temp_transform_decomposed.0[0];
+                temp_transform_decomposed.0[1] = -temp_transform_decomposed.0[1];
+                temp_transform_decomposed.0[2] = -temp_transform_decomposed.0[2];
+
+                temp_transform_decomposed.1[1] = -temp_transform_decomposed.1[1];
+
+                //temp_transform_decomposed.2 = neg_3d(temp_transform_decomposed.2);
+
+                temp_transform_decomposed
+            };
+
             let colour = {
                 if let Some(temp_colour) = node.extras() {
                     let temp_colour = temp_colour.get();
 
                     //let temp_colour = temp_colour.get(10..temp_colour.len() - 1).unwrap();
 
-                    println!("{}",temp_colour);
+                    println!("{}", temp_colour);
 
                     temp_colour
                 } else {
+                    println!("no");
                     "[1.0,1.0,1.0,1.0]"
                 }
             };
 
-            if node_name.contains("(instance: cuboid)") {
+            //cgmath::Matrix4::from_axis_angle(axis, angle)
 
+            if node_name.contains("(instance: cuboid)") {
+                scene.cuboid_instances.push(Colour3DInstance::new(
+                    [1.0; 4],
+                    Matrix4::from_translation(transform_decomposed.0)
+                        * Matrix4::from_quaternion(transform_decomposed.1)
+                        * Matrix4::from_scale(transform_decomposed.2),
+                ));
             }
-            if node_name.contains("(physics: cuboid)") {
-                
-            }
+
+            if node_name.contains("(physics: cuboid)") {}
             if node_name.contains("(physics: immovable cuboid)") {
-                
+                scene
+                    .bodies
+                    .push(CommonBody::ImmovableCuboid(ImmovableCuboid {
+                        aabb: AabbCentredOrigin {
+                            position: transform_decomposed.0,
+                            half_size: mul_3d_by_1d(transform_decomposed.2, 0.5),
+                        },
+                    }));
             }
         }
-    };
-    todo!()
+        nameless.scenes.push(scene);
+    }
+
+    nameless
 }
 
 /*

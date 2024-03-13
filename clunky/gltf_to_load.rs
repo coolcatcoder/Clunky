@@ -407,11 +407,7 @@ fn dungeon_3d_scene_to_common_body_arrays(
     const BASE_TYPE: &str = "physics::physics_3d::bodies::CommonBody::<f32>";
     const VERLET_BODY_MOD: &str = "physics::physics_3d::verlet::bodies";
 
-    let mut bodies = format!(
-        "pub const {}_BODIES: &[{}] = &[",
-        scene_prefix,
-        BASE_TYPE
-    );
+    let mut bodies = format!("pub const {}_BODIES: &[{}] = &[", scene_prefix, BASE_TYPE);
 
     for node in gltf.nodes() {
         if let Some(node_name) = node.name() {
@@ -434,7 +430,7 @@ fn dungeon_3d_scene_to_common_body_arrays(
                         transform_decomposed.2[2] / 2.0,
                     ));
                 }
-                _ => ()
+                _ => (),
             }
         }
     }

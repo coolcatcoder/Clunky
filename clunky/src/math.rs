@@ -334,6 +334,37 @@ impl Matrix4 {
         }
     }
 
+    /// Creats a matrix from a quaternion.
+    pub fn from_quaternion(quaternion: [f32; 4]) -> Matrix4 {
+        let q1q1 = quaternion[1] * quaternion[1];
+        let q2q2 = quaternion[2] * quaternion[2];
+        let q3q3 = quaternion[3] * quaternion[3];
+
+        // Modified from chatgpt. As with any code gotten from the internet, you will check to make 100% sure it works.
+        // Currently untested.
+        Matrix4 {
+            x: [
+                1.0 - 2.0 * (q2q2 + q3q3),
+                2.0 * (quaternion[1] * quaternion[2] - quaternion[0] * quaternion[3]),
+                2.0 * (quaternion[0] * quaternion[2] + quaternion[1] * quaternion[3]),
+                0.0,
+            ],
+            y: [
+                2.0 * (quaternion[1] * quaternion[2] + quaternion[0] * quaternion[3]),
+                1.0 - 2.0 * (q1q1 + q3q3),
+                2.0 * (quaternion[2] * quaternion[3] - quaternion[0] * quaternion[1]),
+                0.0,
+            ],
+            z: [
+                2.0 * (quaternion[1] * quaternion[3] - quaternion[0] * quaternion[2]),
+                2.0 * (quaternion[0] * quaternion[1] + quaternion[2] * quaternion[3]),
+                1.0 - 2.0 * (q1q1 + q2q2),
+                0.0,
+            ],
+            w: [0.0, 0.0, 0.0, 1.0],
+        }
+    }
+
     pub const fn from_angle_x_const(theta: Radians<f32>) -> Matrix4 {
         let theta_sin = SoftF32(theta.0).sin().to_f32();
         let theta_cos = SoftF32(theta.0).cos().to_f32();

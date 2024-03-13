@@ -39,6 +39,7 @@ void main() {
     vec4 temp = model_to_world * vec4(position, 1.0);
     temp = camera.world_to_camera * temp;
     gl_Position = camera.camera_to_clip * temp;
+    gl_Position.x *= -1.0;
 
     normal_out = transpose(inverse(mat3(model_to_world))) * normal; // TODO: inversing matrices is expensive. Do on the cpu, store as part of the instance.
     colour_out = colour;

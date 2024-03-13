@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use crate::{
-    math::{self, Direction},
+    math::{self, add_3d, Direction},
     physics::physics_3d::{self, aabb::AabbCentredOrigin},
 };
 
@@ -10,7 +10,7 @@ use super::verlet;
 /// Usually you want to implement this for an enum that has varients for each of the different body types you want to use with the verlet solver.
 ///
 /// For an example of an enum that implements this, check out [CommonBody].
-pub trait Body<T>: Send + std::fmt::Debug
+pub trait Body<T>: Send + Sync + std::fmt::Debug
 where
     T: math::Float,
 {
@@ -23,12 +23,14 @@ where
     fn is_none(&self) -> bool;
     fn collide_with_others(&self) -> bool;
     fn collide(&mut self, other: &mut Self, other_index: usize, delta_time: T);
+
+    fn detect_collision(&self, other: &Self) -> bool;
 }
 
 /// A premade enum for you to use as the body type for the [super::solver::CpuSolver].
 ///Player
 /// The name might change.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum CommonBody<T>
 where
     T: math::Float,
@@ -36,7 +38,7 @@ where
     Player(verlet::bodies::Player<T>),
     Cuboid(verlet::bodies::Cuboid<T>),
     ImmovableCuboid(ImmovableCuboid<T>),
-    TriggerCuboid(TriggerCuboid<T,CommonBody<T>>),
+    TriggerCuboid(TriggerCuboid<T, CommonBody<T>>),
     None,
 }
 
@@ -51,6 +53,31 @@ where
             CommonBody::Cuboid(cuboid) => Ok(cuboid.particle.position),
             CommonBody::ImmovableCuboid(immovable_cuboid) => Ok(immovable_cuboid.aabb.position),
             CommonBody::TriggerCuboid(trigger_cuboid) => Ok(trigger_cuboid.aabb.position),
+            CommonBody::None => Err("CommonBody::None does not have a position."),
+        }
+    }
+
+    /// Translates the position of the common body. If it doesn't have a position, it returns an error
+    #[must_use]
+    pub fn translate(&mut self, translation: [T; 3]) -> Result<(), &'static str> {
+        match self {
+            CommonBody::Player(player) => {
+                player.particle.apply_uniform_position_change(translation);
+                Ok(())
+            }
+            CommonBody::Cuboid(cuboid) => {
+                cuboid.particle.apply_uniform_position_change(translation);
+                Ok(())
+            }
+            CommonBody::ImmovableCuboid(immovable_cuboid) => {
+                immovable_cuboid.aabb.position =
+                    add_3d(immovable_cuboid.aabb.position, translation);
+                Ok(())
+            }
+            CommonBody::TriggerCuboid(trigger_cuboid) => {
+                trigger_cuboid.aabb.position = add_3d(trigger_cuboid.aabb.position, translation);
+                Ok(())
+            }
             CommonBody::None => Err("CommonBody::None does not have a position."),
         }
     }
@@ -321,7 +348,89 @@ where
             // immovable simple cuboid (This cannot happen, as immovable simple cuboides don't check to see if they have collided with others.)
             (CommonBody::ImmovableCuboid(_), _) => unreachable!(),
 
-            (CommonBody::TriggerCuboid(_),_) => unreachable!(),
+            (CommonBody::TriggerCuboid(_), _) => unreachable!(),
+
+            (CommonBody::None, _) => unreachable!(),
+            (_, CommonBody::None) => unreachable!(),
+        }
+    }
+
+    #[inline]
+    fn detect_collision(&self, other: &CommonBody<T>) -> bool {
+        let colliding_bodies = (self, other);
+        match colliding_bodies {
+            // player
+            (CommonBody::Player(_lhs_player), CommonBody::Player(_rhs_player)) => {
+                todo!()
+            }
+            (CommonBody::Player(lhs_player), CommonBody::Cuboid(rhs_cuboid)) => {
+                let lhs_player_aabb = AabbCentredOrigin {
+                    position: lhs_player.particle.position,
+                    half_size: lhs_player.half_size,
+                };
+                let rhs_cuboid_aabb = AabbCentredOrigin {
+                    position: rhs_cuboid.particle.position,
+                    half_size: rhs_cuboid.half_size,
+                };
+                lhs_player_aabb.is_intersected_by_aabb(rhs_cuboid_aabb)
+            }
+            (CommonBody::Player(lhs_player), CommonBody::ImmovableCuboid(rhs_immovable_cuboid)) => {
+                let lhs_player_aabb = AabbCentredOrigin {
+                    position: lhs_player.particle.position,
+                    half_size: lhs_player.half_size,
+                };
+                lhs_player_aabb.is_intersected_by_aabb(rhs_immovable_cuboid.aabb)
+            }
+            (CommonBody::Player(lhs_player), CommonBody::TriggerCuboid(rhs_trigger_cuboid)) => {
+                let lhs_player_aabb = AabbCentredOrigin {
+                    position: lhs_player.particle.position,
+                    half_size: lhs_player.half_size,
+                };
+                lhs_player_aabb.is_intersected_by_aabb(rhs_trigger_cuboid.aabb)
+            }
+
+            // cuboid
+            (CommonBody::Cuboid(lhs_cuboid), CommonBody::Player(rhs_player)) => {
+                let lhs_cuboid_aabb = AabbCentredOrigin {
+                    position: lhs_cuboid.particle.position,
+                    half_size: lhs_cuboid.half_size,
+                };
+                let rhs_player_aabb = AabbCentredOrigin {
+                    position: rhs_player.particle.position,
+                    half_size: rhs_player.half_size,
+                };
+                lhs_cuboid_aabb.is_intersected_by_aabb(rhs_player_aabb)
+            }
+            (CommonBody::Cuboid(lhs_cuboid), CommonBody::Cuboid(rhs_cuboid)) => {
+                let lhs_cuboid_aabb = AabbCentredOrigin {
+                    position: lhs_cuboid.particle.position,
+                    half_size: lhs_cuboid.half_size,
+                };
+                let rhs_cuboid_aabb = AabbCentredOrigin {
+                    position: rhs_cuboid.particle.position,
+                    half_size: rhs_cuboid.half_size,
+                };
+                lhs_cuboid_aabb.is_intersected_by_aabb(rhs_cuboid_aabb)
+            }
+            (CommonBody::Cuboid(lhs_cuboid), CommonBody::ImmovableCuboid(rhs_immovable_cuboid)) => {
+                let lhs_cuboid_aabb = AabbCentredOrigin {
+                    position: lhs_cuboid.particle.position,
+                    half_size: lhs_cuboid.half_size,
+                };
+                lhs_cuboid_aabb.is_intersected_by_aabb(rhs_immovable_cuboid.aabb)
+            }
+            (CommonBody::Cuboid(lhs_cuboid), CommonBody::TriggerCuboid(rhs_trigger_cuboid)) => {
+                let lhs_cuboid_aabb = AabbCentredOrigin {
+                    position: lhs_cuboid.particle.position,
+                    half_size: lhs_cuboid.half_size,
+                };
+                lhs_cuboid_aabb.is_intersected_by_aabb(rhs_trigger_cuboid.aabb)
+            }
+
+            // immovable simple cuboid (This cannot happen, as immovable simple cuboides don't check to see if they have collided with others.)
+            (CommonBody::ImmovableCuboid(_), _) => unreachable!(),
+
+            (CommonBody::TriggerCuboid(_), _) => unreachable!(),
 
             (CommonBody::None, _) => unreachable!(),
             (_, CommonBody::None) => unreachable!(),
@@ -329,8 +438,8 @@ where
     }
 }
 
-#[derive(Debug)]
-pub struct TriggerCuboid<T,B>
+#[derive(Debug, Clone)]
+pub struct TriggerCuboid<T, B>
 where
     T: math::Float,
     B: Body<T>,
@@ -339,7 +448,7 @@ where
     pub on_collision: fn(&mut B),
 }
 
-impl<T,B> TriggerCuboid<T,B>
+impl<T, B> TriggerCuboid<T, B>
 where
     T: math::Float,
     B: Body<T>,
@@ -348,7 +457,7 @@ where
     pub fn update(&mut self, _gravity: [T; 3], _dampening: [T; 3], _delta_time: T) {}
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ImmovableCuboid<T>
 where
     T: math::Float,

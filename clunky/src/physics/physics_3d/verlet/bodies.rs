@@ -2,7 +2,7 @@ use crate::math;
 
 use super::Particle;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Player<T>
 where
     T: math::Float,
@@ -31,7 +31,7 @@ where
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Cuboid<T>
 where
     T: math::Float,
@@ -44,12 +44,7 @@ impl<T> Cuboid<T>
 where
     T: math::Float,
 {
-    pub fn update(
-        &mut self,
-        gravity: [T; 3],
-        dampening: [T; 3],
-        delta_time: T,
-    ) {
+    pub fn update(&mut self, gravity: [T; 3], dampening: [T; 3], delta_time: T) {
         self.particle.accelerate(gravity);
         self.particle.update(
             delta_time,

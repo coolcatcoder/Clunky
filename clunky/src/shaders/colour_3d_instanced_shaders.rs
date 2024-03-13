@@ -84,7 +84,7 @@ pub fn create_pipeline(device: Arc<Device>, subpass: Subpass) -> Arc<GraphicsPip
             viewport_state: Some(ViewportState::default()),
             rasterization_state: Some(RasterizationState {
                 cull_mode: CullMode::Back,
-                front_face: FrontFace::CounterClockwise,
+                front_face: FrontFace::Clockwise,
                 ..Default::default()
             }),
             multisample_state: Some(MultisampleState::default()),

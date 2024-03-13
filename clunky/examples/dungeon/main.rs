@@ -6,10 +6,13 @@ use clunky::{
     math::{self, index_from_position_2d, Matrix4, Radians},
     meshes,
     physics::physics_3d::{
-        aabb::AabbCentredOrigin, bodies::{CommonBody, ImmovableCuboid}, solver::{CpuSolver, OutsideOfGridBoundsBehaviour}, verlet::{
+        aabb::AabbCentredOrigin,
+        bodies::{CommonBody, ImmovableCuboid},
+        solver::{CpuSolver, OutsideOfGridBoundsBehaviour},
+        verlet::{
             bodies::{Cuboid, Player},
             Particle,
-        }
+        },
     },
     rendering::draw_instanced,
     shaders::colour_3d_instanced_shaders::{self, Camera},
@@ -62,7 +65,6 @@ const FIXED_DELTA_TIME: f32 = 0.04;
 const MAX_SUBSTEPS: u32 = 200;
 
 fn main() {
-    gltf::load_scenes();
     let context = VulkanoContext::new(VulkanoConfig::default());
     let event_loop = EventLoop::new();
     let mut windows_manager = VulkanoWindows::default();
@@ -167,7 +169,7 @@ fn main() {
             }
 
             match axis {
-                0 => game.camera.rotation[1] += value as f32 * game.mouse_sensitivity,
+                0 => game.camera.rotation[1] -= value as f32 * game.mouse_sensitivity,
                 1 => game.camera.rotation[0] -= value as f32 * game.mouse_sensitivity,
                 _ => (),
             }
@@ -485,6 +487,8 @@ fn create_game(memory_allocator: &Arc<StandardMemoryAllocator>) -> Game {
     //let mut marked_rooms = Vec::with_capacity(30); // Might not need marker typed rooms at all.
     //let mut linked_rooms = Vec::with_capacity(30); // 30 linked rooms at a time seems reasonable. IMPORTANT linked rooms shouldn't contain anything. They basically shouldn't exist. The root room is the one that contains everything!
 
+    let scenes = gltf::load_scenes();
+
     // Generate linked rooms.
     for _ in 0..rng.gen_range(3..10) {
         let variety = linked_variety_range.sample(&mut rng);
@@ -529,7 +533,12 @@ fn create_game(memory_allocator: &Arc<StandardMemoryAllocator>) -> Game {
 
     for i in 0..DUNGEON_SIZE * DUNGEON_SIZE {
         if let Room::Empty = game.rooms[i] {
-            game.rooms[i] = generate_room(i, variety_range.sample(&mut rng), &mut game.physics);
+            game.rooms[i] = generate_room(
+                i,
+                variety_range.sample(&mut rng),
+                &mut game.physics,
+                &scenes,
+            );
         }
     }
 
@@ -958,8 +967,7 @@ impl BasicRoom {
         &mut self,
         room_position: [usize; 2],
         instances: &[Colour3DInstance],
-        aabbs: &[AabbCentredOrigin<f32>],
-        physics_cuboids: &[AabbCentredOrigin<f32>],
+        bodies: &[CommonBody<f32>],
         physics: &mut CpuSolver<f32, CommonBody<f32>>,
     ) {
         let translation = [
@@ -974,15 +982,10 @@ impl BasicRoom {
                 Matrix4::from_translation(translation) * matrix,
             ))
         }
-        for aabb in aabbs {
-            physics
-                .bodies
-                .push(CommonBody::ImmovableCuboid(ImmovableCuboid {
-                    aabb: AabbCentredOrigin {
-                        position: math::add_3d(aabb.position, translation),
-                        half_size: aabb.half_size,
-                    },
-                }));
+        for body in bodies {
+            let mut body = body.clone();
+            body.translate(translation).unwrap();
+            physics.bodies.push(body);
         }
     }
 
@@ -1291,8 +1294,7 @@ fn generate_room(
     room_index: usize,
     variety: u8,
     physics: &mut CpuSolver<f32, CommonBody<f32>>,
-    //marked_rooms: &mut Vec<usize>,
-    //linked_rooms: &mut Vec<(usize, usize)>,
+    scenes: &gltf::Nameless,
 ) -> Room {
     /*
     for marked_room in &mut *marked_rooms {
@@ -1333,9 +1335,8 @@ fn generate_room(
             room.create_walls(room_position, [1, 1], physics);
             room.load_from_arrays(
                 room_position,
-                meshes::ROOM_TEST_CUBE_COLOUR_3D_INSTANCES,
-                meshes::ROOM_TEST_AABBS,
-                &[],
+                &scenes.scenes[0].cuboid_instances,
+                &scenes.scenes[0].bodies,
                 physics,
             );
             Room::BasicRoom(room)
@@ -1447,7 +1448,7 @@ fn fixed_update(game: &mut Game) {
         false => 25.0,
     };
 
-    let real_motion = (motion.0 * speed, motion.1 * speed);
+    let real_motion = (-motion.0 * speed, motion.1 * speed);
 
     let y_rotation_cos = game.camera.rotation[1].to_radians().cos();
     let y_rotation_sin = game.camera.rotation[1].to_radians().sin();
@@ -1465,13 +1466,13 @@ fn fixed_update(game: &mut Game) {
 
     game.player().dampening = [horizontal_dampening, 1.0, horizontal_dampening]; // y 0.98 originally
 
-    game.physics.update(FIXED_DELTA_TIME);
+    game.physics.update_experimental(FIXED_DELTA_TIME);
 
     if game.jump_held {
-        if game.player().grounded {
-        //if true {
-            game.player().particle.accelerate([0.0, -500.0, 0.0]);
-            //game.player().particle.accelerate([0.0, -100.0, 0.0]);
+        //if game.player().grounded {
+        if true {
+            //game.player().particle.accelerate([0.0, -500.0, 0.0]);
+            game.player().particle.accelerate([0.0, -100.0, 0.0]);
         }
     }
 
