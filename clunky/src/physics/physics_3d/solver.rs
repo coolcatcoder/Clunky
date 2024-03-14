@@ -1,6 +1,9 @@
 use std::{
     mem::MaybeUninit,
-    sync::{mpsc::channel, Arc, Mutex},
+    sync::{
+        mpsc::{channel, Receiver, Sender},
+        Arc, Mutex,
+    },
 };
 
 use crate::math;
@@ -259,6 +262,7 @@ where
         }
     }
 
+    /// Multithreaded! It suffers on small amounts of particles currently.... Use min len in favourites.
     pub fn update_experimental(&mut self, delta_time: T) {
         let real_grid_width = self.grid_size[0] * self.cell_size[0];
         let real_grid_height = self.grid_size[1] * self.cell_size[1];
@@ -369,8 +373,10 @@ where
 
         //self.collide_bodies(delta_time);
 
-        let collisions = self.detect_collisions();
-        self.collision_response(collisions, delta_time);
+        let (collision_sender, collision_receiver) = channel();
+        self.detect_collisions(&collision_sender);
+        drop(collision_sender);
+        self.respond_to_collisions(collision_receiver.iter(), delta_time);
 
         for cell in &mut self.grid {
             if cell.capacity() == 0 {
@@ -387,10 +393,7 @@ where
     }
 
     #[inline]
-    fn detect_collisions(&self) -> Vec<(usize, usize)> {
-        let (sender, receiver) = channel();
-        //let collisions = Mutex::new(Vec::<(usize, usize)>::with_capacity(10)); // 10?
-
+    fn detect_collisions(&self, collision_sender: &Sender<(usize, usize)>) {
         //TODO: check whether this is the right place to par_iter, rather than one of the other for loops.
         (0..self.grid.len()).into_par_iter().for_each(|cell_index| {
             let cell = &self.grid[cell_index];
@@ -451,6 +454,7 @@ where
                 //let mut collisions = collisions.lock().unwrap();
 
                 for neighbour_index in 0..neighbours_len {
+                //(0..neighbours_len).into_par_iter().for_each(|neighbour_index| {
                     // we are certain that assume_init() is safe due to iterating from 0 to neighbours_len.
                     let neighbour = unsafe { &neighbours[neighbour_index as usize].assume_init() };
                     for rhs_body_index in *neighbour {
@@ -461,128 +465,34 @@ where
                         if self.bodies[*lhs_body_index]
                             .detect_collision(&self.bodies[*rhs_body_index])
                         {
-                            //collisions.push((*lhs_body_index, *rhs_body_index));
-                            sender.send((*lhs_body_index, *rhs_body_index)).unwrap();
+                            collision_sender
+                                .send((*lhs_body_index, *rhs_body_index))
+                                .unwrap();
                         }
                     }
-                }
+                }//);
 
                 // cell is already part of the neighbours, so we don't have to worry about it.
             }
         });
-        //collisions.into_inner().unwrap()
-        drop(sender);
-        let mut collisions = vec![];
-        for collision in receiver.iter() {
-            collisions.push(collision);
-        }
-        collisions
     }
 
     #[inline]
-    fn collision_response(&mut self, collisions: Vec<(usize, usize)>, delta_time: T) {
+    fn respond_to_collisions(
+        &mut self,
+        collisions: std::sync::mpsc::Iter<'_, (usize, usize)>,
+        delta_time: T,
+    ) {
         for (lhs_body_index, rhs_body_index) in collisions {
             // This code is simple and elegant. By splitting at the largest index, it allows us to safely and &mutably yoink the verlet bodies.
             if lhs_body_index > rhs_body_index {
                 let (lhs_bodies, rhs_bodies) = self.bodies.split_at_mut(lhs_body_index);
                 rhs_bodies[0].collide(&mut lhs_bodies[rhs_body_index], rhs_body_index, delta_time);
+                //rhs_bodies[0].respond_to_collision(&mut lhs_bodies[rhs_body_index], rhs_body_index, delta_time);
             } else {
                 let (lhs_bodies, rhs_bodies) = self.bodies.split_at_mut(rhs_body_index);
                 lhs_bodies[lhs_body_index].collide(&mut rhs_bodies[0], rhs_body_index, delta_time);
-            }
-        }
-    }
-
-    #[inline]
-    fn collide_bodies(&mut self, delta_time: T) {
-        // TODO: How the hell can we multithread this?
-        // TODO: Consider having substeps that affect only collision?
-        for cell_index in 0..self.grid.len() {
-            let cell = &self.grid[cell_index];
-            let cell_position =
-                math::position_from_index_3d(cell_index, self.grid_size[0], self.grid_size[1]);
-
-            // Debating how much I like performance. I don't want to write by hand 26 different cell lets. This will do:
-            // This code seems dodgy, but I reckon it is better than using a vec. Gotten from: https://users.rust-lang.org/t/uninitialized-array/50278/3
-            // len of 27 because this includes the center cell
-            let mut neighbours: [MaybeUninit<&Vec<usize>>; 27] =
-                unsafe { MaybeUninit::uninit().assume_init() };
-            let mut neighbours_len: u8 = 0;
-
-            for x in -1..=1 {
-                for y in -1..=1 {
-                    for z in -1..=1 {
-                        let position = [
-                            cell_position[0] as isize + x,
-                            cell_position[1] as isize + y,
-                            cell_position[2] as isize + z,
-                        ];
-
-                        if position[0] >= 0
-                            && position[0] < self.grid_size[0] as isize
-                            && position[1] >= 0
-                            && position[1] < self.grid_size[1] as isize
-                            && position[2] >= 0
-                            && position[2] < self.grid_size[2] as isize
-                        {
-                            neighbours[neighbours_len as usize] = MaybeUninit::new(
-                                &self.grid[math::index_from_position_3d(
-                                    [
-                                        position[0] as usize,
-                                        position[1] as usize,
-                                        position[2] as usize,
-                                    ],
-                                    self.grid_size[0],
-                                    self.grid_size[1],
-                                )],
-                            );
-
-                            neighbours_len += 1;
-                        }
-                    }
-                }
-            }
-
-            // Leaving this here as a lesson. For edge cells there will be less than 27 neighbours, as such it must remain maybe uninit.
-            // let neighbours = unsafe {
-            //     mem::transmute::<_, [&Vec<usize>; 27]>(neighbours)
-            // };
-
-            for lhs_verlet_body_index in cell {
-                if !self.bodies[*lhs_verlet_body_index].collide_with_others() {
-                    continue;
-                }
-
-                for neighbour_index in 0..neighbours_len {
-                    // we are certain that assume_init() is safe due to iterating from 0 to neighbours_len.
-                    let neighbour = unsafe { &neighbours[neighbour_index as usize].assume_init() };
-                    for rhs_verlet_body_index in *neighbour {
-                        if lhs_verlet_body_index == rhs_verlet_body_index {
-                            continue;
-                        }
-
-                        // This code is simple and elegant. By splitting at the largest index, it allows us to safely and &mutably yoink the verlet bodies.
-                        if lhs_verlet_body_index > rhs_verlet_body_index {
-                            let (lhs_verlet_bodies, rhs_verlet_bodies) =
-                                self.bodies.split_at_mut(*lhs_verlet_body_index);
-                            rhs_verlet_bodies[0].collide(
-                                &mut lhs_verlet_bodies[*rhs_verlet_body_index],
-                                *rhs_verlet_body_index,
-                                delta_time,
-                            );
-                        } else {
-                            let (lhs_verlet_bodies, rhs_verlet_bodies) =
-                                self.bodies.split_at_mut(*rhs_verlet_body_index);
-                            lhs_verlet_bodies[*lhs_verlet_body_index].collide(
-                                &mut rhs_verlet_bodies[0],
-                                *rhs_verlet_body_index,
-                                delta_time,
-                            );
-                        }
-                    }
-                }
-
-                // cell is already part of the neighbours, so we don't have to worry about it.
+                //lhs_bodies[lhs_body_index].respond_to_collision(&mut rhs_bodies[0], rhs_body_index, delta_time);
             }
         }
     }
