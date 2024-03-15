@@ -1,9 +1,6 @@
 use std::{
     mem::MaybeUninit,
-    sync::{
-        mpsc::{channel, Receiver, Sender},
-        Arc, Mutex,
-    },
+    sync::mpsc::{channel, Sender},
 };
 
 use crate::math;
@@ -262,19 +259,13 @@ where
         }
     }
 
-    /// Multithreaded! It suffers on small amounts of particles currently.... Use min len in favourites.
+    /// Multithreaded! It suffers on small amounts of particles currently....
     pub fn update_experimental(&mut self, delta_time: T) {
         let real_grid_width = self.grid_size[0] * self.cell_size[0];
         let real_grid_height = self.grid_size[1] * self.cell_size[1];
         let real_grid_length = self.grid_size[2] * self.cell_size[2];
 
-        self.bodies.par_iter_mut().for_each(|body| {
-            if body.is_none() {
-                return;
-            }
-
-            body.update(self.gravity, self.dampening, delta_time);
-        });
+        self.update_bodies(delta_time);
 
         for (verlet_body_index, verlet_body) in self.bodies.iter_mut().enumerate() {
             if verlet_body.is_none() {
@@ -390,6 +381,28 @@ where
             }
             cell.clear();
         }
+    }
+
+    #[inline]
+    fn serial_update_bodies(&mut self, delta_time: T) {
+        self.bodies.iter_mut().for_each(|body| {
+            if body.is_none() {
+                return;
+            }
+
+            body.update(self.gravity, self.dampening, delta_time);
+        });
+    }
+
+    #[inline]
+    fn update_bodies(&mut self, delta_time: T) {
+        self.bodies.par_iter_mut().for_each(|body| {
+            if body.is_none() {
+                return;
+            }
+
+            body.update(self.gravity, self.dampening, delta_time);
+        });
     }
 
     #[inline]
@@ -551,6 +564,24 @@ mod tests {
             OutsideOfGridBoundsBehaviour::ContinueUpdating,
             verlet_bodies,
         )
+    }
+
+    // (10,22), (1000,2_468), (5000,12_518), (10_000,28_238), (20_000,54_449), (50_000,171_110), (100_000,672_048)
+    #[bench]
+    fn bench_cpu_solver_serial_update_100_000_particles(b: &mut Bencher) {
+        let mut solver = create_test_solver::<f32>(100_000, 0.0);
+        b.iter(|| {
+            solver.serial_update_bodies(0.04);
+        })
+    }
+
+    // (10,7_581), (1000,21_242), (5000,32_108), (10_000,69_903), (20_000,171_272), (50_000,385_621), (100_000,821_128)
+    #[bench]
+    fn bench_cpu_solver_update_100_000_particles(b: &mut Bencher) {
+        let mut solver = create_test_solver::<f32>(100_000, 0.0);
+        b.iter(|| {
+            solver.update_bodies(0.04);
+        })
     }
 
     #[bench]
