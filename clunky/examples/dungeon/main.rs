@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use clunky::{
     buffer_contents::{self, Colour3DInstance},
-    lost_code::{is_pressed, FixedUpdate, FpsTracker},
+    lost_code::{is_pressed, FixedUpdate, FpsTracker, MaxSubsteps},
     math::{self, index_from_position_2d, Matrix4, Radians},
     meshes,
     physics::physics_3d::{
@@ -108,7 +108,7 @@ fn main() {
 
     let mut game = create_game(&context.memory_allocator());
 
-    let mut fixed_update_runner = FixedUpdate::new(FIXED_DELTA_TIME);
+    let mut fixed_update_runner = FixedUpdate::new(FIXED_DELTA_TIME, MaxSubsteps::WarnAt(MAX_SUBSTEPS));
 
     event_loop.run(move |event, _, control_flow| match event {
         Event::WindowEvent {
@@ -129,7 +129,7 @@ fn main() {
         }
 
         Event::MainEventsCleared => {
-            fixed_update_runner.update(MAX_SUBSTEPS, || fixed_update(&mut game));
+            fixed_update_runner.update(|| fixed_update(&mut game));
 
             update(&mut game);
 

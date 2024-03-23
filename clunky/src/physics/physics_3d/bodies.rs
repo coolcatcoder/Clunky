@@ -18,6 +18,8 @@ where
     fn update(&mut self, gravity: [T; 3], dampening: [T; 3], delta_time: T);
     /// Gets the position of the body. Panic if it doesn't have a position.
     fn position_unchecked(&self) -> [T; 3];
+    /// Gets the half size of the body. Panics if it doesn't have a size.
+    fn half_size_unchecked(&self) -> [T; 3];
     /// If the body is nothing. It won't even bother to place this thing in the grid.
     /// This is useful for when you don't want to disturb the indices of bodies, but still want to remove bodies.
     fn is_none(&self) -> bool;
@@ -138,6 +140,16 @@ where
             CommonBody::Cuboid(cuboid) => cuboid.particle.position,
             CommonBody::ImmovableCuboid(immovable_cuboid) => immovable_cuboid.aabb.position,
             CommonBody::TriggerCuboid(trigger_cuboid) => trigger_cuboid.aabb.position,
+            CommonBody::None => unreachable!(),
+        }
+    }
+
+    fn half_size_unchecked(&self) -> [T; 3] {
+        match self {
+            CommonBody::Player(player) => player.half_size,
+            CommonBody::Cuboid(cuboid) => cuboid.half_size,
+            CommonBody::ImmovableCuboid(immovable_cuboid) => immovable_cuboid.aabb.half_size,
+            CommonBody::TriggerCuboid(trigger_cuboid) => trigger_cuboid.aabb.half_size,
             CommonBody::None => unreachable!(),
         }
     }

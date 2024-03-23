@@ -53,6 +53,8 @@ pub trait Float: SignedNumber {
     fn to_radians(self) -> Self;
     fn from_f32(value: f32) -> Self;
     fn from_f64(value: f64) -> Self;
+    /// Returns the smallest integer greater than or equal to self.
+    fn ceil(self) -> Self;
 }
 
 impl Number for f32 {
@@ -92,6 +94,11 @@ impl SignedNumber for f32 {
 }
 
 impl Float for f32 {
+    #[inline]
+    fn ceil(self) -> Self {
+        self.ceil()
+    }
+
     #[inline]
     fn sqrt(self) -> Self {
         self.sqrt()
@@ -160,6 +167,11 @@ impl SignedNumber for f64 {
 }
 
 impl Float for f64 {
+    #[inline]
+    fn ceil(self) -> Self {
+        self.ceil()
+    }
+
     #[inline]
     fn sqrt(self) -> Self {
         self.sqrt()
@@ -483,7 +495,7 @@ impl Matrix4 {
         let f = cot(fovy.0 / 2.0);
 
         Matrix4 {
-            x: [f / aspect, 0.0, 0.0, 0.0],
+            x: [-f / aspect, 0.0, 0.0, 0.0],
             y: [0.0, f, 0.0, 0.0],
             z: [0.0, 0.0, (far + near) / (near - far), -1.0],
             w: [0.0, 0.0, (2.0 * far * near) / (near - far), 0.0],

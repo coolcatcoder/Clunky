@@ -29,4 +29,3 @@ features = ["extras", "names", "extensions"]
 [build-dependencies.gltf]
 version = "1.4.0"
 features = ["extras", "names", "extensions"]
-

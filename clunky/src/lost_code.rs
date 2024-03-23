@@ -18,47 +18,65 @@ pub fn is_pressed(state: ElementState) -> bool {
 }
 
 /// Calls a function every fixed_delta_time seconds.
-pub struct FixedUpdate {
-    fixed_time_passed: f32,
-    fixed_delta_time: f32,
+pub struct FixedUpdate<T: Float> {
+    fixed_time_passed: T,
+    fixed_delta_time: T,
     starting_time: Instant,
+    max_substeps: MaxSubsteps,
 }
 
-impl FixedUpdate {
+/// Do you want a max amount of substeps, and if so, how should we handle going over?
+pub enum MaxSubsteps {
+    Infinite,
+    ReturnAt(u32),
+    PanicAt(u32),
+    WarnAt(u32),
+}
+
+impl<T: Float> FixedUpdate<T> {
     /// Create a new FixedUpdate.
     ///
     /// fixed_delta_time should be how often you want your function to be called, in seconds.
     #[must_use]
-    pub fn new(fixed_delta_time: f32) -> FixedUpdate {
+    pub fn new(fixed_delta_time: T, max_substeps: MaxSubsteps) -> FixedUpdate<T> {
         FixedUpdate {
-            fixed_time_passed: 0.0,
+            fixed_time_passed: T::ZERO,
             fixed_delta_time,
             starting_time: Instant::now(),
+            max_substeps,
         }
     }
 
-    /// Call this every frame, and it will call closure every fixed_delta_time seconds.
-    ///
-    /// If there are more substeps than max_substeps it will println!() to let you know, but will not panic!(). This may change.
-    pub fn update<F>(&mut self, max_substeps: u32, mut closure: F)
-    where
-        F: FnMut(),
+    /// Every time this is called, it will see how long has passed, and call the callback the amount of times it should have been called, in that time span.
+    pub fn update<F: FnMut()>(&mut self, mut callback: F,)
     {
-        let seconds_since_start = self.starting_time.elapsed().as_secs_f32();
+        let seconds_since_start = T::from_f64(self.starting_time.elapsed().as_secs_f64());
         let mut substeps = 0;
 
         while self.fixed_time_passed < seconds_since_start {
-            closure();
+            callback();
 
             self.fixed_time_passed += self.fixed_delta_time;
 
             substeps += 1;
 
-            if substeps > max_substeps {
-                println!(
-                    "Too many substeps per frame. Entered performance sinkhole. Substeps: {}",
-                    substeps
-                )
+            match self.max_substeps {
+                MaxSubsteps::Infinite => (),
+                MaxSubsteps::ReturnAt(max) => {
+                    if substeps > max {
+                        return;
+                    }
+                }
+                MaxSubsteps::PanicAt(max) => {
+                    if substeps > max {
+                        panic!("Too many substeps.\nSubsteps: {}\nMax: {}", substeps, max);
+                    }
+                }
+                MaxSubsteps::WarnAt(max) => {
+                    if substeps > max {
+                        eprintln!("Too many substeps.\nSubsteps: {}\nMax: {}", substeps, max);
+                    }
+                }
             }
         }
     }

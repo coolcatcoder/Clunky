@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Instant};
 
 use clunky::{
     buffer_contents,
-    lost_code::{is_pressed, FixedUpdate, FpsTracker},
+    lost_code::{is_pressed, FixedUpdate, FpsTracker, MaxSubsteps},
     math::{self, Degrees, Matrix4, Radians},
     meshes,
     physics::physics_3d::{
@@ -425,7 +425,7 @@ fn main() {
 
     let mut frames_since_start = 0u64;
 
-    let mut fixed_update_runner = FixedUpdate::new(FIXED_DELTA_TIME);
+    let mut fixed_update_runner = FixedUpdate::new(FIXED_DELTA_TIME, MaxSubsteps::WarnAt(MAX_SUBSTEPS));
 
     let mut fps_tracker = FpsTracker::<f32>::new();
 
@@ -452,7 +452,7 @@ fn main() {
             Event::MainEventsCleared => {
                 // game stuff
                 {
-                    fixed_update_runner.update(MAX_SUBSTEPS, || {
+                    fixed_update_runner.update(|| {
                         fixed_update(
                             &mut wasd_held,
                             &mut jump_held,

@@ -4,3 +4,8 @@ members = [
     "rust-gpu-easier",
 ]
 resolver = "2"
+
+[profile.measure]
+inherits = "release"
+debug = true
+strip = false
