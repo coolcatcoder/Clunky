@@ -1,6 +1,6 @@
 use clunky::{
     buffer_contents::Colour3DInstance,
-    math::{mul_3d_by_1d, neg_3d, Matrix4},
+    math::{mul_3d_by_1d, Matrix4},
     physics::physics_3d::{
         aabb::AabbCentredOrigin,
         bodies::{CommonBody, ImmovableCuboid},
@@ -40,7 +40,7 @@ pub fn load_scenes() -> Nameless {
 
             println!("{}", node_name);
 
-            let Some(properties) = node.extras() else {
+            let Some(_properties) = node.extras() else {
                 continue;
             };
             if node_name.contains("single room") {
@@ -63,7 +63,7 @@ pub fn load_scenes() -> Nameless {
                 temp_transform_decomposed
             };
 
-            let colour = {
+            let _colour = {
                 if let Some(temp_colour) = node.extras() {
                     let temp_colour = temp_colour.get();
 

@@ -108,7 +108,8 @@ fn main() {
 
     let mut game = create_game(&context.memory_allocator());
 
-    let mut fixed_update_runner = FixedUpdate::new(FIXED_DELTA_TIME, MaxSubsteps::WarnAt(MAX_SUBSTEPS));
+    let mut fixed_update_runner =
+        FixedUpdate::new(FIXED_DELTA_TIME, MaxSubsteps::WarnAt(MAX_SUBSTEPS));
 
     event_loop.run(move |event, _, control_flow| match event {
         Event::WindowEvent {

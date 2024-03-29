@@ -114,6 +114,7 @@ pub fn create_pipeline(device: Arc<Device>, subpass: Subpass) -> Arc<GraphicsPip
 
 /// A more user friendly version of [vertex_shader::CameraData3D]
 /// Rotation is in degrees. I understand that this should be a quaternion.
+#[derive(Debug)]
 pub struct Camera {
     pub position: [f32; 3],
     pub rotation: [f32; 3],

@@ -1,17 +1,14 @@
-use rayon::{
-    iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator},
-    prelude,
-};
+#![feature(vec_push_within_capacity)]
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use std::sync::Arc;
 
 use clunky::{
     buffer_contents::{self, Colour3DInstance},
     lost_code::{is_pressed, FixedUpdate, FpsTracker, MaxSubsteps},
-    math::{self, index_from_position_2d, Matrix4, Radians},
+    math::{self, Matrix4, Radians},
     meshes,
     physics::physics_3d::{
-        aabb::AabbCentredOrigin,
-        bodies::{Body, CommonBody, ImmovableCuboid},
+        bodies::{Body, CommonBody},
         solver::{CpuSolver, OutsideOfGridBoundsBehaviour},
         verlet::{
             bodies::{Cuboid, Player},
@@ -22,10 +19,7 @@ use clunky::{
     shaders::colour_3d_instanced_shaders::{self, Camera},
 };
 use gltf::RenderObject;
-use rand::{
-    distributions::{Distribution, Uniform},
-    thread_rng, Rng,
-};
+use rand::{rngs::ThreadRng, thread_rng, Rng};
 use vulkano::{
     buffer::{
         allocator::{SubbufferAllocator, SubbufferAllocatorCreateInfo},
@@ -68,8 +62,10 @@ const COLLISION_GRID_CELL_SIZE: [usize; 3] = [10, 10, 10];
 
 const INITIAL_BODY_CAPACITY: usize = 100;
 
-const FIXED_DELTA_TIME: f32 = 0.04;
+const FIXED_DELTA_TIME: f32 = 0.025; // usually I would do 0.04
 const MAX_SUBSTEPS: u32 = 200;
+
+const MAX_RAINDROPS: usize = 15_000;
 
 fn main() {
     let context = VulkanoContext::new(VulkanoConfig::default());
@@ -113,9 +109,11 @@ fn main() {
 
     //let fps_cap: Option<f32> = None;
 
+    let mut rain = Rain::new();
     let mut game = create_game(&context.memory_allocator());
 
-    let mut fixed_update_runner = FixedUpdate::new(FIXED_DELTA_TIME, MaxSubsteps::WarnAt(MAX_SUBSTEPS));
+    let mut fixed_update_runner =
+        FixedUpdate::new(FIXED_DELTA_TIME, MaxSubsteps::WarnAt(MAX_SUBSTEPS));
 
     event_loop.run(move |event, _, control_flow| match event {
         Event::WindowEvent {
@@ -138,7 +136,7 @@ fn main() {
         Event::MainEventsCleared => {
             fixed_update_runner.update(|| fixed_update(&mut game));
 
-            update(&mut game);
+            update(&mut game, &mut rain);
 
             render(
                 &context,
@@ -358,45 +356,95 @@ fn create_pipelines(device: &Arc<Device>, render_pass: &Arc<RenderPass>) -> Pipe
     }
 }
 
-/*
-fn window_size_dependent_setup(context: &VulkanoContext, window_renderer: &mut VulkanoWindowRenderer) -> Vec<Arc<Framebuffer>> {
-    let window_extent = window_renderer.window().inner_size();
-    let depth_buffer_view = ImageView::new_default(
-        Image::new(
-            context.memory_allocator().clone(),
-            ImageCreateInfo {
-                image_type: ImageType::Dim2d,
-                format: Format::D32_SFLOAT,
-                extent: [window_extent.width, window_extent.height, 1],
-                usage: ImageUsage::TRANSIENT_ATTACHMENT | ImageUsage::DEPTH_STENCIL_ATTACHMENT,
-                ..Default::default()
-            },
-            AllocationCreateInfo::default(),
-        )
-        .unwrap(),
-    )
-    .unwrap();
-
-    window_renderer.
-
-    swapchain_images
-        .iter()
-        .map(|swapchain_image| {
-            let swapchain_image_view = ImageView::new_default(swapchain_image.clone()).unwrap();
-            Framebuffer::new(
-                render_pass.clone(),
-                FramebufferCreateInfo {
-                    attachments: vec![swindow_size_dependent_setup
+// Can we have some sort of smoke erupting from the volcano?
+enum Stage {
+    Calm(u32),
+    LargeChunks(u32),
+    FineRain(u32),
+    Todo(u32),
 }
-*/
 
+// Todo, rename to volcano.
 struct Rain {
-    basic_drop: FixedUpdate<f32>
+    rng: ThreadRng,
+    stage: Stage,
+    drop_indices: Vec<(usize, usize)>,
+    stage_ticker: FixedUpdate<f32>,
+    basic_drop: FixedUpdate<f32>,
 }
 
 impl Rain {
-    fn run(&self) {
-        //self.basic_drop.update(MAX_SUBSTEPS, closure)
+    fn new() -> Rain {
+        Rain {
+            rng: thread_rng(),
+            stage: Stage::Calm(0),
+            drop_indices: Vec::with_capacity(MAX_RAINDROPS),
+            
+            stage_ticker: FixedUpdate::new(1.0, MaxSubsteps::Infinite),
+            basic_drop: FixedUpdate::new(0.1_f32, MaxSubsteps::ReturnAt(10)),
+        }
+    }
+    fn run(&mut self, game: &mut Game) {
+        return;
+        if self.drop_indices.len() >= MAX_RAINDROPS - 1000 {
+            //if false {
+            //println!("Removing rain!");
+            for _ in 0..50 {
+                //game.physics.bodies.swap_remove(self.drop_indices[0]); // still might be possible
+                game.physics.bodies[self.drop_indices[0].0] = CommonBody::None;
+                //game.objects_to_render.swap_remove(self.drop_indices[0].1); // once again, might be possible, with a bit of work
+                game.objects_to_render[self.drop_indices[0].1] = RenderObject::None;
+                self.drop_indices.remove(0); // May be slow.
+            }
+        }
+
+        self.stage_ticker.update(|| {
+            match &mut self.stage {
+                Stage::Calm(seconds) => {
+                    *seconds += 1
+                }
+                Stage::LargeChunks(seconds) => {
+                    *seconds += 1
+                }
+                Stage::FineRain(seconds) => {
+                    *seconds += 1
+                }
+                Stage::Todo(seconds) => {
+                    *seconds += 1
+                }
+            }
+        });
+
+        self.basic_drop.update(|| {
+            if let Stage::FineRain(_) = self.stage {
+                for _ in 0..30 {
+                    self.drop_indices
+                        .push_within_capacity((game.physics.bodies.len(), game.objects_to_render.len()))
+                        .unwrap();
+                    game.objects_to_render.push(RenderObject::Cuboid {
+                        body_index: game.physics.bodies.len(),
+                        colour: [
+                            self.rng.gen_range(0.0..1.0),
+                            self.rng.gen_range(0.0..1.0),
+                            self.rng.gen_range(0.0..1.0),
+                            1.0,
+                        ],
+                    });
+                    game.physics.bodies.push(CommonBody::Cuboid(Cuboid {
+                        particle: Particle::from_position([
+                            self.rng.gen_range(-250.0..250.0),
+                            -300.0,
+                            self.rng.gen_range(-250.0..250.0),
+                        ]),
+                        half_size: [
+                            self.rng.gen_range(2.0..6.0),
+                            self.rng.gen_range(2.0..6.0),
+                            self.rng.gen_range(2.0..6.0),
+                        ],
+                    }));
+                }
+            }
+        });
     }
 }
 
@@ -430,8 +478,8 @@ fn create_game(memory_allocator: &Arc<StandardMemoryAllocator>) -> Game {
         sprinting: true,
         paused: false,
         camera: Camera {
-            position: [2.0, -4.0, 2.0],
-            rotation: [0.0; 3],
+            position: [-184.70149, 2.0, -147.17622],
+            rotation: [4.0, 523.0, 0.0],
 
             ambient_strength: 0.3,
             specular_strength: 0.5,
@@ -487,7 +535,7 @@ fn create_game(memory_allocator: &Arc<StandardMemoryAllocator>) -> Game {
     };
 
     game.physics.bodies.push(CommonBody::Player(Player {
-        particle: Particle::from_position([0.0, -2.0, 0.0]),
+        particle: Particle::from_position([-184.70149, 3.0, -147.17622]),
         mass: 30.0,
         friction: 5.0,
         restitution: 0.5,
@@ -577,27 +625,32 @@ fn fixed_update(game: &mut Game) {
     game.camera.light_position[2] = game.camera.position[2];
 }
 
-fn update(game: &mut Game) {
+fn update(game: &mut Game, rain: &mut Rain) {
+    rain.run(game);
+
     game.cuboid_buffers.instance_buffer.clear();
 
     // Actual plan:
     // Step 1: Remove non-renderables, like None physics objects.
     // Step 2: Collect in parallel an instance from all the render_objects
 
-    game.objects_to_render
+    game.cuboid_buffers.instance_buffer = game
+        .objects_to_render
         .par_iter()
-        .map(|render_object| match render_object {
+        .filter_map(|render_object| match render_object {
+            RenderObject::None => None,
             RenderObject::Cuboid { body_index, colour } => {
                 let body = &game.physics.bodies[*body_index];
-                Colour3DInstance::new(
+                Some(Colour3DInstance::new(
                     *colour,
                     Matrix4::from_translation(body.position_unchecked())
                         * Matrix4::from_scale(body.size().unwrap()),
-                )
+                ))
             }
-            RenderObject::CuboidNoPhysics(instance) => instance.clone(),
+            RenderObject::CuboidNoPhysics(instance) => Some(instance.clone()),
         })
-        .collect_into_vec(&mut game.cuboid_buffers.instance_buffer);
+        //.collect_into_vec(&mut game.cuboid_buffers.instance_buffer);
+        .collect();
 }
 
 fn on_keyboard_input(
@@ -644,6 +697,13 @@ fn on_keyboard_input(
                 if is_pressed(input.state) {
                     println!("fps: {}", fps_tracker.average_fps());
                     println!("bodies: {}", game.physics.bodies.len());
+                }
+            }
+
+            VirtualKeyCode::P => {
+                if is_pressed(input.state) {
+                    println!("player: {:?}", game.player());
+                    println!("camera: {:?}", game.camera);
                 }
             }
 

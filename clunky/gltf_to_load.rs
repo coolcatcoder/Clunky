@@ -399,7 +399,7 @@ fn dungeon_3d_scene_to_a_3d_aabb_array(
     aabbs
 }
 
-fn dungeon_3d_scene_to_common_body_arrays(
+fn _dungeon_3d_scene_to_common_body_arrays(
     gltf: &Document,
     debug: &mut String,
     scene_prefix: &'static str,

@@ -511,7 +511,7 @@ impl ops::Mul for Matrix4 {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct Radians<T: Float>(pub T);
 
 #[repr(C)]

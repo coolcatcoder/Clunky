@@ -1,10 +1,10 @@
-use std::num::NonZeroUsize;
+use std::str::FromStr;
 
 use clunky::{
     buffer_contents::Colour3DInstance,
-    math::{mul_3d_by_1d, neg_3d, Matrix4},
+    math::{mul_3d_by_1d, Matrix4},
     physics::physics_3d::{
-        aabb::AabbCentredOrigin,
+        aabb::{AabbCentredOrigin, AabbMinMax},
         bodies::{CommonBody, ImmovableCuboid},
     },
 };
@@ -19,9 +19,11 @@ pub struct Nameless {
 pub struct Scene {
     pub render_objects: Vec<RenderObject>,
     pub bodies: Vec<CommonBody<f32>>,
+    pub grow_zones: Vec<AabbMinMax<f32>>,
 }
 
 pub enum RenderObject {
+    None,
     Cuboid { body_index: usize, colour: [f32; 4] },
     CuboidNoPhysics(Colour3DInstance),
 }
@@ -37,6 +39,7 @@ pub fn load_scenes() -> Nameless {
         let mut scene = Scene {
             render_objects: Vec::with_capacity(gltf.nodes().len()),
             bodies: Vec::with_capacity(gltf.nodes().len()),
+            grow_zones: Vec::with_capacity(10),
         };
 
         for node in gltf.nodes() {
@@ -55,13 +58,29 @@ pub fn load_scenes() -> Nameless {
                 temp_transform_decomposed.0[1] = -temp_transform_decomposed.0[1];
                 temp_transform_decomposed.0[2] = -temp_transform_decomposed.0[2];
 
-                temp_transform_decomposed.1[1] = -temp_transform_decomposed.1[1];
-
-                //temp_transform_decomposed.2 = neg_3d(temp_transform_decomposed.2);
-
                 temp_transform_decomposed
             };
             println!("{:?}", transform_decomposed);
+
+            let colour = if let Some(colour_index) = properties.find("\"colour\":") {
+                let mut colour_string = String::with_capacity(15);
+                let mut index = colour_index+10;
+                while properties.as_bytes()[index] != b"]"[0] {
+                    colour_string.push(properties.as_bytes()[index] as char);
+                    index += 1;
+                }
+
+                let mut temp_colour = [0.0; 4];
+                for (index,float) in colour_string.split(",").enumerate() {
+                    temp_colour[index] = f32::from_str(float).unwrap();
+                }
+
+                println!("temp colour: {:?}", temp_colour);
+
+                temp_colour
+            } else {
+                [1.0; 4]
+            };
 
             let does_not_have_required_physics = false;
 
@@ -69,8 +88,9 @@ pub fn load_scenes() -> Nameless {
                 scene
                     .render_objects
                     .push(RenderObject::CuboidNoPhysics(Colour3DInstance::new(
-                        [1.0; 4],
+                        colour,
                         Matrix4::from_translation(transform_decomposed.0)
+                            //* Matrix4::from_quaternion([ 0.0, 0.7071068, 0.0, 0.7071068 ])
                             * Matrix4::from_quaternion(transform_decomposed.1)
                             * Matrix4::from_scale(transform_decomposed.2),
                     )));
@@ -95,6 +115,9 @@ pub fn load_scenes() -> Nameless {
                 );
             }
         }
+        scene.render_objects.shrink_to_fit();
+        scene.bodies.shrink_to_fit();
+        scene.grow_zones.shrink_to_fit();
         nameless.scenes.push(scene);
     }
 

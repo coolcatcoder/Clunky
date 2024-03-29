@@ -609,6 +609,7 @@ where
     }
 
     #[inline]
+    #[allow(dead_code)]
     fn serial_update_bodies(&mut self, delta_time: T) {
         self.bodies.iter_mut().for_each(|body| {
             if body.is_none() {
@@ -743,12 +744,20 @@ where
             // This code is simple and elegant. By splitting at the largest index, it allows us to safely and &mutably yoink the verlet bodies.
             if lhs_body_index > rhs_body_index {
                 let (lhs_bodies, rhs_bodies) = self.bodies.split_at_mut(lhs_body_index);
-                rhs_bodies[0].collide(&mut lhs_bodies[rhs_body_index], rhs_body_index, delta_time);
-                //rhs_bodies[0].respond_to_collision(&mut lhs_bodies[rhs_body_index], rhs_body_index, delta_time);
+                //rhs_bodies[0].collide(&mut lhs_bodies[rhs_body_index], rhs_body_index, delta_time);
+                rhs_bodies[0].respond_to_collision(
+                    &mut lhs_bodies[rhs_body_index],
+                    rhs_body_index,
+                    delta_time,
+                );
             } else {
                 let (lhs_bodies, rhs_bodies) = self.bodies.split_at_mut(rhs_body_index);
-                lhs_bodies[lhs_body_index].collide(&mut rhs_bodies[0], rhs_body_index, delta_time);
-                //lhs_bodies[lhs_body_index].respond_to_collision(&mut rhs_bodies[0], rhs_body_index, delta_time);
+                //lhs_bodies[lhs_body_index].collide(&mut rhs_bodies[0], rhs_body_index, delta_time);
+                lhs_bodies[lhs_body_index].respond_to_collision(
+                    &mut rhs_bodies[0],
+                    rhs_body_index,
+                    delta_time,
+                );
             }
         }
     }

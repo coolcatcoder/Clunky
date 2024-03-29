@@ -48,8 +48,7 @@ impl<T: Float> FixedUpdate<T> {
     }
 
     /// Every time this is called, it will see how long has passed, and call the callback the amount of times it should have been called, in that time span.
-    pub fn update<F: FnMut()>(&mut self, mut callback: F,)
-    {
+    pub fn update<F: FnMut()>(&mut self, mut callback: F) {
         let seconds_since_start = T::from_f64(self.starting_time.elapsed().as_secs_f64());
         let mut substeps = 0;
 
