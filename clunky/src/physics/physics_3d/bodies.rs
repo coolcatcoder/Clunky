@@ -39,7 +39,7 @@ where
     Player(verlet::bodies::Player<T>),
     Cuboid(verlet::bodies::Cuboid<T>),
     ImmovableCuboid(ImmovableCuboid<T>),
-    TriggerCuboid(TriggerCuboid<T, CommonBody<T>>),
+    CollisionRecorderCuboid(CollisionRecorderCuboid<T, CommonBody<T>>),
     None,
 }
 
@@ -53,7 +53,7 @@ where
             CommonBody::Player(player) => Ok(player.particle.position),
             CommonBody::Cuboid(cuboid) => Ok(cuboid.particle.position),
             CommonBody::ImmovableCuboid(immovable_cuboid) => Ok(immovable_cuboid.aabb.position),
-            CommonBody::TriggerCuboid(trigger_cuboid) => Ok(trigger_cuboid.aabb.position),
+            CommonBody::CollisionRecorderCuboid(collision_recorder_cuboid) => Ok(collision_recorder_cuboid.aabb.position),
             CommonBody::None => Err("CommonBody::None does not have a position."),
         }
     }
@@ -75,8 +75,8 @@ where
                     add_3d(immovable_cuboid.aabb.position, translation);
                 Ok(())
             }
-            CommonBody::TriggerCuboid(trigger_cuboid) => {
-                trigger_cuboid.aabb.position = add_3d(trigger_cuboid.aabb.position, translation);
+            CommonBody::CollisionRecorderCuboid(collision_recorder_cuboid) => {
+                collision_recorder_cuboid.aabb.position = add_3d(collision_recorder_cuboid.aabb.position, translation);
                 Ok(())
             }
             CommonBody::None => Err("CommonBody::None does not have a position."),
@@ -96,8 +96,8 @@ where
                 immovable_cuboid.aabb.half_size,
                 T::from_f32(2.0),
             )),
-            CommonBody::TriggerCuboid(trigger_volume) => Ok(math::mul_3d_by_1d(
-                trigger_volume.aabb.half_size,
+            CommonBody::CollisionRecorderCuboid(collision_recorder_cuboid) => Ok(math::mul_3d_by_1d(
+                collision_recorder_cuboid.aabb.half_size,
                 T::from_f32(2.0),
             )),
             CommonBody::None => Err("CommonBody::None does not have a half_size."),
@@ -109,7 +109,7 @@ where
             CommonBody::Player(player) => Ok(player.half_size),
             CommonBody::Cuboid(cuboid) => Ok(cuboid.half_size),
             CommonBody::ImmovableCuboid(immovable_cuboid) => Ok(immovable_cuboid.aabb.half_size),
-            CommonBody::TriggerCuboid(trigger_cuboid) => Ok(trigger_cuboid.aabb.half_size),
+            CommonBody::CollisionRecorderCuboid(collision_recorder_cuboid) => Ok(collision_recorder_cuboid.aabb.half_size),
             CommonBody::None => Err("CommonBody::None does not have a half_size."),
         }
     }
@@ -128,7 +128,7 @@ where
             CommonBody::ImmovableCuboid(immovable_cuboid) => {
                 immovable_cuboid.update(gravity, dampening, delta_time)
             }
-            CommonBody::TriggerCuboid(_) => (),
+            CommonBody::CollisionRecorderCuboid(_) => (),
             CommonBody::None => unreachable!(),
         }
     }
@@ -138,7 +138,7 @@ where
             CommonBody::Player(player) => player.particle.position,
             CommonBody::Cuboid(cuboid) => cuboid.particle.position,
             CommonBody::ImmovableCuboid(immovable_cuboid) => immovable_cuboid.aabb.position,
-            CommonBody::TriggerCuboid(trigger_cuboid) => trigger_cuboid.aabb.position,
+            CommonBody::CollisionRecorderCuboid(collision_recorder_cuboid) => collision_recorder_cuboid.aabb.position,
             CommonBody::None => unreachable!(),
         }
     }
@@ -148,7 +148,7 @@ where
             CommonBody::Player(player) => player.half_size,
             CommonBody::Cuboid(cuboid) => cuboid.half_size,
             CommonBody::ImmovableCuboid(immovable_cuboid) => immovable_cuboid.aabb.half_size,
-            CommonBody::TriggerCuboid(trigger_cuboid) => trigger_cuboid.aabb.half_size,
+            CommonBody::CollisionRecorderCuboid(collision_recorder_cuboid) => collision_recorder_cuboid.aabb.half_size,
             CommonBody::None => unreachable!(),
         }
     }
@@ -166,7 +166,7 @@ where
             CommonBody::Player(_) => true,
             CommonBody::Cuboid(_) => true,
             CommonBody::ImmovableCuboid(_) => false,
-            CommonBody::TriggerCuboid(_) => false,
+            CommonBody::CollisionRecorderCuboid(_) => false,
             CommonBody::None => unreachable!(),
         }
     }
@@ -265,13 +265,16 @@ where
                     lhs_player.particle.apply_impulse(impulse, delta_time);
                 }
             }
-            (CommonBody::Player(lhs_player), CommonBody::TriggerCuboid(rhs_trigger_cuboid)) => {
+            (CommonBody::Player(lhs_player), CommonBody::CollisionRecorderCuboid(rhs_collision_recorder_cuboid)) => {
                 let lhs_player_aabb = AabbCentredOrigin {
                     position: lhs_player.particle.position,
                     half_size: lhs_player.half_size,
                 };
-                if lhs_player_aabb.is_intersected_by_aabb(rhs_trigger_cuboid.aabb) {
-                    (rhs_trigger_cuboid.on_collision)(colliding_bodies.1);
+                if lhs_player_aabb.is_intersected_by_aabb(rhs_collision_recorder_cuboid.aabb) {
+                    if (rhs_collision_recorder_cuboid.save_collision)(colliding_bodies.1) {
+                        todo!();
+                        //rhs_collision_recorder_cuboid.stored_collider_index = 
+                    }
                 }
             }
 
@@ -346,20 +349,21 @@ where
                     lhs_cuboid.particle.apply_impulse(impulse, delta_time);
                 }
             }
-            (CommonBody::Cuboid(lhs_cuboid), CommonBody::TriggerCuboid(rhs_trigger_cuboid)) => {
+            (CommonBody::Cuboid(lhs_cuboid), CommonBody::CollisionRecorderCuboid(rhs_collision_recorder_cuboid)) => {
                 let lhs_cuboid_aabb = AabbCentredOrigin {
                     position: lhs_cuboid.particle.position,
                     half_size: lhs_cuboid.half_size,
                 };
-                if lhs_cuboid_aabb.is_intersected_by_aabb(rhs_trigger_cuboid.aabb) {
-                    (rhs_trigger_cuboid.on_collision)(colliding_bodies.1);
+                if lhs_cuboid_aabb.is_intersected_by_aabb(rhs_collision_recorder_cuboid.aabb) {
+                    todo!();
+                    //(rhs_collision_recorder_cuboid.on_collision)(colliding_bodies.1);
                 }
             }
 
             // immovable simple cuboid (This cannot happen, as immovable simple cuboides don't check to see if they have collided with others.)
             (CommonBody::ImmovableCuboid(_), _) => unreachable!(),
 
-            (CommonBody::TriggerCuboid(_), _) => unreachable!(),
+            (CommonBody::CollisionRecorderCuboid(_), _) => unreachable!(),
 
             (CommonBody::None, _) => unreachable!(),
             (_, CommonBody::None) => unreachable!(),
@@ -462,8 +466,9 @@ where
                 //println!("impulse: {:?}", impulse);
                 lhs_player.particle.apply_impulse(impulse, delta_time);
             }
-            (CommonBody::Player(_), CommonBody::TriggerCuboid(rhs_trigger_cuboid)) => {
-                (rhs_trigger_cuboid.on_collision)(colliding_bodies.1);
+            (CommonBody::Player(_), CommonBody::CollisionRecorderCuboid(rhs_collision_recorder_cuboid)) => {
+                todo!();
+                //(rhs_collision_recorder_cuboid.on_collision)(colliding_bodies.1);
             }
 
             // cuboid
@@ -533,14 +538,15 @@ where
                 );
                 lhs_cuboid.particle.apply_impulse(impulse, delta_time);
             }
-            (CommonBody::Cuboid(_), CommonBody::TriggerCuboid(rhs_trigger_cuboid)) => {
-                (rhs_trigger_cuboid.on_collision)(colliding_bodies.1);
+            (CommonBody::Cuboid(_), CommonBody::CollisionRecorderCuboid(rhs_collision_recorder_cuboid)) => {
+                todo!();
+                //(rhs_collision_recorder_cuboid.on_collision)(colliding_bodies.1);
             }
 
             // immovable simple cuboid (This cannot happen, as immovable simple cuboides don't check to see if they have collided with others.)
             (CommonBody::ImmovableCuboid(_), _) => unreachable!(),
 
-            (CommonBody::TriggerCuboid(_), _) => unreachable!(),
+            (CommonBody::CollisionRecorderCuboid(_), _) => unreachable!(),
 
             (CommonBody::None, _) => unreachable!(),
             (_, CommonBody::None) => unreachable!(),
@@ -573,12 +579,12 @@ where
                 };
                 lhs_player_aabb.is_intersected_by_aabb(rhs_immovable_cuboid.aabb)
             }
-            (CommonBody::Player(lhs_player), CommonBody::TriggerCuboid(rhs_trigger_cuboid)) => {
+            (CommonBody::Player(lhs_player), CommonBody::CollisionRecorderCuboid(rhs_collision_recorder_cuboid)) => {
                 let lhs_player_aabb = AabbCentredOrigin {
                     position: lhs_player.particle.position,
                     half_size: lhs_player.half_size,
                 };
-                lhs_player_aabb.is_intersected_by_aabb(rhs_trigger_cuboid.aabb)
+                lhs_player_aabb.is_intersected_by_aabb(rhs_collision_recorder_cuboid.aabb)
             }
 
             // cuboid
@@ -611,18 +617,18 @@ where
                 };
                 lhs_cuboid_aabb.is_intersected_by_aabb(rhs_immovable_cuboid.aabb)
             }
-            (CommonBody::Cuboid(lhs_cuboid), CommonBody::TriggerCuboid(rhs_trigger_cuboid)) => {
+            (CommonBody::Cuboid(lhs_cuboid), CommonBody::CollisionRecorderCuboid(rhs_collision_recorder_cuboid)) => {
                 let lhs_cuboid_aabb = AabbCentredOrigin {
                     position: lhs_cuboid.particle.position,
                     half_size: lhs_cuboid.half_size,
                 };
-                lhs_cuboid_aabb.is_intersected_by_aabb(rhs_trigger_cuboid.aabb)
+                lhs_cuboid_aabb.is_intersected_by_aabb(rhs_collision_recorder_cuboid.aabb)
             }
 
             // immovable simple cuboid (This cannot happen, as immovable simple cuboides don't check to see if they have collided with others.)
             (CommonBody::ImmovableCuboid(_), _) => unreachable!(),
 
-            (CommonBody::TriggerCuboid(_), _) => unreachable!(),
+            (CommonBody::CollisionRecorderCuboid(_), _) => unreachable!(),
 
             (CommonBody::None, _) => unreachable!(),
             (_, CommonBody::None) => unreachable!(),
@@ -631,22 +637,15 @@ where
 }
 
 #[derive(Debug, Clone)]
-pub struct TriggerCuboid<T, B>
+pub struct CollisionRecorderCuboid<T, B>
 where
     T: math::Float,
     B: Body<T>,
 {
     pub aabb: AabbCentredOrigin<T>,
-    pub on_collision: fn(&mut B),
-}
-
-impl<T, B> TriggerCuboid<T, B>
-where
-    T: math::Float,
-    B: Body<T>,
-{
-    #[inline]
-    pub fn update(&mut self, _gravity: [T; 3], _dampening: [T; 3], _delta_time: T) {}
+    pub save_collision: fn(&mut B)->bool,
+    pub stored_collider_index: Option<usize>,
+    // TODO: multiple collisions behaviour?
 }
 
 #[derive(Debug, Clone)]

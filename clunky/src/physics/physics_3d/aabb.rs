@@ -181,6 +181,7 @@ where
     }
 }
 
+#[derive(Copy, Clone, Debug)]
 pub struct AabbMinMax<T>
 where
     T: Number,

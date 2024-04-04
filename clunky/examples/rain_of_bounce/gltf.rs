@@ -2,10 +2,11 @@ use std::str::FromStr;
 
 use clunky::{
     buffer_contents::Colour3DInstance,
-    math::{mul_3d_by_1d, Matrix4},
+    math::{add_3d, mul_3d_by_1d, sub_3d, Matrix4},
     physics::physics_3d::{
         aabb::{AabbCentredOrigin, AabbMinMax},
         bodies::{CommonBody, ImmovableCuboid},
+        verlet::{bodies::Cuboid, Particle},
     },
 };
 use gltf::Gltf;
@@ -64,14 +65,14 @@ pub fn load_scenes() -> Nameless {
 
             let colour = if let Some(colour_index) = properties.find("\"colour\":") {
                 let mut colour_string = String::with_capacity(15);
-                let mut index = colour_index+10;
+                let mut index = colour_index + 10;
                 while properties.as_bytes()[index] != b"]"[0] {
                     colour_string.push(properties.as_bytes()[index] as char);
                     index += 1;
                 }
 
                 let mut temp_colour = [0.0; 4];
-                for (index,float) in colour_string.split(",").enumerate() {
+                for (index, float) in colour_string.split(",").enumerate() {
                     temp_colour[index] = f32::from_str(float).unwrap();
                 }
 
@@ -82,7 +83,7 @@ pub fn load_scenes() -> Nameless {
                 [1.0; 4]
             };
 
-            let does_not_have_required_physics = false;
+            let mut does_not_have_required_physics = false;
 
             if properties.contains("\"instance\":\"cuboid no physics\"") {
                 scene
@@ -96,7 +97,27 @@ pub fn load_scenes() -> Nameless {
                     )));
             }
 
-            if properties.contains("\"physics\":\"cuboid\"") {}
+            if properties.contains("\"instance\":\"cuboid\"") {
+                does_not_have_required_physics = true;
+                scene.render_objects.push(RenderObject::Cuboid {
+                    body_index: scene.bodies.len() + 1,
+                    colour,
+                }); // +1 accounts for player.
+            }
+
+            if properties.contains("\"physics\":\"cuboid\"") {
+                if !does_not_have_required_physics {
+                    panic!(
+                        "Node '{}', has physics, when the instance type does not require it!",
+                        node.name().unwrap_or("NAMELESS")
+                    );
+                }
+                does_not_have_required_physics = false;
+                scene.bodies.push(CommonBody::Cuboid(Cuboid {
+                    particle: Particle::from_position(transform_decomposed.0),
+                    half_size: mul_3d_by_1d(transform_decomposed.2, 0.5),
+                }));
+            }
             if properties.contains("\"physics\":\"immovable cuboid\"") {
                 scene
                     .bodies
@@ -110,9 +131,22 @@ pub fn load_scenes() -> Nameless {
 
             if does_not_have_required_physics {
                 panic!(
-                    "Node '{}', does not have physics, when the instance type requires them!",
+                    "Node '{}', does not have physics, when the instance type requires it!",
                     node.name().unwrap_or("NAMELESS")
                 );
+            }
+
+            if properties.contains("\"special\":\"grow zone\"") {
+                scene.grow_zones.push(AabbMinMax {
+                    min: sub_3d(
+                        transform_decomposed.0,
+                        mul_3d_by_1d(transform_decomposed.2, 0.5),
+                    ),
+                    max: add_3d(
+                        transform_decomposed.0,
+                        mul_3d_by_1d(transform_decomposed.2, 0.5),
+                    ),
+                });
             }
         }
         scene.render_objects.shrink_to_fit();

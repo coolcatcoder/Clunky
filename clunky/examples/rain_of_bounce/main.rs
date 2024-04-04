@@ -8,7 +8,8 @@ use clunky::{
     math::{self, Matrix4, Radians},
     meshes,
     physics::physics_3d::{
-        bodies::{Body, CommonBody},
+        aabb::{AabbCentredOrigin, AabbMinMax},
+        bodies::{Body, CommonBody, CollisionRecorderCuboid},
         solver::{CpuSolver, OutsideOfGridBoundsBehaviour},
         verlet::{
             bodies::{Cuboid, Player},
@@ -379,7 +380,7 @@ impl Rain {
             rng: thread_rng(),
             stage: Stage::Calm(0),
             drop_indices: Vec::with_capacity(MAX_RAINDROPS),
-            
+
             stage_ticker: FixedUpdate::new(1.0, MaxSubsteps::Infinite),
             basic_drop: FixedUpdate::new(0.1_f32, MaxSubsteps::ReturnAt(10)),
         }
@@ -398,28 +399,21 @@ impl Rain {
             }
         }
 
-        self.stage_ticker.update(|| {
-            match &mut self.stage {
-                Stage::Calm(seconds) => {
-                    *seconds += 1
-                }
-                Stage::LargeChunks(seconds) => {
-                    *seconds += 1
-                }
-                Stage::FineRain(seconds) => {
-                    *seconds += 1
-                }
-                Stage::Todo(seconds) => {
-                    *seconds += 1
-                }
-            }
+        self.stage_ticker.update(|| match &mut self.stage {
+            Stage::Calm(seconds) => *seconds += 1,
+            Stage::LargeChunks(seconds) => *seconds += 1,
+            Stage::FineRain(seconds) => *seconds += 1,
+            Stage::Todo(seconds) => *seconds += 1,
         });
 
         self.basic_drop.update(|| {
             if let Stage::FineRain(_) = self.stage {
                 for _ in 0..30 {
                     self.drop_indices
-                        .push_within_capacity((game.physics.bodies.len(), game.objects_to_render.len()))
+                        .push_within_capacity((
+                            game.physics.bodies.len(),
+                            game.objects_to_render.len(),
+                        ))
                         .unwrap();
                     game.objects_to_render.push(RenderObject::Cuboid {
                         body_index: game.physics.bodies.len(),
@@ -448,7 +442,13 @@ impl Rain {
     }
 }
 
+struct PlantGrower {
+    grow_zones: Vec<AabbMinMax<f32>>,
+    new_plant_ticker: FixedUpdate<f32>,
+}
+
 struct Game {
+    rng: ThreadRng,
     mouse_sensitivity: f32,
     wasd_held: [bool; 4],
     jump_held: bool,
@@ -457,6 +457,7 @@ struct Game {
     camera: Camera,
     physics: CpuSolver<f32, CommonBody<f32>>,
     objects_to_render: Vec<gltf::RenderObject>,
+    plant_grower: PlantGrower,
 
     cuboid_buffers: ColourBuffers,
 }
@@ -468,10 +469,41 @@ impl Game {
         };
         player
     }
+
+    fn tick_plant_grower(&mut self) {
+        self.plant_grower.new_plant_ticker.update(|| {
+            println!("tick");
+            let index = self.rng.gen_range(0..self.plant_grower.grow_zones.len());
+            let grow_zone = &self.plant_grower.grow_zones[index];
+            let position = [
+                self.rng.gen_range(grow_zone.min[0]..grow_zone.max[0]),
+                self.rng.gen_range(grow_zone.min[1]..grow_zone.max[1]),
+                self.rng.gen_range(grow_zone.min[2]..grow_zone.max[2]),
+            ];
+
+            self.objects_to_render.push(RenderObject::Cuboid {
+                body_index: self.physics.bodies.len(),
+                colour: [0.0, 1.0, 0.0, 1.0],
+            });
+
+            // Rather just have 1 collision recorder for the player
+            self.physics
+                .bodies
+                .push(CommonBody::CollisionRecorderCuboid(CollisionRecorderCuboid {
+                    aabb: AabbCentredOrigin {
+                        position,
+                        half_size: [0.5; 3],
+                    },
+                    save_collision: |_body| {true},
+                    stored_collider_index: None,
+                }));
+        });
+    }
 }
 
 fn create_game(memory_allocator: &Arc<StandardMemoryAllocator>) -> Game {
     let mut game = Game {
+        rng: thread_rng(),
         mouse_sensitivity: 1.0,
         wasd_held: [false; 4],
         jump_held: false,
@@ -501,6 +533,10 @@ fn create_game(memory_allocator: &Arc<StandardMemoryAllocator>) -> Game {
             Vec::with_capacity(INITIAL_BODY_CAPACITY),
         ),
         objects_to_render: Vec::with_capacity(INITIAL_BODY_CAPACITY),
+        plant_grower: PlantGrower {
+            grow_zones: vec![],
+            new_plant_ticker: FixedUpdate::new(3.0, MaxSubsteps::Infinite),
+        },
         cuboid_buffers: ColourBuffers {
             vertex_buffer: Buffer::from_iter(
                 memory_allocator.clone(),
@@ -550,6 +586,8 @@ fn create_game(memory_allocator: &Arc<StandardMemoryAllocator>) -> Game {
     game.objects_to_render = world.render_objects.drain(..).collect();
 
     game.physics.bodies.append(&mut world.bodies);
+
+    game.plant_grower.grow_zones = world.grow_zones.clone();
 
     game
 }
@@ -627,6 +665,7 @@ fn fixed_update(game: &mut Game) {
 
 fn update(game: &mut Game, rain: &mut Rain) {
     rain.run(game);
+    game.tick_plant_grower();
 
     game.cuboid_buffers.instance_buffer.clear();
 

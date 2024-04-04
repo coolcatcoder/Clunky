@@ -1,5 +1,6 @@
 use std::{
     mem::MaybeUninit,
+    num::NonZeroU8,
     sync::mpsc::{channel, Sender},
 };
 
@@ -10,6 +11,12 @@ use super::bodies::Body;
 use rayon::prelude::*;
 
 extern crate test;
+
+// TODO: add Steps struct to solver.
+pub struct Steps {
+    pub particle_updates: NonZeroU8,
+    pub penetration_removals: NonZeroU8,
+}
 
 /// A generic solver capable of handling most basic physics simulations.
 pub struct CpuSolver<T, B>
