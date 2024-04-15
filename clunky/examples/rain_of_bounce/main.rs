@@ -1,6 +1,6 @@
 #![feature(vec_push_within_capacity)]
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 
 use clunky::{
     buffer_contents::{self, Colour3DInstance},
@@ -9,7 +9,7 @@ use clunky::{
     meshes,
     physics::physics_3d::{
         aabb::{AabbCentredOrigin, AabbMinMax},
-        bodies::{Body, CommonBody, CollisionRecorderCuboid},
+        bodies::{Body, CollisionRecorderCuboid, CommonBody},
         solver::{CpuSolver, OutsideOfGridBoundsBehaviour},
         verlet::{
             bodies::{Cuboid, Player},
@@ -54,6 +54,7 @@ use winit::{
 
 use vulkano::sync::GpuFuture;
 
+mod engine;
 mod gltf;
 
 // Small secret... I have no idea how the grid in my physics engine works.
@@ -447,17 +448,36 @@ struct PlantGrower {
     new_plant_ticker: FixedUpdate<f32>,
 }
 
+struct DayNightCycle {
+    start: Option<Instant>,
+    level: usize,
+}
+
+struct TitleMenu {}
+
+struct CreatureSelectionMenu {}
+
+enum Menu {
+    Title(TitleMenu),
+    CreatureSelection(CreatureSelectionMenu),
+}
+
 struct Game {
     rng: ThreadRng,
+
     mouse_sensitivity: f32,
     wasd_held: [bool; 4],
     jump_held: bool,
     sprinting: bool,
     paused: bool,
     camera: Camera,
+
     physics: CpuSolver<f32, CommonBody<f32>>,
     objects_to_render: Vec<gltf::RenderObject>,
+
     plant_grower: PlantGrower,
+
+    day_night_cycle: DayNightCycle,
 
     cuboid_buffers: ColourBuffers,
 }
@@ -489,14 +509,16 @@ impl Game {
             // Rather just have 1 collision recorder for the player
             self.physics
                 .bodies
-                .push(CommonBody::CollisionRecorderCuboid(CollisionRecorderCuboid {
-                    aabb: AabbCentredOrigin {
-                        position,
-                        half_size: [0.5; 3],
+                .push(CommonBody::CollisionRecorderCuboid(
+                    CollisionRecorderCuboid {
+                        aabb: AabbCentredOrigin {
+                            position,
+                            half_size: [0.5; 3],
+                        },
+                        save_collision: |_body| true,
+                        stored_collider_index: None,
                     },
-                    save_collision: |_body| {true},
-                    stored_collider_index: None,
-                }));
+                ));
         });
     }
 }
@@ -504,6 +526,7 @@ impl Game {
 fn create_game(memory_allocator: &Arc<StandardMemoryAllocator>) -> Game {
     let mut game = Game {
         rng: thread_rng(),
+
         mouse_sensitivity: 1.0,
         wasd_held: [false; 4],
         jump_held: false,
@@ -523,6 +546,7 @@ fn create_game(memory_allocator: &Arc<StandardMemoryAllocator>) -> Game {
             aspect_ratio: 0.0,
             fov_y: Radians(std::f32::consts::FRAC_PI_2),
         },
+
         physics: CpuSolver::new(
             [0.0, 50.0, 0.0],
             [0.8, 1.0, 0.8],
@@ -533,10 +557,16 @@ fn create_game(memory_allocator: &Arc<StandardMemoryAllocator>) -> Game {
             Vec::with_capacity(INITIAL_BODY_CAPACITY),
         ),
         objects_to_render: Vec::with_capacity(INITIAL_BODY_CAPACITY),
+
         plant_grower: PlantGrower {
             grow_zones: vec![],
             new_plant_ticker: FixedUpdate::new(3.0, MaxSubsteps::Infinite),
         },
+        day_night_cycle: DayNightCycle {
+            start: None,
+            level: 0,
+        },
+
         cuboid_buffers: ColourBuffers {
             vertex_buffer: Buffer::from_iter(
                 memory_allocator.clone(),
