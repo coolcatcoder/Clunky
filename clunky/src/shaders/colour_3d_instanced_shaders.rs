@@ -154,3 +154,22 @@ impl Camera {
         }
     }
 }
+
+impl Default for Camera {
+    fn default() -> Self {
+        Self {
+            position: [0.0; 3],
+            rotation: [0.0; 3],
+
+            ambient_strength: 0.3,
+            specular_strength: 0.5,
+            light_colour: [0.5; 3],
+            light_position: [0.0, -10.0, 0.0],
+
+            near_distance: 0.01,
+            far_distance: 250.0,
+            aspect_ratio: 0.0,
+            fov_y: Radians(std::f32::consts::FRAC_PI_2),
+        }
+    }
+}

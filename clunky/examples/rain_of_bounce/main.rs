@@ -1,3 +1,79 @@
+use common_renderer::CommonRenderer;
+use engine::SimpleEngine;
+use winit::{
+    event::{DeviceEvent, Event, WindowEvent},
+    event_loop::ControlFlow,
+};
+
+mod common_renderer;
+mod engine;
+
+fn main() {
+    let config = engine::Config::<CommonRenderer> {
+        //experimental_draw_calls: draw_calls{},
+        ..Default::default()
+    };
+
+    SimpleEngine::init(config, move |event, _, control_flow, engine| match event {
+        Event::MainEventsCleared => {
+            //fixed_update_runner.update(|| fixed_update(&mut game));
+
+            //update(&mut game, &mut rain);
+
+            //fps_tracker.update();
+            //println!("{}", fps_tracker.average_fps());
+        }
+
+        Event::WindowEvent {
+            event: WindowEvent::KeyboardInput { input, .. },
+            ..
+        } => {
+            // on_keyboard_input(
+            //     input,
+            //     control_flow,
+            //     &fps_tracker,
+            //     &mut windows_manager.get_primary_renderer_mut().unwrap(),
+            //     &mut game,
+            // );
+        }
+
+        Event::DeviceEvent {
+            event: DeviceEvent::Motion { axis, value },
+            ..
+        } => {
+            // let window_renderer = windows_manager.get_primary_renderer_mut().unwrap();
+            // if game.paused || !window_renderer.window().has_focus() {
+            //     return;
+            // }
+
+            // match axis {
+            //     0 => game.camera.rotation[1] -= value as f32 * game.mouse_sensitivity,
+            //     1 => game.camera.rotation[0] -= value as f32 * game.mouse_sensitivity,
+            //     _ => (),
+            // }
+
+            // let window_extent = window_renderer.window_size();
+
+            // window_renderer
+            //     .window()
+            //     .set_cursor_position(PhysicalPosition::new(
+            //         window_extent[0] / 2.0,
+            //         window_extent[1] / 2.0,
+            //     ))
+            //     .unwrap();
+            // window_renderer.window().set_cursor_visible(false);
+        }
+
+        Event::DeviceEvent {
+            event: DeviceEvent::MouseWheel { delta: _ },
+            ..
+        } => {}
+
+        _ => (),
+    });
+}
+
+/*
 #![feature(vec_push_within_capacity)]
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use std::{sync::Arc, time::Instant};
@@ -10,7 +86,7 @@ use clunky::{
     physics::physics_3d::{
         aabb::{AabbCentredOrigin, AabbMinMax},
         bodies::{Body, CollisionRecorderCuboid, CommonBody},
-        solver::{CpuSolver, OutsideOfGridBoundsBehaviour},
+        solver::{self, CpuSolver, OutsideOfGridBoundsBehaviour},
         verlet::{
             bodies::{Cuboid, Player},
             Particle,
@@ -548,13 +624,15 @@ fn create_game(memory_allocator: &Arc<StandardMemoryAllocator>) -> Game {
         },
 
         physics: CpuSolver::new(
-            [0.0, 50.0, 0.0],
-            [0.8, 1.0, 0.8],
-            COLLISION_GRID_SIZE,
-            COLLISION_GRID_ORIGIN,
-            COLLISION_GRID_CELL_SIZE,
-            OutsideOfGridBoundsBehaviour::ContinueUpdating, // TODO: replace with none instead
-            Vec::with_capacity(INITIAL_BODY_CAPACITY),
+            solver::Config{
+                gravity: [0.0, 50.0, 0.0],
+                dampening: [0.8, 1.0, 0.8],
+                grid_size: COLLISION_GRID_SIZE,
+                grid_origin: COLLISION_GRID_ORIGIN,
+                cell_size: COLLISION_GRID_CELL_SIZE,
+                outside_of_grid_bounds_behaviour: OutsideOfGridBoundsBehaviour::ContinueUpdating, // TODO: replace with none instead
+                bodies: Vec::with_capacity(INITIAL_BODY_CAPACITY),
+            },
         ),
         objects_to_render: Vec::with_capacity(INITIAL_BODY_CAPACITY),
 
@@ -814,3 +892,4 @@ fn on_keyboard_input(
         }
     }
 }
+*/

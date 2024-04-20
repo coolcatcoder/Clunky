@@ -12,6 +12,37 @@ use rayon::prelude::*;
 
 extern crate test;
 
+pub struct Config<T, B>
+where
+    T: math::Float,
+    B: Body<T>,
+{
+    pub gravity: [T; 3],
+    pub dampening: [T; 3],
+    pub grid_size: [usize; 3],
+    pub grid_origin: [T; 3],
+    pub cell_size: [usize; 3],
+    pub outside_of_grid_bounds_behaviour: OutsideOfGridBoundsBehaviour<T, B>,
+    pub bodies: Vec<B>,
+}
+
+impl<B> Default for Config<f32, B>
+where
+    B: Body<f32>,
+{
+    fn default() -> Self {
+        Self {
+            gravity: [0.0, 50.0, 0.0],
+            dampening: [0.8, 1.0, 0.8],
+            grid_size: [10; 3],
+            grid_origin: [0.0; 3],
+            cell_size: [5; 3],
+            outside_of_grid_bounds_behaviour: OutsideOfGridBoundsBehaviour::ContinueUpdating,
+            bodies: vec![],
+        }
+    }
+}
+
 // TODO: add Steps struct to solver.
 pub struct Steps {
     pub particle_updates: NonZeroU8,
@@ -39,24 +70,16 @@ where
     T: math::Float,
     B: Body<T>,
 {
-    pub fn new(
-        gravity: [T; 3],
-        dampening: [T; 3],
-        grid_size: [usize; 3],
-        grid_origin: [T; 3],
-        cell_size: [usize; 3],
-        outside_of_grid_bounds_behaviour: OutsideOfGridBoundsBehaviour<T, B>,
-        bodies: Vec<B>,
-    ) -> CpuSolver<T, B> {
+    pub fn new(config: Config<T, B>) -> CpuSolver<T, B> {
         CpuSolver {
-            gravity,
-            dampening,
-            bodies,
-            grid_size,
-            cell_size,
-            grid_origin,
-            grid: vec![vec![]; grid_size[0] * grid_size[1] * grid_size[2]],
-            outside_of_grid_bounds_behaviour,
+            gravity: config.gravity,
+            dampening: config.dampening,
+            bodies: config.bodies,
+            grid_size: config.grid_size,
+            cell_size: config.cell_size,
+            grid_origin: config.grid_origin,
+            grid: vec![vec![]; config.grid_size[0] * config.grid_size[1] * config.grid_size[2]],
+            outside_of_grid_bounds_behaviour: config.outside_of_grid_bounds_behaviour,
         }
     }
 
@@ -815,15 +838,15 @@ mod tests {
                 .unwrap();
         }
 
-        CpuSolver::new(
-            [T::ZERO, gravity, T::ZERO],
-            [T::from_f64(0.8), T::ONE, T::from_f64(0.8)],
-            [10, 10, 10],
-            [T::from_f64(-50.0), T::from_f64(-50.0), T::from_f64(-50.0)],
-            [10, 10, 10],
-            OutsideOfGridBoundsBehaviour::ContinueUpdating,
-            verlet_bodies,
-        )
+        CpuSolver::new(Config {
+            gravity: [T::ZERO, gravity, T::ZERO],
+            dampening: [T::from_f64(0.8), T::ONE, T::from_f64(0.8)],
+            grid_size: [10, 10, 10],
+            grid_origin: [T::from_f64(-50.0), T::from_f64(-50.0), T::from_f64(-50.0)],
+            cell_size: [10, 10, 10],
+            outside_of_grid_bounds_behaviour: OutsideOfGridBoundsBehaviour::ContinueUpdating,
+            bodies: verlet_bodies,
+        })
     }
 
     // (10,22), (1000,2_468), (5000,12_518), (10_000,28_238), (20_000,54_449), (50_000,171_110), (100_000,672_048)
@@ -868,15 +891,15 @@ mod tests {
             verlet_bodies.push(CommonBody::None);
         }
 
-        let mut solver = CpuSolver::new(
-            [0.0, 50.0, 0.0],
-            [0.8, 1.0, 0.8],
-            [10, 10, 10],
-            [-50.0, -50.0, -50.0],
-            [10, 10, 10],
-            OutsideOfGridBoundsBehaviour::ContinueUpdating,
-            verlet_bodies,
-        );
+        let mut solver = CpuSolver::new(Config {
+            gravity: [0.0, 50.0, 0.0],
+            dampening: [0.8, 1.0, 0.8],
+            grid_size: [10, 10, 10],
+            grid_origin: [-50.0, -50.0, -50.0],
+            cell_size: [10, 10, 10],
+            outside_of_grid_bounds_behaviour: OutsideOfGridBoundsBehaviour::ContinueUpdating,
+            bodies: verlet_bodies,
+        });
         b.iter(|| {
             solver.update(0.04);
         })

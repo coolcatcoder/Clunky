@@ -20,7 +20,7 @@ pub fn is_pressed(state: ElementState) -> bool {
 /// Calls a function every fixed_delta_time seconds.
 pub struct FixedUpdate<T: Float> {
     fixed_time_passed: T,
-    fixed_delta_time: T,
+    pub fixed_delta_time: T,
     starting_time: Instant,
     max_substeps: MaxSubsteps,
 }

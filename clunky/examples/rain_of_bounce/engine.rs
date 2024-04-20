@@ -2,17 +2,21 @@ use std::sync::{mpsc::channel, Arc};
 
 use clunky::{
     buffer_contents::{self, Colour3DInstance},
+    lost_code::{FixedUpdate, MaxSubsteps},
     math::Matrix4,
     physics::physics_3d::{
         bodies::{Body, CommonBody},
-        solver::CpuSolver,
+        solver::{self, CpuSolver},
     },
     rendering::draw_instanced,
-    shaders::colour_3d_instanced_shaders::Camera,
+    shaders::colour_3d_instanced_shaders::{self, Camera},
 };
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use vulkano::{
-    buffer::{allocator::SubbufferAllocator, Subbuffer},
+    buffer::{
+        allocator::{SubbufferAllocator, SubbufferAllocatorCreateInfo},
+        BufferContents, BufferUsage, Subbuffer,
+    },
     command_buffer::{
         allocator::StandardCommandBufferAllocator, AutoCommandBufferBuilder, CommandBufferUsage,
         RenderPassBeginInfo,
@@ -20,14 +24,24 @@ use vulkano::{
     descriptor_set::{
         allocator::StandardDescriptorSetAllocator, PersistentDescriptorSet, WriteDescriptorSet,
     },
+    device::Device,
     format::{ClearValue, Format},
     image::{view::ImageView, Image, ImageCreateInfo, ImageType, ImageUsage},
-    memory::allocator::AllocationCreateInfo,
+    memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator},
     pipeline::{graphics::viewport::Viewport, GraphicsPipeline, Pipeline, PipelineBindPoint},
-    render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass},
+    render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass, Subpass},
     sync::GpuFuture,
 };
-use vulkano_util::{context::VulkanoContext, renderer::VulkanoWindowRenderer};
+use vulkano_util::{
+    context::{VulkanoConfig, VulkanoContext},
+    renderer::VulkanoWindowRenderer,
+    window::VulkanoWindows,
+};
+use winit::{
+    event::{Event, WindowEvent},
+    event_loop::{ControlFlow, EventLoop, EventLoopWindowTarget},
+    window::WindowId,
+};
 
 /*
 pub struct interesting {
@@ -39,181 +53,203 @@ pub struct interesting {
 }
 */
 
+/// A necessary evil, so that we avoid recursive generics in ExperimentalDrawCalls.
+pub struct AccessibleToRenderer {
+    pub context: VulkanoContext,
+    pub render_pass: Arc<RenderPass>,
+    pub allocators: Allocators,
+
+    pub viewport: Viewport,
+    pub windows_manager: VulkanoWindows,
+}
+
 /// This is designed for this game, and this game only. I'm hopeful I'll find a way to make it generic oneday.
-pub struct SimpleEngine {
+pub struct SimpleEngine<R: Renderer> {
+    // Camera should be a generic, based on a trait that allows conversion to some universal properties thing, that we can send to any shader.
     pub camera: Camera,
 
     pub physics: CpuSolver<f32, CommonBody<f32>>,
-    pub render_objects: Vec<RenderObject>,
+    // If option is None then you cannot access fixed update.
+    // This is required to avoid potential double mutability.
+    physics_fixed_update: Option<FixedUpdate<f64>>,
+    on_physics_fixed_update: fn(&mut SimpleEngine<R>),
 
-    buffers: Buffers,
-    allocators: Allocators,
+    experimental_draw_calls: R,
+
+    accessible_while_drawing: AccessibleToRenderer,
 }
 
-impl SimpleEngine {
-    pub fn update_and_render(&mut self, window_renderer: &mut VulkanoWindowRenderer) {
-        let (cuboid_sender, cuboid_receiver) = channel();
+pub struct Config<R: Renderer> {
+    pub starting_camera: Camera,
 
-        self.render_objects
-            .par_iter()
-            .for_each(|render_object| match render_object {
-                RenderObject::None => (),
-                RenderObject::Cuboid { body_index, colour } => {
-                    let body = &self.physics.bodies[*body_index];
-                    cuboid_sender
-                        .send(Colour3DInstance::new(
-                            *colour,
-                            Matrix4::from_translation(body.position_unchecked())
-                                * Matrix4::from_scale(body.size().unwrap()),
-                        ))
-                        .unwrap();
+    pub physics_config: solver::Config<f32, CommonBody<f32>>,
+    pub physics_fixed_update: FixedUpdate<f64>,
+    pub on_physics_fixed_update: fn(&mut SimpleEngine<R>),
+}
+
+impl<R: Renderer> Default for Config<R> {
+    fn default() -> Self {
+        Self {
+            starting_camera: Default::default(),
+
+            physics_config: Default::default(),
+            physics_fixed_update: FixedUpdate::new(0.035, MaxSubsteps::WarnAt(85)),
+            on_physics_fixed_update: |_| {},
+        }
+    }
+}
+
+impl<R: Renderer + 'static> SimpleEngine<R> {
+    pub fn init<F>(config: Config<R>, mut event_handler: F)
+    where
+        F: 'static
+            + FnMut(Event<'_, ()>, &EventLoopWindowTarget<()>, &mut ControlFlow, &mut SimpleEngine<R>),
+    {
+        let event_loop = EventLoop::new();
+        let mut engine = {
+            let context = VulkanoContext::new(VulkanoConfig::default());
+            let mut windows_manager = VulkanoWindows::default();
+            windows_manager.create_window(&event_loop, &context, &Default::default(), |_| {});
+
+            let render_pass = vulkano::single_pass_renderpass!(
+                context.device().clone(),
+                attachments: {
+                    color: {
+                        format: windows_manager.get_primary_renderer().unwrap().swapchain_format(),
+                        samples: 1,
+                        load_op: Clear,
+                        store_op: Store,
+                    },
+                    depth: {
+                        format: Format::D32_SFLOAT,
+                        samples: 1,
+                        load_op: Clear,
+                        store_op: Store,
+                    }
+                },
+                pass: {
+                    color: [color],
+                    depth_stencil: {depth},
+                },
+            )
+            .unwrap();
+
+            let allocators = Allocators::new(context.device(), context.memory_allocator());
+
+            let mut viewport = Viewport {
+                offset: [0.0, 0.0],
+                extent: [0.0, 0.0],
+                depth_range: 0.0..=1.0,
+            };
+
+            let mut accessible_while_drawing = AccessibleToRenderer {
+                context,
+                render_pass,
+                allocators,
+
+                viewport,
+                windows_manager,
+            };
+
+            Self {
+                camera: config.starting_camera,
+
+                physics: CpuSolver::new(config.physics_config),
+                physics_fixed_update: Some(config.physics_fixed_update),
+                on_physics_fixed_update: config.on_physics_fixed_update,
+
+                experimental_draw_calls: R::new(&mut accessible_while_drawing),
+
+                accessible_while_drawing,
+            }
+        };
+
+        event_loop.run(move |event, target, control_flow| {
+            match event {
+                Event::WindowEvent {
+                    event: WindowEvent::CloseRequested,
+                    ..
+                } => {
+                    *control_flow = ControlFlow::Exit;
                 }
-                RenderObject::CuboidNoPhysics(instance) => {
-                    cuboid_sender.send(*instance).unwrap();
+
+                Event::WindowEvent {
+                    event: WindowEvent::Resized(..) | WindowEvent::ScaleFactorChanged { .. },
+                    window_id,
+                } => {
+                    engine.correct_window_size(window_id);
                 }
-            });
 
-        drop(cuboid_sender);
+                Event::MainEventsCleared => {
+                    let mut physics_fixed_update = engine.physics_fixed_update.take().unwrap();
+                    physics_fixed_update.update(|| {
+                        (engine.on_physics_fixed_update)(&mut engine);
+                        engine.physics.update(todo!());
+                    });
+                    engine.physics_fixed_update = Some(physics_fixed_update);
 
-        self.buffers.cuboid.instance_buffer.extend(cuboid_receiver);
+                    event_handler(event, target, control_flow, &mut engine);
+
+                    engine
+                        .experimental_draw_calls
+                        .render(&mut engine.accessible_while_drawing);
+
+                    return;
+                }
+
+                _ => (),
+            }
+
+            event_handler(event, target, control_flow, &mut engine);
+        })
     }
 
-    fn render_to_window(
-        &self,
-        window_renderer: &mut VulkanoWindowRenderer,
-        context: &VulkanoContext,
-        render_pass: &Arc<RenderPass>,
-        viewport: &Viewport,
-        pipelines: &Pipelines,
-    ) {
-        let future = window_renderer.acquire().unwrap();
+    fn correct_window_size(&mut self, window_id: WindowId) {
+        let window_renderer = self
+            .accessible_while_drawing
+            .windows_manager
+            .get_renderer_mut(window_id)
+            .unwrap();
+        window_renderer.resize();
+        //TODO Really suspicious:
+        self.accessible_while_drawing.viewport.extent = window_renderer.window_size();
+        self.camera.aspect_ratio = window_renderer.aspect_ratio();
+    }
+}
 
-        let mut command_buffer_builder = AutoCommandBufferBuilder::primary(
-            &self.allocators.command_buffer_allocator,
-            context.graphics_queue().queue_family_index(),
-            CommandBufferUsage::OneTimeSubmit,
-        )
-        .unwrap();
+pub trait Renderer {
+    fn new(accessible_to_renderer: &mut AccessibleToRenderer) -> Self;
+    fn render(&mut self, accessible_to_renderer: &mut AccessibleToRenderer);
+}
 
-        // Creating a depth buffer and a frame buffer every frame is very very bad. Not avoidable until next vulkano version.
+pub struct Allocators {
+    pub command_buffer_allocator: StandardCommandBufferAllocator,
+    pub subbuffer_allocator: SubbufferAllocator,
+    pub descriptor_set_allocator: StandardDescriptorSetAllocator,
+}
 
-        let depth_buffer_view = ImageView::new_default(
-            Image::new(
-                context.memory_allocator().clone(),
-                ImageCreateInfo {
-                    image_type: ImageType::Dim2d,
-                    format: Format::D32_SFLOAT,
-                    extent: window_renderer.swapchain_image_view().image().extent(),
-                    usage: ImageUsage::TRANSIENT_ATTACHMENT | ImageUsage::DEPTH_STENCIL_ATTACHMENT,
+impl Allocators {
+    fn new(device: &Arc<Device>, memory_allocator: &Arc<StandardMemoryAllocator>) -> Self {
+        Self {
+            command_buffer_allocator: StandardCommandBufferAllocator::new(
+                device.clone(),
+                Default::default(),
+            ),
+            subbuffer_allocator: SubbufferAllocator::new(
+                memory_allocator.clone(),
+                SubbufferAllocatorCreateInfo {
+                    buffer_usage: BufferUsage::UNIFORM_BUFFER
+                        | BufferUsage::VERTEX_BUFFER
+                        | BufferUsage::INDEX_BUFFER,
+                    memory_type_filter: MemoryTypeFilter::PREFER_DEVICE
+                        | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
                     ..Default::default()
                 },
-                AllocationCreateInfo::default(),
-            )
-            .unwrap(),
-        )
-        .unwrap();
-
-        let framebuffer = Framebuffer::new(
-            render_pass.clone(),
-            FramebufferCreateInfo {
-                attachments: vec![window_renderer.swapchain_image_view(), depth_buffer_view],
-                ..Default::default()
-            },
-        )
-        .unwrap();
-
-        let camera_uniform = self
-            .allocators
-            .subbuffer_allocator
-            .allocate_sized()
-            .unwrap();
-        *camera_uniform.write().unwrap() = self.camera.to_uniform();
-
-        command_buffer_builder
-            .begin_render_pass(
-                RenderPassBeginInfo {
-                    clear_values: vec![
-                        // Sets background colour.
-                        Some([0.0, 0.0, 1.0, 1.0].into()),
-                        Some(ClearValue::Depth(1.0)),
-                    ],
-                    ..RenderPassBeginInfo::framebuffer(framebuffer)
-                },
+            ),
+            descriptor_set_allocator: StandardDescriptorSetAllocator::new(
+                device.clone(),
                 Default::default(),
-            )
-            .unwrap()
-            .set_viewport(0, [viewport.clone()].into_iter().collect())
-            .unwrap()
-            .bind_pipeline_graphics(pipelines.colour_pipeline.clone())
-            .unwrap()
-            .bind_descriptor_sets(
-                PipelineBindPoint::Graphics,
-                pipelines.colour_pipeline.layout().clone(),
-                0,
-                vec![PersistentDescriptorSet::new(
-                    &self.allocators.descriptor_set_allocator,
-                    pipelines
-                        .colour_pipeline
-                        .layout()
-                        .set_layouts()
-                        .get(0)
-                        .unwrap()
-                        .clone(),
-                    [WriteDescriptorSet::buffer(0, camera_uniform)],
-                    [],
-                )
-                .unwrap()],
-            )
-            .unwrap();
-
-        // Yuck. Make this a simple function that takes only a command buffer builder, and a subbuffer_allocator, or perhaps the other way round. Impl is your friend
-        draw_instanced(
-            &mut command_buffer_builder,
-            &self.buffers.cuboid.instance_buffer,
-            &self.buffers.cuboid.vertex_buffer,
-            &self.buffers.cuboid.index_buffer,
-            &self.allocators.subbuffer_allocator,
-        );
-
-        command_buffer_builder
-            .end_render_pass(Default::default())
-            .unwrap();
-
-        let command_buffer = command_buffer_builder.build().unwrap();
-
-        window_renderer.present(
-            future
-                .then_execute(context.graphics_queue().clone(), command_buffer)
-                .unwrap()
-                .boxed(),
-            false,
-        );
+            ),
+        }
     }
-}
-
-pub enum RenderObject {
-    None,
-    Cuboid { body_index: usize, colour: [f32; 4] },
-    CuboidNoPhysics(Colour3DInstance),
-}
-
-struct Buffers {
-    cuboid: ColourBuffers,
-    spheroid: ColourBuffers,
-}
-
-struct ColourBuffers {
-    vertex_buffer: Subbuffer<[buffer_contents::Basic3DVertex]>,
-    index_buffer: Subbuffer<[u32]>,
-    instance_buffer: Vec<buffer_contents::Colour3DInstance>,
-}
-
-struct Allocators {
-    command_buffer_allocator: StandardCommandBufferAllocator,
-    subbuffer_allocator: SubbufferAllocator,
-    descriptor_set_allocator: StandardDescriptorSetAllocator,
-}
-
-struct Pipelines {
-    colour_pipeline: Arc<GraphicsPipeline>,
 }
