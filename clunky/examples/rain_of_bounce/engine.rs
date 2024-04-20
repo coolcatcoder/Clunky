@@ -1,40 +1,26 @@
-use std::sync::{mpsc::channel, Arc};
+use std::sync::Arc;
 
 use clunky::{
-    buffer_contents::{self, Colour3DInstance},
     lost_code::{FixedUpdate, MaxSubsteps},
-    math::Matrix4,
     physics::physics_3d::{
-        bodies::{Body, CommonBody},
+        bodies::CommonBody,
         solver::{self, CpuSolver},
     },
-    rendering::draw_instanced,
-    shaders::colour_3d_instanced_shaders::{self, Camera},
+    shaders::colour_3d_instanced_shaders::Camera,
 };
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use vulkano::{
     buffer::{
         allocator::{SubbufferAllocator, SubbufferAllocatorCreateInfo},
-        BufferContents, BufferUsage, Subbuffer,
+        BufferUsage,
     },
-    command_buffer::{
-        allocator::StandardCommandBufferAllocator, AutoCommandBufferBuilder, CommandBufferUsage,
-        RenderPassBeginInfo,
-    },
-    descriptor_set::{
-        allocator::StandardDescriptorSetAllocator, PersistentDescriptorSet, WriteDescriptorSet,
-    },
+    command_buffer::allocator::StandardCommandBufferAllocator,
+    descriptor_set::allocator::StandardDescriptorSetAllocator,
     device::Device,
-    format::{ClearValue, Format},
-    image::{view::ImageView, Image, ImageCreateInfo, ImageType, ImageUsage},
-    memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator},
-    pipeline::{graphics::viewport::Viewport, GraphicsPipeline, Pipeline, PipelineBindPoint},
-    render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass, Subpass},
-    sync::GpuFuture,
+    memory::allocator::{MemoryTypeFilter, StandardMemoryAllocator},
+    pipeline::graphics::viewport::Viewport,
 };
 use vulkano_util::{
     context::{VulkanoConfig, VulkanoContext},
-    renderer::VulkanoWindowRenderer,
     window::VulkanoWindows,
 };
 use winit::{
@@ -56,10 +42,8 @@ pub struct interesting {
 /// A necessary evil, so that we avoid recursive generics in ExperimentalDrawCalls.
 pub struct AccessibleToRenderer {
     pub context: VulkanoContext,
-    pub render_pass: Arc<RenderPass>,
     pub allocators: Allocators,
 
-    pub viewport: Viewport,
     pub windows_manager: VulkanoWindows,
 }
 
@@ -74,9 +58,9 @@ pub struct SimpleEngine<R: Renderer> {
     physics_fixed_update: Option<FixedUpdate<f64>>,
     on_physics_fixed_update: fn(&mut SimpleEngine<R>),
 
-    experimental_draw_calls: R,
+    renderer: R,
 
-    accessible_while_drawing: AccessibleToRenderer,
+    accessible_to_renderer: AccessibleToRenderer,
 }
 
 pub struct Config<R: Renderer> {
@@ -100,7 +84,7 @@ impl<R: Renderer> Default for Config<R> {
 }
 
 impl<R: Renderer + 'static> SimpleEngine<R> {
-    pub fn init<F>(config: Config<R>, mut event_handler: F)
+    pub fn init<F>(config: Config<R>, create_renderer: fn(&mut AccessibleToRenderer, &EventLoop<()>)->R, mut event_handler: F)
     where
         F: 'static
             + FnMut(Event<'_, ()>, &EventLoopWindowTarget<()>, &mut ControlFlow, &mut SimpleEngine<R>),
@@ -111,43 +95,12 @@ impl<R: Renderer + 'static> SimpleEngine<R> {
             let mut windows_manager = VulkanoWindows::default();
             windows_manager.create_window(&event_loop, &context, &Default::default(), |_| {});
 
-            let render_pass = vulkano::single_pass_renderpass!(
-                context.device().clone(),
-                attachments: {
-                    color: {
-                        format: windows_manager.get_primary_renderer().unwrap().swapchain_format(),
-                        samples: 1,
-                        load_op: Clear,
-                        store_op: Store,
-                    },
-                    depth: {
-                        format: Format::D32_SFLOAT,
-                        samples: 1,
-                        load_op: Clear,
-                        store_op: Store,
-                    }
-                },
-                pass: {
-                    color: [color],
-                    depth_stencil: {depth},
-                },
-            )
-            .unwrap();
-
             let allocators = Allocators::new(context.device(), context.memory_allocator());
 
-            let mut viewport = Viewport {
-                offset: [0.0, 0.0],
-                extent: [0.0, 0.0],
-                depth_range: 0.0..=1.0,
-            };
-
-            let mut accessible_while_drawing = AccessibleToRenderer {
+            let mut accessible_to_renderer = AccessibleToRenderer {
                 context,
-                render_pass,
                 allocators,
 
-                viewport,
                 windows_manager,
             };
 
@@ -158,9 +111,9 @@ impl<R: Renderer + 'static> SimpleEngine<R> {
                 physics_fixed_update: Some(config.physics_fixed_update),
                 on_physics_fixed_update: config.on_physics_fixed_update,
 
-                experimental_draw_calls: R::new(&mut accessible_while_drawing),
+                renderer: create_renderer(&mut accessible_to_renderer, &event_loop),
 
-                accessible_while_drawing,
+                accessible_to_renderer,
             }
         };
 
@@ -182,17 +135,18 @@ impl<R: Renderer + 'static> SimpleEngine<R> {
 
                 Event::MainEventsCleared => {
                     let mut physics_fixed_update = engine.physics_fixed_update.take().unwrap();
+                    let fixed_delta_time = physics_fixed_update.fixed_delta_time as f32;
                     physics_fixed_update.update(|| {
                         (engine.on_physics_fixed_update)(&mut engine);
-                        engine.physics.update(todo!());
+                        engine.physics.update(fixed_delta_time);
                     });
                     engine.physics_fixed_update = Some(physics_fixed_update);
 
                     event_handler(event, target, control_flow, &mut engine);
 
                     engine
-                        .experimental_draw_calls
-                        .render(&mut engine.accessible_while_drawing);
+                        .renderer
+                        .render(&mut engine.accessible_to_renderer);
 
                     return;
                 }
@@ -206,19 +160,18 @@ impl<R: Renderer + 'static> SimpleEngine<R> {
 
     fn correct_window_size(&mut self, window_id: WindowId) {
         let window_renderer = self
-            .accessible_while_drawing
+            .accessible_to_renderer
             .windows_manager
             .get_renderer_mut(window_id)
             .unwrap();
         window_renderer.resize();
         //TODO Really suspicious:
-        self.accessible_while_drawing.viewport.extent = window_renderer.window_size();
-        self.camera.aspect_ratio = window_renderer.aspect_ratio();
+        //self.accessible_while_drawing.viewport.extent = window_renderer.window_size();
+        //self.camera.aspect_ratio = window_renderer.aspect_ratio();
     }
 }
 
 pub trait Renderer {
-    fn new(accessible_to_renderer: &mut AccessibleToRenderer) -> Self;
     fn render(&mut self, accessible_to_renderer: &mut AccessibleToRenderer);
 }
 

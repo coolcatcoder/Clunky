@@ -1,76 +1,78 @@
 use common_renderer::CommonRenderer;
 use engine::SimpleEngine;
-use winit::{
-    event::{DeviceEvent, Event, WindowEvent},
-    event_loop::ControlFlow,
-};
+use winit::event::{DeviceEvent, Event, WindowEvent};
 
 mod common_renderer;
 mod engine;
 
 fn main() {
     let config = engine::Config::<CommonRenderer> {
-        //experimental_draw_calls: draw_calls{},
         ..Default::default()
     };
 
-    SimpleEngine::init(config, move |event, _, control_flow, engine| match event {
-        Event::MainEventsCleared => {
-            //fixed_update_runner.update(|| fixed_update(&mut game));
+    SimpleEngine::init(
+        config,
+        |accessible_to_renderer, event_loop| {
+            CommonRenderer::new(common_renderer::Config { ..Default::default() }, accessible_to_renderer, event_loop)
+        },
+        move |event, _, _control_flow, _engine| match event {
+            Event::MainEventsCleared => {
+                //fixed_update_runner.update(|| fixed_update(&mut game));
 
-            //update(&mut game, &mut rain);
+                //update(&mut game, &mut rain);
 
-            //fps_tracker.update();
-            //println!("{}", fps_tracker.average_fps());
-        }
+                //fps_tracker.update();
+                //println!("{}", fps_tracker.average_fps());
+            }
 
-        Event::WindowEvent {
-            event: WindowEvent::KeyboardInput { input, .. },
-            ..
-        } => {
-            // on_keyboard_input(
-            //     input,
-            //     control_flow,
-            //     &fps_tracker,
-            //     &mut windows_manager.get_primary_renderer_mut().unwrap(),
-            //     &mut game,
-            // );
-        }
+            Event::WindowEvent {
+                event: WindowEvent::KeyboardInput { input: _, .. },
+                ..
+            } => {
+                // on_keyboard_input(
+                //     input,
+                //     control_flow,
+                //     &fps_tracker,
+                //     &mut windows_manager.get_primary_renderer_mut().unwrap(),
+                //     &mut game,
+                // );
+            }
 
-        Event::DeviceEvent {
-            event: DeviceEvent::Motion { axis, value },
-            ..
-        } => {
-            // let window_renderer = windows_manager.get_primary_renderer_mut().unwrap();
-            // if game.paused || !window_renderer.window().has_focus() {
-            //     return;
-            // }
+            Event::DeviceEvent {
+                event: DeviceEvent::Motion { axis: _, value: _ },
+                ..
+            } => {
+                // let window_renderer = windows_manager.get_primary_renderer_mut().unwrap();
+                // if game.paused || !window_renderer.window().has_focus() {
+                //     return;
+                // }
 
-            // match axis {
-            //     0 => game.camera.rotation[1] -= value as f32 * game.mouse_sensitivity,
-            //     1 => game.camera.rotation[0] -= value as f32 * game.mouse_sensitivity,
-            //     _ => (),
-            // }
+                // match axis {
+                //     0 => game.camera.rotation[1] -= value as f32 * game.mouse_sensitivity,
+                //     1 => game.camera.rotation[0] -= value as f32 * game.mouse_sensitivity,
+                //     _ => (),
+                // }
 
-            // let window_extent = window_renderer.window_size();
+                // let window_extent = window_renderer.window_size();
 
-            // window_renderer
-            //     .window()
-            //     .set_cursor_position(PhysicalPosition::new(
-            //         window_extent[0] / 2.0,
-            //         window_extent[1] / 2.0,
-            //     ))
-            //     .unwrap();
-            // window_renderer.window().set_cursor_visible(false);
-        }
+                // window_renderer
+                //     .window()
+                //     .set_cursor_position(PhysicalPosition::new(
+                //         window_extent[0] / 2.0,
+                //         window_extent[1] / 2.0,
+                //     ))
+                //     .unwrap();
+                // window_renderer.window().set_cursor_visible(false);
+            }
 
-        Event::DeviceEvent {
-            event: DeviceEvent::MouseWheel { delta: _ },
-            ..
-        } => {}
+            Event::DeviceEvent {
+                event: DeviceEvent::MouseWheel { delta: _ },
+                ..
+            } => {}
 
-        _ => (),
-    });
+            _ => (),
+        },
+    );
 }
 
 /*

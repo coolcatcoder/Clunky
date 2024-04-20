@@ -482,7 +482,7 @@ where
             }
             (
                 CommonBody::Player(_),
-                CommonBody::CollisionRecorderCuboid(rhs_collision_recorder_cuboid),
+                CommonBody::CollisionRecorderCuboid(_rhs_collision_recorder_cuboid),
             ) => {
                 todo!();
                 //(rhs_collision_recorder_cuboid.on_collision)(colliding_bodies.1);
@@ -557,7 +557,7 @@ where
             }
             (
                 CommonBody::Cuboid(_),
-                CommonBody::CollisionRecorderCuboid(rhs_collision_recorder_cuboid),
+                CommonBody::CollisionRecorderCuboid(_rhs_collision_recorder_cuboid),
             ) => {
                 todo!();
                 //(rhs_collision_recorder_cuboid.on_collision)(colliding_bodies.1);
