@@ -1,4 +1,4 @@
-pub mod colour_3d_instanced_shaders;
+pub mod instanced_simple_lit_colour_3d;
 
 pub mod uv_3d_instanced_vertex_shader {
     vulkano_shaders::shader! {

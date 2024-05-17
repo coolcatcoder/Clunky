@@ -1,12 +1,8 @@
 use std::sync::Arc;
 
 use clunky::{
-    lost_code::{FixedUpdate, MaxSubsteps},
-    physics::physics_3d::{
-        bodies::CommonBody,
-        solver::{self, CpuSolver},
-    },
-    shaders::colour_3d_instanced_shaders::Camera,
+    lost_code::{FixedUpdate, FpsTracker, MaxSubsteps},
+    physics::PhysicsSimulation,
 };
 use vulkano::{
     buffer::{
@@ -17,7 +13,6 @@ use vulkano::{
     descriptor_set::allocator::StandardDescriptorSetAllocator,
     device::Device,
     memory::allocator::{MemoryTypeFilter, StandardMemoryAllocator},
-    pipeline::graphics::viewport::Viewport,
 };
 use vulkano_util::{
     context::{VulkanoConfig, VulkanoContext},
@@ -29,101 +24,114 @@ use winit::{
     window::WindowId,
 };
 
-/*
-pub struct interesting {
-    //pub camera: Camera, Don't know how to do yet, perhaps have it be a generic, for example: T::Camera with T impling 3d shader type or something.
+pub struct Redesign {
+    // Physics
+    // Option Renderer
 
-    //physics: CpuSolver<f32, CommonBody<f32>>, Need a solver trait perhaps, and then have this be generic.
-    //objects_to_render: Vec<gltf::RenderObject>,
-    buffers: Buffers,
-}
-*/
-
-/// A necessary evil, so that we avoid recursive generics in ExperimentalDrawCalls.
-pub struct AccessibleToRenderer {
-    pub context: VulkanoContext,
-    pub allocators: Allocators,
-
-    pub windows_manager: VulkanoWindows,
 }
 
 /// This is designed for this game, and this game only. I'm hopeful I'll find a way to make it generic oneday.
 pub struct SimpleEngine<R: Renderer> {
-    // Camera should be a generic, based on a trait that allows conversion to some universal properties thing, that we can send to any shader.
-    pub camera: Camera,
-
-    pub physics: CpuSolver<f32, CommonBody<f32>>,
+    pub physics: R::Physics,
     // If option is None then you cannot access fixed update.
     // This is required to avoid potential double mutability.
     physics_fixed_update: Option<FixedUpdate<f64>>,
-    on_physics_fixed_update: fn(&mut SimpleEngine<R>),
 
-    renderer: R,
+    fps_tracker: FpsTracker<f32>,
 
-    accessible_to_renderer: AccessibleToRenderer,
+    close_everything_on_window_close: bool,
+
+    pub renderer_storage: R::Storage,
+
+    //pub accessible_to_renderer: AccessibleToRenderer,
+    pub context: VulkanoContext,
+    pub allocators: Allocators,
+
+    pub windows_manager: VulkanoWindows,
+
+    pub temporary_event_loop_storage: Option<EventLoop<()>>,
 }
 
-pub struct Config<R: Renderer> {
-    pub starting_camera: Camera,
-
-    pub physics_config: solver::Config<f32, CommonBody<f32>>,
+/// Config for the simple engine.
+pub struct Config {
     pub physics_fixed_update: FixedUpdate<f64>,
-    pub on_physics_fixed_update: fn(&mut SimpleEngine<R>),
+
+    pub close_everything_on_window_close: bool,
 }
 
-impl<R: Renderer> Default for Config<R> {
+impl Default for Config {
     fn default() -> Self {
         Self {
-            starting_camera: Default::default(),
-
-            physics_config: Default::default(),
             physics_fixed_update: FixedUpdate::new(0.035, MaxSubsteps::WarnAt(85)),
-            on_physics_fixed_update: |_| {},
+
+            close_everything_on_window_close: true,
         }
     }
 }
 
+/// An event. Not much more to say.
+pub enum EngineEvent<'a, T: 'static> {
+    WinitEvent(Event<'a, T>),
+    PhysicsEvent(PhysicsEvent),
+}
+
+pub enum PhysicsEvent {
+    BeforeTick,
+    AfterTick,
+}
+
 impl<R: Renderer + 'static> SimpleEngine<R> {
-    pub fn init<F>(config: Config<R>, create_renderer: fn(&mut AccessibleToRenderer, &EventLoop<()>)->R, mut event_handler: F)
-    where
-        F: 'static
-            + FnMut(Event<'_, ()>, &EventLoopWindowTarget<()>, &mut ControlFlow, &mut SimpleEngine<R>),
-    {
+    pub fn new(config: Config, physics_simulation: R::Physics) -> Self {
         let event_loop = EventLoop::new();
-        let mut engine = {
+        {
             let context = VulkanoContext::new(VulkanoConfig::default());
-            let mut windows_manager = VulkanoWindows::default();
-            windows_manager.create_window(&event_loop, &context, &Default::default(), |_| {});
 
             let allocators = Allocators::new(context.device(), context.memory_allocator());
 
-            let mut accessible_to_renderer = AccessibleToRenderer {
+            let windows_manager = VulkanoWindows::default();
+
+            Self {
+                physics: physics_simulation,
+                physics_fixed_update: Some(config.physics_fixed_update),
+
+                fps_tracker: FpsTracker::new(),
+
+                close_everything_on_window_close: config.close_everything_on_window_close,
+
+                renderer_storage: todo!(),
+
                 context,
                 allocators,
 
                 windows_manager,
-            };
 
-            Self {
-                camera: config.starting_camera,
-
-                physics: CpuSolver::new(config.physics_config),
-                physics_fixed_update: Some(config.physics_fixed_update),
-                on_physics_fixed_update: config.on_physics_fixed_update,
-
-                renderer: create_renderer(&mut accessible_to_renderer, &event_loop),
-
-                accessible_to_renderer,
+                temporary_event_loop_storage: Some(event_loop),
             }
-        };
+        }
+    }
 
+    pub fn run<E>(self, mut event_handler: E) -> !
+    where
+        E: 'static
+            + FnMut(
+                EngineEvent<'_, ()>,
+                &EventLoopWindowTarget<()>,
+                &mut ControlFlow,
+                &mut SimpleEngine<R>,
+            ),
+    {
+        let mut engine = self;
+
+        let event_loop = engine.temporary_event_loop_storage.take().unwrap();
         event_loop.run(move |event, target, control_flow| {
             match event {
                 Event::WindowEvent {
                     event: WindowEvent::CloseRequested,
                     ..
                 } => {
-                    *control_flow = ControlFlow::Exit;
+                    if engine.close_everything_on_window_close {
+                        *control_flow = ControlFlow::Exit;
+                    }
                 }
 
                 Event::WindowEvent {
@@ -137,16 +145,40 @@ impl<R: Renderer + 'static> SimpleEngine<R> {
                     let mut physics_fixed_update = engine.physics_fixed_update.take().unwrap();
                     let fixed_delta_time = physics_fixed_update.fixed_delta_time as f32;
                     physics_fixed_update.update(|| {
-                        (engine.on_physics_fixed_update)(&mut engine);
+                        event_handler(
+                            EngineEvent::PhysicsEvent(PhysicsEvent::BeforeTick),
+                            target,
+                            control_flow,
+                            &mut engine,
+                        );
                         engine.physics.update(fixed_delta_time);
+                        event_handler(
+                            EngineEvent::PhysicsEvent(PhysicsEvent::AfterTick),
+                            target,
+                            control_flow,
+                            &mut engine,
+                        );
                     });
                     engine.physics_fixed_update = Some(physics_fixed_update);
 
-                    event_handler(event, target, control_flow, &mut engine);
+                    event_handler(
+                        EngineEvent::WinitEvent(event),
+                        target,
+                        control_flow,
+                        &mut engine,
+                    );
 
-                    engine
-                        .renderer
-                        .render(&mut engine.accessible_to_renderer);
+                    let mut renderer = R::new(&mut engine);
+                    renderer.render();
+                    //TODO:
+
+                    //let mut renderer = engine.renderer.take().unwrap();
+
+                    //renderer.render(&mut engine);
+
+                    //engine.renderer = Some(renderer);
+
+                    engine.fps_tracker.update();
 
                     return;
                 }
@@ -154,25 +186,48 @@ impl<R: Renderer + 'static> SimpleEngine<R> {
                 _ => (),
             }
 
-            event_handler(event, target, control_flow, &mut engine);
+            event_handler(
+                EngineEvent::WinitEvent(event),
+                target,
+                control_flow,
+                &mut engine,
+            );
         })
     }
 
+    pub fn get_renderer(&mut self) -> R {
+        R::new(self)
+    }
+
     fn correct_window_size(&mut self, window_id: WindowId) {
-        let window_renderer = self
-            .accessible_to_renderer
-            .windows_manager
-            .get_renderer_mut(window_id)
-            .unwrap();
+        let window_renderer = self.windows_manager.get_renderer_mut(window_id).unwrap();
         window_renderer.resize();
-        //TODO Really suspicious:
-        //self.accessible_while_drawing.viewport.extent = window_renderer.window_size();
-        //self.camera.aspect_ratio = window_renderer.aspect_ratio();
+        self.get_renderer().correct_window_size(
+            window_id,
+            window_renderer.window_size(),
+            window_renderer.aspect_ratio(),
+        );
+    }
+
+    pub fn fps_tracker(&self) -> &FpsTracker<f32> {
+        &self.fps_tracker
     }
 }
 
-pub trait Renderer {
-    fn render(&mut self, accessible_to_renderer: &mut AccessibleToRenderer);
+pub trait RendererMethods {
+
+}
+
+pub trait Renderer
+where
+    Self: Sized,
+
+    Self::Physics: PhysicsSimulation<f32>,
+{
+    // Bit annoying that the renderer needs to specify physics, but it is what it is.
+    type Physics;
+    type Storage;
+    type Methods;
 }
 
 pub struct Allocators {

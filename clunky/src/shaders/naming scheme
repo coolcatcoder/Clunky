@@ -1,0 +1,10 @@
+order of shader name stuff:
+instancing (not instanced, is default),
+lighting (unlit is default) (May mention lightin model.),
+colour or uv, or other interesting characteristic
+dimensions (last),
+
+Example:
+InstancedSimpleLitColour3D
+
+Note that it does not need "Shader" on the end. It should already be a sub module of the Shader module

@@ -2,6 +2,7 @@ use crate::math::{self, Float};
 
 pub mod aabb;
 pub mod bodies;
+pub mod grid;
 pub mod solver;
 pub mod verlet;
 

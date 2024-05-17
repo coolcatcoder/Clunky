@@ -102,12 +102,20 @@ impl<T: Float> FpsTracker<T> {
             time_since_previous_frame: Instant::now(),
         }
     }
+
     /// Gets fps averaged over the last second-ish.
     /// We can't stop at the end of a second exactly, hence why it is slightly averaged.
     #[inline]
     #[must_use]
     pub fn average_fps(&self) -> T {
         self.average_fps
+    }
+
+    /// Time since previous frame.
+    #[inline]
+    #[must_use]
+    pub fn delta_time(&self) -> T {
+        self.delta_time
     }
 
     /// Call this when a frame has passed.
