@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use clunky::{
     lost_code::{FixedUpdate, FpsTracker, MaxSubsteps},
-    physics::PhysicsSimulation,
+    physics::{physics_3d::bodies::CommonBody, PhysicsSimulation},
 };
 use vulkano::{
     buffer::{
@@ -24,10 +24,11 @@ use winit::{
     window::WindowId,
 };
 
+use crate::common_renderer::CommonRenderer;
+
 pub struct Redesign {
     // Physics
     // Option Renderer
-
 }
 
 /// This is designed for this game, and this game only. I'm hopeful I'll find a way to make it generic oneday.
@@ -41,7 +42,7 @@ pub struct SimpleEngine<R: Renderer> {
 
     close_everything_on_window_close: bool,
 
-    pub renderer_storage: R::Storage,
+    pub renderer_storage: R,
 
     //pub accessible_to_renderer: AccessibleToRenderer,
     pub context: VulkanoContext,
@@ -53,15 +54,22 @@ pub struct SimpleEngine<R: Renderer> {
 }
 
 /// Config for the simple engine.
-pub struct Config {
+pub struct Config<R: Renderer> {
+    pub renderer_config: R::Config,
+
     pub physics_fixed_update: FixedUpdate<f64>,
 
     pub close_everything_on_window_close: bool,
 }
 
-impl Default for Config {
+impl<R: Renderer> Default for Config<R>
+where
+    R::Config: Default,
+{
     fn default() -> Self {
         Self {
+            renderer_config: Default::default(),
+
             physics_fixed_update: FixedUpdate::new(0.035, MaxSubsteps::WarnAt(85)),
 
             close_everything_on_window_close: true,
@@ -81,14 +89,21 @@ pub enum PhysicsEvent {
 }
 
 impl<R: Renderer + 'static> SimpleEngine<R> {
-    pub fn new(config: Config, physics_simulation: R::Physics) -> Self {
+    pub fn new(config: Config<R>, physics_simulation: R::Physics) -> Self {
         let event_loop = EventLoop::new();
         {
             let context = VulkanoContext::new(VulkanoConfig::default());
 
             let allocators = Allocators::new(context.device(), context.memory_allocator());
 
-            let windows_manager = VulkanoWindows::default();
+            let mut windows_manager = VulkanoWindows::default();
+
+            let renderer = R::new(
+                config.renderer_config,
+                &event_loop,
+                &mut windows_manager,
+                &context,
+            );
 
             Self {
                 physics: physics_simulation,
@@ -98,7 +113,7 @@ impl<R: Renderer + 'static> SimpleEngine<R> {
 
                 close_everything_on_window_close: config.close_everything_on_window_close,
 
-                renderer_storage: todo!(),
+                renderer_storage: renderer,
 
                 context,
                 allocators,
@@ -168,15 +183,7 @@ impl<R: Renderer + 'static> SimpleEngine<R> {
                         &mut engine,
                     );
 
-                    let mut renderer = R::new(&mut engine);
-                    renderer.render();
-                    //TODO:
-
-                    //let mut renderer = engine.renderer.take().unwrap();
-
-                    //renderer.render(&mut engine);
-
-                    //engine.renderer = Some(renderer);
+                    R::render(&mut engine);
 
                     engine.fps_tracker.update();
 
@@ -195,27 +202,19 @@ impl<R: Renderer + 'static> SimpleEngine<R> {
         })
     }
 
-    pub fn get_renderer(&mut self) -> R {
-        R::new(self)
-    }
-
     fn correct_window_size(&mut self, window_id: WindowId) {
         let window_renderer = self.windows_manager.get_renderer_mut(window_id).unwrap();
         window_renderer.resize();
-        self.get_renderer().correct_window_size(
-            window_id,
-            window_renderer.window_size(),
-            window_renderer.aspect_ratio(),
-        );
+
+        let window_size = window_renderer.window_size();
+        let aspect_ratio = window_renderer.aspect_ratio();
+
+        R::correct_window_size(self, window_id, window_size, aspect_ratio);
     }
 
     pub fn fps_tracker(&self) -> &FpsTracker<f32> {
         &self.fps_tracker
     }
-}
-
-pub trait RendererMethods {
-
 }
 
 pub trait Renderer
@@ -224,10 +223,25 @@ where
 
     Self::Physics: PhysicsSimulation<f32>,
 {
-    // Bit annoying that the renderer needs to specify physics, but it is what it is.
+    // Bit annoying that the renderer needs to specify physics, but it is what it is. Perhaps if we could rename this whole trait to be something else?
     type Physics;
-    type Storage;
-    type Methods;
+    type Config;
+
+    fn new(
+        config: Self::Config,
+        event_loop: &EventLoop<()>,
+        windows_manager: &mut VulkanoWindows,
+        context: &VulkanoContext,
+    ) -> Self;
+
+    fn correct_window_size(
+        engine: &mut SimpleEngine<Self>,
+        window_id: WindowId,
+        new_window_size: [f32; 2],
+        new_aspect_ratio: f32,
+    );
+
+    fn render(engine: &mut SimpleEngine<Self>);
 }
 
 pub struct Allocators {

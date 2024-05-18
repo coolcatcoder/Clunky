@@ -1,14 +1,19 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, marker::PhantomData, sync::Arc};
 
 use clunky::{
     math::{mul_3d_by_1d, Matrix4},
     meshes,
     physics::{
-        physics_3d::{aabb::AabbCentredOrigin, bodies::ImmovableCuboid, solver::CpuSolver},
+        physics_3d::{
+            aabb::AabbCentredOrigin,
+            bodies::{Body, ImmovableCuboid},
+            solver::CpuSolver,
+        },
         PhysicsSimulation,
     },
     shaders::instanced_simple_lit_colour_3d::{self, Camera},
 };
+use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use vulkano::{
     buffer::{allocator::SubbufferAllocator, Buffer, BufferCreateInfo, BufferUsage, Subbuffer},
     command_buffer::{
@@ -33,13 +38,18 @@ use vulkano::{
     swapchain::SwapchainCreateInfo,
     sync::GpuFuture,
 };
-use vulkano_util::{context::VulkanoContext, window::WindowDescriptor};
+use vulkano_util::{
+    context::VulkanoContext,
+    window::{VulkanoWindows, WindowDescriptor},
+};
 use winit::{
     event_loop::{EventLoop, EventLoopWindowTarget},
     window::WindowId,
 };
 
-use crate::{body::Body, engine::{Renderer, SimpleEngine}};
+use crate::engine::{Renderer, SimpleEngine};
+
+pub trait RenderBody: Body<f32> {}
 
 #[derive(Default)]
 pub struct Config {
@@ -70,46 +80,127 @@ pub struct WindowSpecific {
     viewport: Viewport,
 }
 
-pub struct CommonRenderer {
-    engine: &'static mut SimpleEngine<Self>
+/// Contains a few basic draw calls. Useful for prototypes.
+/// Mainly designed for copying and editing, to fit your needs.
+pub struct CommonRenderer<B: RenderBody> {
+    window_specific: HashMap<WindowId, WindowSpecific>,
+
+    render_pass: Arc<RenderPass>,
+
+    pipelines: Pipelines,
+    buffers: Buffers,
+
+    pub render_bodies: RenderBodies,
+    render_bodies_instances: RenderBodiesInstances,
+
+    _phantom_data: PhantomData<B>,
 }
 
-impl Renderer for CommonRenderer {
-    type Physics = CpuSolver<f32, Body>;
-    type Storage = Storage;
+pub struct Methods<'a, B: RenderBody> {
+    engine: &'a mut SimpleEngine<CommonRenderer<B>>,
+}
 
-    fn new(engine: &'static mut SimpleEngine<Self>) -> Self {
+impl<B: RenderBody> Renderer for CommonRenderer<B> {
+    type Physics = CpuSolver<f32, B>;
+    type Config = Config;
+
+    fn new(
+        config: Config,
+
+        // It is messy, but the user won't ever call this method, so it will do.
+        event_loop: &EventLoop<()>,
+        windows_manager: &mut VulkanoWindows,
+        context: &VulkanoContext,
+    ) -> Self {
+        let mut window_specific = HashMap::new();
+
+        for window_config in config.starting_windows {
+            let id = windows_manager.create_window(
+                event_loop,
+                context,
+                &window_config.window_descriptor,
+                window_config.swapchain_create_info_modify,
+            );
+
+            window_specific.insert(
+                id,
+                WindowSpecific {
+                    camera: window_config.camera,
+                    viewport: Viewport {
+                        offset: [0.0, 0.0],
+                        extent: [1.0, 1.0],
+                        depth_range: 0.0..=1.0,
+                    },
+                },
+            );
+        }
+
+        let render_pass = vulkano::single_pass_renderpass!(
+            context.device().clone(),
+            attachments: {
+                color: {
+                    format: windows_manager.get_primary_renderer().unwrap().swapchain_format(),
+                    samples: 1,
+                    load_op: Clear,
+                    store_op: Store,
+                },
+                depth: {
+                    format: Format::D32_SFLOAT,
+                    samples: 1,
+                    load_op: Clear,
+                    store_op: Store,
+                }
+            },
+            pass: {
+                color: [color],
+                depth_stencil: {depth},
+            },
+        )
+        .unwrap();
+
+        let pipelines = Pipelines::new(context.device(), &render_pass);
+
         Self {
-            engine,
+            window_specific,
+
+            render_pass,
+
+            pipelines,
+            buffers: Buffers::new(context),
+
+            render_bodies: Default::default(),
+            render_bodies_instances: Default::default(),
+
+            _phantom_data: PhantomData,
         }
     }
 
     fn correct_window_size(
-        self,
+        engine: &mut SimpleEngine<Self>,
         window_id: WindowId,
         new_window_size: [f32; 2],
         new_aspect_ratio: f32,
     ) {
-        let window_specific = self.engine.renderer_storage.window_specific.get_mut(&window_id).unwrap();
+        let window_specific = engine
+            .renderer_storage
+            .window_specific
+            .get_mut(&window_id)
+            .unwrap();
         window_specific.viewport.extent = new_window_size;
         window_specific.camera.aspect_ratio = new_aspect_ratio;
     }
 
-    fn render(self) {
-        for (id, window_specific) in &mut self.engine.renderer_storage.window_specific {
-            let window_renderer = self.engine
-                .windows_manager
-                .get_renderer_mut(*id)
-                .unwrap();
+    fn render(engine: &mut SimpleEngine<Self>) {
+        let instances = engine.renderer_storage.render_bodies.create_instances();
+
+        for (id, window_specific) in &mut engine.renderer_storage.window_specific {
+            let window_renderer = engine.windows_manager.get_renderer_mut(*id).unwrap();
 
             let future = window_renderer.acquire().unwrap();
 
             let mut command_buffer_builder = AutoCommandBufferBuilder::primary(
-                &self.engine.allocators.command_buffer_allocator,
-                self.engine
-                    .context
-                    .graphics_queue()
-                    .queue_family_index(),
+                &engine.allocators.command_buffer_allocator,
+                engine.context.graphics_queue().queue_family_index(),
                 CommandBufferUsage::OneTimeSubmit,
             )
             .unwrap();
@@ -118,7 +209,7 @@ impl Renderer for CommonRenderer {
 
             let depth_buffer_view = ImageView::new_default(
                 Image::new(
-                    self.engine.context.memory_allocator().clone(),
+                    engine.context.memory_allocator().clone(),
                     ImageCreateInfo {
                         image_type: ImageType::Dim2d,
                         format: Format::D32_SFLOAT,
@@ -134,7 +225,7 @@ impl Renderer for CommonRenderer {
             .unwrap();
 
             let framebuffer = Framebuffer::new(
-                self.engine.renderer_storage.render_pass.clone(),
+                engine.renderer_storage.render_pass.clone(),
                 FramebufferCreateInfo {
                     attachments: vec![window_renderer.swapchain_image_view(), depth_buffer_view],
                     ..Default::default()
@@ -142,7 +233,7 @@ impl Renderer for CommonRenderer {
             )
             .unwrap();
 
-            let camera_uniform = self.engine
+            let camera_uniform = engine
                 .allocators
                 .subbuffer_allocator
                 .allocate_sized()
@@ -167,15 +258,28 @@ impl Renderer for CommonRenderer {
 
             // COLOUR_3D_INSTANCED
             command_buffer_builder
-                .bind_pipeline_graphics(self.engine.renderer_storage.pipelines.colour_3d_instanced.clone())
+                .bind_pipeline_graphics(
+                    engine
+                        .renderer_storage
+                        .pipelines
+                        .colour_3d_instanced
+                        .clone(),
+                )
                 .unwrap()
                 .bind_descriptor_sets(
                     PipelineBindPoint::Graphics,
-                    self.engine.renderer_storage.pipelines.colour_3d_instanced.layout().clone(),
+                    engine
+                        .renderer_storage
+                        .pipelines
+                        .colour_3d_instanced
+                        .layout()
+                        .clone(),
                     0,
                     vec![PersistentDescriptorSet::new(
-                        &self.engine.allocators.descriptor_set_allocator,
-                        self.engine.renderer_storage.pipelines
+                        &engine.allocators.descriptor_set_allocator,
+                        engine
+                            .renderer_storage
+                            .pipelines
                             .colour_3d_instanced
                             .layout()
                             .set_layouts()
@@ -191,9 +295,13 @@ impl Renderer for CommonRenderer {
 
             let mut easy_draw = EasyDraw {
                 command_buffer_builder: &mut command_buffer_builder,
-                subbuffer_allocator: &self.engine.allocators.subbuffer_allocator,
+                subbuffer_allocator: &engine.allocators.subbuffer_allocator,
             };
-            self.engine.renderer_storage.buffers.cuboid_colour.draw(&mut easy_draw);
+            engine
+                .renderer_storage
+                .buffers
+                .cuboid_colour
+                .draw(&mut easy_draw);
 
             command_buffer_builder
                 .end_render_pass(Default::default())
@@ -203,10 +311,7 @@ impl Renderer for CommonRenderer {
 
             window_renderer.present(
                 future
-                    .then_execute(
-                        self.engine.context.graphics_queue().clone(),
-                        command_buffer,
-                    )
+                    .then_execute(engine.context.graphics_queue().clone(), command_buffer)
                     .unwrap()
                     .boxed(),
                 false,
@@ -215,79 +320,24 @@ impl Renderer for CommonRenderer {
     }
 }
 
-/// Contains a few basic draw calls. Useful for prototypes.
-/// Mainly designed for copying and editing, to fit your needs.
-pub struct Storage {
-    window_specific: HashMap<WindowId, WindowSpecific>,
+impl<B: RenderBody> CommonRenderer<B> {
+    pub fn get_window_specific(&mut self, window_id: WindowId) -> Option<&mut WindowSpecific> {
+        self.window_specific.get_mut(&window_id)
+    }
 
-    render_pass: Arc<RenderPass>,
+    pub fn update_render_bodies_instances(&mut self, bodies: &Vec<B>) {
+        self.render_bodies.cuboid_colour.par_iter().map(|(index, colour)| {
+            let body = bodies[*index];
 
-    pipelines: Pipelines,
-    buffers: Buffers,
+            instanced_simple_lit_colour_3d::Instance::new(*colour, Matrix4::from_translation(aabb.position)
+            * Matrix4::from_scale(mul_3d_by_1d(aabb.half_size, 2.0)))
+        }).collect_into_vec(&mut self.render_bodies_instances.cuboid_colour);
+    }
 }
 
-impl CommonRenderer {
-    pub fn init(
-        self,
-        config: Config,
-    ) {
-        let event_loop = self.engine.temporary_event_loop_storage.as_ref().unwrap();
-        let mut window_specific = HashMap::new();
-
-        for window_config in config.starting_windows {
-            let id = self.engine.windows_manager.create_window(
-                event_loop,
-                &self.engine.context,
-                &window_config.window_descriptor,
-                window_config.swapchain_create_info_modify,
-            );
-
-            window_specific.insert(
-                id,
-                WindowSpecific {
-                    camera: window_config.camera,
-                    viewport: Viewport {
-                        offset: [0.0, 0.0],
-                        extent: [1.0, 1.0],
-                        depth_range: 0.0..=1.0,
-                    },
-                },
-            );
-        }
-
-        let render_pass = vulkano::single_pass_renderpass!(
-            self.engine.context.device().clone(),
-            attachments: {
-                color: {
-                    format: self.engine.windows_manager.get_primary_renderer().unwrap().swapchain_format(),
-                    samples: 1,
-                    load_op: Clear,
-                    store_op: Store,
-                },
-                depth: {
-                    format: Format::D32_SFLOAT,
-                    samples: 1,
-                    load_op: Clear,
-                    store_op: Store,
-                }
-            },
-            pass: {
-                color: [color],
-                depth_stencil: {depth},
-            },
-        )
-        .unwrap();
-
-        let pipelines = Pipelines::new(self.engine.context.device(), &render_pass);
-
-        self.engine.renderer_storage = Storage {
-            window_specific,
-
-            render_pass,
-
-            pipelines,
-            buffers: Buffers::new(self.engine),
-        };
+impl<'a, B: RenderBody> Methods<'a, B> {
+    pub fn new(engine: &'a mut SimpleEngine<CommonRenderer<B>>) -> Self {
+        Self { engine }
     }
 
     /// Creates a new window!
@@ -319,24 +369,31 @@ impl CommonRenderer {
     }
 
     // Removes a window!
-    pub fn remove_window(
-        self,
-        id: WindowId,
-    ) {
+    pub fn remove_window(self, id: WindowId) {
         self.engine.renderer_storage.window_specific.remove(&id);
         self.engine.windows_manager.remove_renderer(id);
     }
 
     pub fn get_window_specific(&mut self, window_id: WindowId) -> Option<&mut WindowSpecific> {
-        self.engine.renderer_storage.window_specific.get_mut(&window_id)
+        self.engine
+            .renderer_storage
+            .window_specific
+            .get_mut(&window_id)
     }
 
     pub fn add_cuboid_colour(&mut self, instance: instanced_simple_lit_colour_3d::Instance) {
-        self.engine.renderer_storage.buffers.cuboid_colour.instances.push(instance);
+        self.engine
+            .renderer_storage
+            .buffers
+            .cuboid_colour
+            .instances
+            .push(instance);
     }
 
     pub fn add_cuboid_colour_from_aabb(&mut self, aabb: AabbCentredOrigin<f32>, colour: [f32; 4]) {
-        self.engine.renderer_storage.buffers
+        self.engine
+            .renderer_storage
+            .buffers
             .cuboid_colour
             .instances
             .push(instanced_simple_lit_colour_3d::Instance::new(
@@ -345,6 +402,20 @@ impl CommonRenderer {
                     * Matrix4::from_scale(mul_3d_by_1d(aabb.half_size, 2.0)),
             ));
     }
+
+    pub fn add_cuboid_colour_from_body_index(&mut self, body_index: usize, colour: [f32; 4]) {
+        self.engine.renderer_storage.render_bodies.cuboid_colour.push((body_index, colour));
+    }
+}
+
+#[derive(Default)]
+pub struct RenderBodies {
+    pub cuboid_colour: Vec<(usize, [f32; 4])>,
+}
+
+#[derive(Default)]
+struct RenderBodiesInstances {
+    cuboid_colour: Vec<instanced_simple_lit_colour_3d::Instance>,
 }
 
 struct Pipelines {
@@ -391,9 +462,9 @@ struct Buffers {
 }
 
 impl Buffers {
-    fn new(engine: &mut SimpleEngine<CommonRenderer>) -> Self {
+    fn new(context: &VulkanoContext) -> Self {
         Buffers {
-            cuboid_colour: Colour3DInstancedBuffers::new(meshes::CUBE_GLTF, &mut engine.context),
+            cuboid_colour: Colour3DInstancedBuffers::new(meshes::CUBE_GLTF, context),
             //custom_colour_instanced: vec![],
         }
     }
@@ -406,7 +477,7 @@ struct Colour3DInstancedBuffers {
 }
 
 impl Colour3DInstancedBuffers {
-    fn new(gltf: &[u8], context: &mut VulkanoContext) -> Self {
+    fn new(gltf: &[u8], context: &VulkanoContext) -> Self {
         Self {
             // TODO: use a staging buffer, and keep vertices and indices in device memory only, with no host sequential write?
             vertices: Buffer::from_iter(

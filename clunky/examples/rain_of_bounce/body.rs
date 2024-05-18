@@ -9,6 +9,9 @@ use clunky::{
     },
 };
 
+use crate::common_renderer::RenderBody;
+
+// TODO: Keep track of which grid cells actually have something in them, only check those.
 #[derive(Debug, Clone)]
 pub enum Body {
     Creature(Creature),
@@ -17,6 +20,8 @@ pub enum Body {
 }
 
 impl Body {}
+
+impl RenderBody for Body {}
 
 impl bodies::Body<f32> for Body {
     #[inline]

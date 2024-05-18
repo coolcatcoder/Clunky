@@ -7,7 +7,7 @@ use clunky::{
         aabb::AabbCentredOrigin,
         //bodies::{Body, ImmovableCuboid},
         solver::{self, CpuSolver},
-        verlet::{bodies::Player, Particle},
+        verlet::Particle,
     },
     shaders::instanced_simple_lit_colour_3d::{self, Camera},
 };
@@ -26,7 +26,7 @@ mod body;
 mod common_renderer;
 mod engine;
 
-type Engine = SimpleEngine<CommonRenderer, CpuSolver<f32, Body>>;
+type Engine = SimpleEngine<CommonRenderer<Body>>;
 
 struct CreaturesManager {
     //creatures: Vec<Creature>,
@@ -92,7 +92,17 @@ fn main() {
 
     let physics_simulation = CpuSolver::new(physics_config);
 
+    let renderer_config = common_renderer::Config {
+        starting_windows: vec![WindowConfig {
+            camera: Default::default(),
+            window_descriptor: Default::default(),
+            swapchain_create_info_modify: |_| {},
+        }],
+        ..Default::default()
+    };
+
     let config = engine::Config {
+        renderer_config,
         close_everything_on_window_close: false,
         ..Default::default()
     };
@@ -100,19 +110,6 @@ fn main() {
     let mut engine: Engine = SimpleEngine::new(config, physics_simulation);
 
     let temp_event_loop = engine.temporary_event_loop_storage.take().unwrap();
-
-    let mut renderer = CommonRenderer::new(
-        common_renderer::Config {
-            starting_windows: vec![WindowConfig {
-                camera: Default::default(),
-                window_descriptor: Default::default(),
-                swapchain_create_info_modify: |_| {},
-            }],
-            ..Default::default()
-        },
-        &mut engine,
-        &temp_event_loop,
-    );
 
     engine.physics.bodies.push(Body::Creature(Creature {
         particle: Particle::from_position([0.0; 3]),
@@ -123,13 +120,6 @@ fn main() {
 
         grounded: false,
     }));
-
-    renderer.add_cuboid_colour(
-        instanced_simple_lit_colour_3d::Instance::new(
-            [1.0; 4],
-            Matrix4::from_translation([2.0, 0.0, 0.0]),
-        ),
-    );
 
     game.creatures_manager
         .creature_controlled_by_window
@@ -146,8 +136,15 @@ fn main() {
         grounded: false,
     }));
 
+    let mut starting_renderer = common_renderer::Methods::new(&mut engine);
+
+    starting_renderer.add_cuboid_colour(instanced_simple_lit_colour_3d::Instance::new(
+        [1.0; 4],
+        Matrix4::from_translation([2.0, 0.0, 0.0]),
+    ));
+
     let second_player_window =
-        renderer.create_window(WindowConfig::default(), &temp_event_loop, &mut engine);
+        starting_renderer.create_window(WindowConfig::default(), &temp_event_loop);
 
     game.creatures_manager
         .creature_controlled_by_window
@@ -164,119 +161,121 @@ fn main() {
         .bodies
         .push(Body::ImmovableCuboid(floor.clone()));
 
-    renderer.add_cuboid_colour_from_aabb(floor, [1.0, 0.0, 1.0, 1.0]);
+    let mut starting_renderer = common_renderer::Methods::new(&mut engine);
+    starting_renderer.add_cuboid_colour_from_aabb(floor, [1.0, 0.0, 1.0, 1.0]);
 
-    engine.run(
-        renderer,
-        move |event, event_loop, control_flow, engine| match event {
-            EngineEvent::WinitEvent(Event::WindowEvent {
-                window_id,
-                event: WindowEvent::CloseRequested,
-                ..
-            }) => {
-                let mut renderer = engine.renderer.take().unwrap();
-                renderer.remove_window(window_id, engine);
-                engine.renderer = Some(renderer);
+    engine.run(move |event, event_loop, control_flow, engine| match event {
+        EngineEvent::WinitEvent(Event::WindowEvent {
+            window_id,
+            event: WindowEvent::CloseRequested,
+            ..
+        }) => {
+            let mut renderer = common_renderer::Methods::new(engine);
+            renderer.remove_window(window_id);
 
-                if let Some(creature_selection_window) =
-                    game.creatures_manager.creature_selection_window
-                {
-                    if creature_selection_window == window_id {
-                        game.creatures_manager.creature_selection_window = None;
-                        return;
-                    }
-                }
-
-                game.creatures_manager
-                    .creature_controlled_by_window
-                    .remove(&window_id);
-            }
-
-            EngineEvent::WinitEvent(Event::MainEventsCleared) => {
-                //update(&mut game, &mut rain);
-
-                //println!("{}", engine.fps_tracker().average_fps());
-            }
-
-            EngineEvent::PhysicsEvent(PhysicsEvent::BeforeTick) => {
-                on_physics_fixed_update_before_physics_tick(&mut game, engine)
-            }
-
-            EngineEvent::PhysicsEvent(PhysicsEvent::AfterTick) => {
-                on_physics_fixed_update_after_physics_tick(&mut game, engine)
-            }
-
-            EngineEvent::WinitEvent(Event::WindowEvent {
-                event: WindowEvent::KeyboardInput { input, .. },
-                ..
-            }) => {
-                on_keyboard_input(input, control_flow, engine, &mut game);
-            }
-
-            EngineEvent::WinitEvent(Event::WindowEvent {
-                window_id,
-                event: WindowEvent::Focused(focus),
-                ..
-            }) => {
-                if focus {
-                    game.window_focused = Some(window_id);
-                } else {
-                    game.window_focused = None;
-                }
-            }
-
-            EngineEvent::WinitEvent(Event::DeviceEvent {
-                event: DeviceEvent::Motion { axis, value },
-                ..
-            }) => {
-                let Some(window_focused) = game.window_focused else {
-                    return;
-                };
-
-                let window_renderer = engine
-                    .windows_manager
-                    .get_renderer_mut(window_focused)
-                    .unwrap();
-
-                if game.paused {
-                    window_renderer.window().set_cursor_visible(true);
+            if let Some(creature_selection_window) =
+                game.creatures_manager.creature_selection_window
+            {
+                if creature_selection_window == window_id {
+                    game.creatures_manager.creature_selection_window = None;
                     return;
                 }
-
-                let camera = &mut engine
-                    .renderer
-                    .as_mut()
-                    .unwrap()
-                    .get_window_specific(window_focused)
-                    .unwrap()
-                    .camera;
-
-                match axis {
-                    0 => camera.rotation[1] -= value as f32 * game.settings.mouse_sensitivity,
-                    1 => camera.rotation[0] -= value as f32 * game.settings.mouse_sensitivity,
-                    _ => (),
-                }
-
-                let window_extent = window_renderer.window_size();
-
-                window_renderer
-                    .window()
-                    .set_cursor_position(PhysicalPosition::new(
-                        window_extent[0] / 2.0,
-                        window_extent[1] / 2.0,
-                    ))
-                    .unwrap();
-                window_renderer.window().set_cursor_visible(false);
             }
 
-            EngineEvent::WinitEvent(Event::DeviceEvent {
-                event: DeviceEvent::MouseWheel { delta: _ },
-                ..
-            }) => {}
+            game.creatures_manager
+                .creature_controlled_by_window
+                .remove(&window_id);
+        }
 
-            _ => (),
-        },
-    )
+        EngineEvent::WinitEvent(Event::MainEventsCleared) => {
+            //update(&mut game, &mut rain);
+
+            //println!("{}", engine.fps_tracker().average_fps());
+        }
+
+        EngineEvent::PhysicsEvent(PhysicsEvent::BeforeTick) => {
+            on_physics_fixed_update_before_physics_tick(&mut game, engine)
+        }
+
+        EngineEvent::PhysicsEvent(PhysicsEvent::AfterTick) => {
+            on_physics_fixed_update_after_physics_tick(&mut game, engine)
+        }
+
+        EngineEvent::WinitEvent(Event::WindowEvent {
+            event: WindowEvent::KeyboardInput { input, .. },
+            ..
+        }) => {
+            on_keyboard_input(input, control_flow, engine, &mut game);
+        }
+
+        EngineEvent::WinitEvent(Event::WindowEvent {
+            window_id,
+            event: WindowEvent::Focused(focus),
+            ..
+        }) => {
+            if focus {
+                game.window_focused = Some(window_id);
+            } else {
+                game.window_focused = None;
+            }
+        }
+
+        EngineEvent::WinitEvent(Event::DeviceEvent {
+            event: DeviceEvent::Motion { axis, value },
+            ..
+        }) => {
+            let Some(window_focused) = game.window_focused else {
+                return;
+            };
+
+            let mut renderer = common_renderer::Methods::new(engine);
+
+            let mut camera = renderer
+                .get_window_specific(window_focused)
+                .unwrap()
+                .camera
+                .clone(); // Cloning is nasty.
+
+            let window_renderer = engine
+                .windows_manager
+                .get_renderer_mut(window_focused)
+                .unwrap();
+
+            if game.paused {
+                window_renderer.window().set_cursor_visible(true);
+                return;
+            }
+
+            match axis {
+                0 => camera.rotation[1] -= value as f32 * game.settings.mouse_sensitivity,
+                1 => camera.rotation[0] -= value as f32 * game.settings.mouse_sensitivity,
+                _ => (),
+            }
+
+            let window_extent = window_renderer.window_size();
+
+            window_renderer
+                .window()
+                .set_cursor_position(PhysicalPosition::new(
+                    window_extent[0] / 2.0,
+                    window_extent[1] / 2.0,
+                ))
+                .unwrap();
+            window_renderer.window().set_cursor_visible(false);
+
+            let mut renderer = common_renderer::Methods::new(engine);
+
+            renderer.get_window_specific(window_focused).unwrap().camera = camera;
+            // deal wit hit!!! TODO: this will never work!!!!
+        }
+
+        EngineEvent::WinitEvent(Event::DeviceEvent {
+            event: DeviceEvent::MouseWheel { delta: _ },
+            ..
+        }) => {}
+
+        _ => (),
+    })
 }
 
 // TODO: because we can't access Game in this function, we can either have a custom event enum for the engine, or we can just add a generic to the engine, and pass any random struct in, for use here or elsewhere.
@@ -446,6 +445,11 @@ fn on_keyboard_input(
     }
 }
 
+#[inline]
+fn renderer(engine: &mut Engine) -> common_renderer::Methods<Body> {
+    common_renderer::Methods::new(engine)
+}
+
 fn creature(index: usize, engine: &mut Engine) -> &mut Creature {
     let Body::Creature(creature) = &mut engine.physics.bodies[index] else {
         panic!()
@@ -455,9 +459,7 @@ fn creature(index: usize, engine: &mut Engine) -> &mut Creature {
 
 fn camera(window_id: WindowId, engine: &mut Engine) -> &mut Camera {
     &mut engine
-        .renderer
-        .as_mut()
-        .unwrap()
+        .renderer_storage
         .get_window_specific(window_id)
         .unwrap()
         .camera
