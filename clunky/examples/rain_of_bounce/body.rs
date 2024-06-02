@@ -9,17 +9,28 @@ use clunky::{
     },
 };
 
-use crate::common_renderer::RenderBody;
+use crate::{common_renderer::RenderBody, CreatureIndex};
 
 // TODO: Keep track of which grid cells actually have something in them, only check those.
 #[derive(Debug, Clone)]
 pub enum Body {
     Creature(Creature),
     ImmovableCuboid(AabbCentredOrigin<f32>),
+    TriggerImmovableCuboid {
+        aabb: AabbCentredOrigin<f32>,
+        collisions: Vec<usize>,
+    },
     None,
 }
 
-impl Body {}
+impl Body {
+    pub fn owner(&self) -> Result<CreatureIndex, &'static str> {
+        match self {
+            Body::Creature(creature) => Ok(creature.owner),
+            _ => Err("This body does not have an owner"),
+        }
+    }
+}
 
 impl RenderBody for Body {}
 
@@ -28,6 +39,7 @@ impl bodies::Body<f32> for Body {
     fn update(&mut self, gravity: [f32; 3], _dampening: [f32; 3], delta_time: f32) {
         match self {
             Body::Creature(creature) => creature.update(gravity, delta_time),
+            Body::TriggerImmovableCuboid { collisions, .. } => collisions.clear(),
             _ => {}
         }
     }
@@ -37,6 +49,7 @@ impl bodies::Body<f32> for Body {
         match self {
             Body::Creature(creature) => creature.particle.position,
             Body::ImmovableCuboid(immovable_cuboid) => immovable_cuboid.position,
+            Body::TriggerImmovableCuboid { aabb, .. } => aabb.position,
             Body::None => unreachable!(),
         }
     }
@@ -46,6 +59,7 @@ impl bodies::Body<f32> for Body {
         match self {
             Body::Creature(creature) => creature.half_size,
             Body::ImmovableCuboid(immovable_cuboid) => immovable_cuboid.half_size,
+            Body::TriggerImmovableCuboid { aabb, .. } => aabb.half_size,
             Body::None => unreachable!(),
         }
     }
@@ -63,7 +77,7 @@ impl bodies::Body<f32> for Body {
     fn collide_with_others(&self) -> bool {
         match self {
             Body::Creature(_) => true,
-            Body::ImmovableCuboid(_) => false,
+            Body::ImmovableCuboid(_) | Body::TriggerImmovableCuboid { .. } => false,
             Body::None => unreachable!(),
         }
     }
@@ -81,10 +95,8 @@ impl bodies::Body<f32> for Body {
                     .aabb()
                     .is_intersected_by_aabb(*rhs_immovable_cuboid)
             }
-
-            // IMMOVABLE_CUBOID
-            (Body::ImmovableCuboid(_), _) => {
-                unreachable!()
+            (Body::Creature(lhs_creature), Body::TriggerImmovableCuboid { aabb, .. }) => {
+                lhs_creature.aabb().is_intersected_by_aabb(*aabb)
             }
 
             _ => unreachable!(),
@@ -92,7 +104,13 @@ impl bodies::Body<f32> for Body {
     }
 
     #[inline]
-    fn respond_to_collision(&mut self, other: &mut Body, _other_index: usize, delta_time: f32) {
+    fn respond_to_collision(
+        &mut self,
+        other: &mut Body,
+        lhs_index: usize,
+        rhs_index: usize,
+        delta_time: f32,
+    ) {
         let colliding_bodies = (self, other);
         match colliding_bodies {
             // CREATURE
@@ -163,6 +181,9 @@ impl bodies::Body<f32> for Body {
                 //println!("impulse: {:?}", impulse);
                 lhs_creature.particle.apply_impulse(impulse, delta_time);
             }
+            (Body::Creature(_), Body::TriggerImmovableCuboid { collisions, .. }) => {
+                collisions.push(lhs_index);
+            }
             _ => unreachable!(),
         }
     }
@@ -180,6 +201,8 @@ pub struct Creature {
     pub dampening: [f32; 3],
 
     pub grounded: bool,
+
+    pub owner: CreatureIndex,
 }
 
 impl Creature {

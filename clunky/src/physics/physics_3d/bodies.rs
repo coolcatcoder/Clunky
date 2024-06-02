@@ -22,7 +22,13 @@ where
     /// This is useful for when you don't want to disturb the indices of bodies, but still want to remove bodies.
     fn is_none(&self) -> bool;
     fn collide_with_others(&self) -> bool;
-    fn respond_to_collision(&mut self, other: &mut Self, other_index: usize, delta_time: T);
+    fn respond_to_collision(
+        &mut self,
+        other: &mut Self,
+        lhs_index: usize,
+        rhs_index: usize,
+        delta_time: T,
+    );
 
     fn detect_collision(&self, other: &Self) -> bool;
 }
@@ -182,7 +188,8 @@ where
     fn respond_to_collision(
         &mut self,
         other: &mut CommonBody<T>,
-        _other_index: usize,
+        _lhs_index: usize,
+        _rhs_index: usize,
         delta_time: T,
     ) {
         let colliding_bodies = (self, other);

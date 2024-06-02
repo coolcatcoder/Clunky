@@ -191,7 +191,29 @@ impl<B: RenderBody> Renderer for CommonRenderer<B> {
     }
 
     fn render(engine: &mut SimpleEngine<Self>) {
-        let instances = engine.renderer_storage.render_bodies.create_instances();
+        let cuboid_colour_before_len = engine
+            .renderer_storage
+            .buffers
+            .cuboid_colour
+            .instances
+            .len();
+
+        engine
+            .renderer_storage
+            .update_render_bodies_instances(&engine.physics.bodies);
+
+        //println!("physics instances: {}", engine.renderer_storage.render_bodies_instances.cuboid_colour.len());
+        engine
+            .renderer_storage
+            .buffers
+            .cuboid_colour
+            .instances
+            .append(
+                &mut engine
+                    .renderer_storage
+                    .render_bodies_instances
+                    .cuboid_colour,
+            );
 
         for (id, window_specific) in &mut engine.renderer_storage.window_specific {
             let window_renderer = engine.windows_manager.get_renderer_mut(*id).unwrap();
@@ -317,6 +339,22 @@ impl<B: RenderBody> Renderer for CommonRenderer<B> {
                 false,
             )
         }
+
+        engine
+            .renderer_storage
+            .buffers
+            .cuboid_colour
+            .instances
+            .drain(cuboid_colour_before_len..);
+        assert!(
+            cuboid_colour_before_len
+                == engine
+                    .renderer_storage
+                    .buffers
+                    .cuboid_colour
+                    .instances
+                    .len()
+        );
     }
 }
 
@@ -326,12 +364,19 @@ impl<B: RenderBody> CommonRenderer<B> {
     }
 
     pub fn update_render_bodies_instances(&mut self, bodies: &Vec<B>) {
-        self.render_bodies.cuboid_colour.par_iter().map(|(index, colour)| {
-            let body = bodies[*index];
+        self.render_bodies
+            .cuboid_colour
+            .par_iter()
+            .map(|(index, colour)| {
+                let body = &bodies[*index];
 
-            instanced_simple_lit_colour_3d::Instance::new(*colour, Matrix4::from_translation(aabb.position)
-            * Matrix4::from_scale(mul_3d_by_1d(aabb.half_size, 2.0)))
-        }).collect_into_vec(&mut self.render_bodies_instances.cuboid_colour);
+                instanced_simple_lit_colour_3d::Instance::new(
+                    *colour,
+                    Matrix4::from_translation(body.position_unchecked())
+                        * Matrix4::from_scale(mul_3d_by_1d(body.half_size_unchecked(), 2.0)),
+                )
+            })
+            .collect_into_vec(&mut self.render_bodies_instances.cuboid_colour);
     }
 }
 
@@ -404,7 +449,11 @@ impl<'a, B: RenderBody> Methods<'a, B> {
     }
 
     pub fn add_cuboid_colour_from_body_index(&mut self, body_index: usize, colour: [f32; 4]) {
-        self.engine.renderer_storage.render_bodies.cuboid_colour.push((body_index, colour));
+        self.engine
+            .renderer_storage
+            .render_bodies
+            .cuboid_colour
+            .push((body_index, colour));
     }
 }
 

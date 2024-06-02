@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use clunky::{
-    lost_code::is_pressed,
+    lost_code::{is_pressed, FixedUpdate, MaxSubsteps},
     math::{add_3d, Matrix4},
     physics::physics_3d::{
         aabb::AabbCentredOrigin,
@@ -13,46 +13,60 @@ use clunky::{
 };
 use common_renderer::{CommonRenderer, WindowConfig};
 use engine::{EngineEvent, PhysicsEvent, SimpleEngine};
+use rand::{thread_rng, Rng};
 use winit::{
     dpi::PhysicalPosition,
     event::{DeviceEvent, Event, KeyboardInput, VirtualKeyCode, WindowEvent},
-    event_loop::ControlFlow,
+    event_loop::{ControlFlow, EventLoop, EventLoopWindowTarget},
     window::{Fullscreen, WindowId},
 };
 
-use body::{Body, Creature};
+use body::{Body, Creature as CreatureBody};
+
+use creature_types::{Burgle, CreatureType};
 
 mod body;
 mod common_renderer;
+mod creature_types;
 mod engine;
 
 type Engine = SimpleEngine<CommonRenderer<Body>>;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct CreatureIndex(usize);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct BodyIndex(usize);
+
+const GRID_MIN: [isize; 3] = [-200, -3, -200];
+const GRID_MAX: [isize; 3] = [200, 10, 200];
+const GRID_SUBDIVISIONS: [usize; 3] = [15, 1, 15];
+
+const FIXED_DELTA_TIME: f64 = 0.03;
+
 struct CreaturesManager {
-    //creatures: Vec<Creature>,
-    creature_controlled_by_window: HashMap<WindowId, usize>,
+    creature_controlled_by_window: HashMap<WindowId, CreatureIndex>,
     creature_selection_window: Option<WindowId>,
+
+    creatures: Vec<CreatureType>,
+    captured_creatures: Vec<CreatureIndex>,
 }
 
 struct Settings {
     mouse_sensitivity: f32,
 }
 
-struct Movement {
-    wasd_held: [bool; 4],
-    sprinting: bool,
-    jump_held: bool,
-}
-
 struct Game {
     settings: Settings,
-
-    movement: Movement,
 
     creatures_manager: CreaturesManager,
 
     paused: bool,
     window_focused: Option<WindowId>,
+
+    capture_key_held: bool,
+    // Usize is index into bodies within capture range. BodyIndex is to make certain that it is still the same body, and hasn't accidentally changed.
+    capture_index_selected: Option<(usize, BodyIndex)>,
+    bodies_within_capture_range: Option<Vec<BodyIndex>>,
 }
 
 impl Game {
@@ -62,32 +76,55 @@ impl Game {
                 mouse_sensitivity: 1.0,
             },
 
-            movement: Movement {
-                wasd_held: [false; 4],
-                sprinting: true,
-                jump_held: false,
-            },
-
             creatures_manager: CreaturesManager {
-                //creatures: vec![],
                 creature_controlled_by_window: HashMap::new(),
                 creature_selection_window: None,
+
+                creatures: vec![],
+                captured_creatures: vec![],
             },
 
             paused: false,
             window_focused: None,
+
+            capture_key_held: false,
+            capture_index_selected: None,
+            bodies_within_capture_range: None,
         }
+    }
+
+    fn focused_creature(&self) -> &CreatureType {
+        let focused_window = self.window_focused.unwrap();
+
+        let creature_index = *self
+            .creatures_manager
+            .creature_controlled_by_window
+            .get(&focused_window)
+            .unwrap();
+
+        &self.creatures_manager.creatures[creature_index.0]
+    }
+
+    fn focused_creature_mut(&mut self) -> &mut CreatureType {
+        let focused_window = self.window_focused.unwrap();
+
+        let creature_index = *self
+            .creatures_manager
+            .creature_controlled_by_window
+            .get(&focused_window)
+            .unwrap();
+
+        &mut self.creatures_manager.creatures[creature_index.0]
     }
 }
 
 fn main() {
+    println!("TODO:\nStore which grid actually have collision in them, so you don't have to loop over them all.");
+
     let mut game = Game::new();
 
     let physics_config = solver::Config {
-        grid_size: [10, 1, 10],
-        grid_origin: [-25.0, -3.0, -25.0],
-        cell_size: [5, 10, 5],
-        ..Default::default()
+        ..solver::Config::size_from_min_max_with_subdivisions(GRID_MIN, GRID_MAX, GRID_SUBDIVISIONS)
     };
 
     let physics_simulation = CpuSolver::new(physics_config);
@@ -102,6 +139,7 @@ fn main() {
     };
 
     let config = engine::Config {
+        physics_fixed_update: FixedUpdate::new(FIXED_DELTA_TIME, MaxSubsteps::WarnAt(100)),
         renderer_config,
         close_everything_on_window_close: false,
         ..Default::default()
@@ -111,50 +149,79 @@ fn main() {
 
     let temp_event_loop = engine.temporary_event_loop_storage.take().unwrap();
 
-    engine.physics.bodies.push(Body::Creature(Creature {
-        particle: Particle::from_position([0.0; 3]),
-        half_size: [0.5, 1.0, 0.5],
-
-        mass: 1.0,
-        dampening: [0.0; 3],
-
-        grounded: false,
-    }));
+    game.creatures_manager
+        .creatures
+        .push(CreatureType::Burgle(Burgle::new(
+            &mut engine,
+            [0.0; 3],
+            [0.5, 1.0, 0.5],
+            [1.5; 3],
+            [1.0, 0.0, 1.0, 1.0],
+            CreatureIndex(game.creatures_manager.creatures.len()),
+        )));
 
     game.creatures_manager
-        .creature_controlled_by_window
-        .insert(engine.windows_manager.primary_window_id().unwrap(), 0);
+        .captured_creatures
+        .push(CreatureIndex(0));
+
+    game.creatures_manager.creature_controlled_by_window.insert(
+        engine.windows_manager.primary_window_id().unwrap(),
+        CreatureIndex(0),
+    );
 
     // 2 player test
-    engine.physics.bodies.push(Body::Creature(Creature {
-        particle: Particle::from_position([5.0, 0.0, 5.0]),
-        half_size: [0.5, 1.0, 0.5],
+    game.creatures_manager
+        .creatures
+        .push(CreatureType::Burgle(Burgle::new(
+            &mut engine,
+            [0.0; 3],
+            [0.5, 1.0, 0.5],
+            [1.5; 3],
+            [1.0, 1.0, 0.0, 1.0],
+            CreatureIndex(game.creatures_manager.creatures.len()),
+        )));
 
-        mass: 1.0,
-        dampening: [0.0; 3],
-
-        grounded: false,
-    }));
+    /*
+    game.creatures_manager
+        .captured_creatures
+        .push(CreatureIndex(1));
+    */
 
     let mut starting_renderer = common_renderer::Methods::new(&mut engine);
+
+    starting_renderer.add_cuboid_colour(instanced_simple_lit_colour_3d::Instance::new(
+        [1.0; 4],
+        Matrix4::from_translation([GRID_MIN[0] as f32, GRID_MIN[1] as f32, GRID_MIN[2] as f32]),
+    ));
+
+    starting_renderer.add_cuboid_colour(instanced_simple_lit_colour_3d::Instance::new(
+        [1.0; 4],
+        Matrix4::from_translation([GRID_MAX[0] as f32, GRID_MAX[1] as f32, GRID_MAX[2] as f32]),
+    ));
 
     starting_renderer.add_cuboid_colour(instanced_simple_lit_colour_3d::Instance::new(
         [1.0; 4],
         Matrix4::from_translation([2.0, 0.0, 0.0]),
     ));
 
+    /*
     let second_player_window =
         starting_renderer.create_window(WindowConfig::default(), &temp_event_loop);
 
     game.creatures_manager
         .creature_controlled_by_window
-        .insert(second_player_window, 1);
+        .insert(second_player_window, CreatureIndex(1));
+    */
 
     engine.temporary_event_loop_storage = Some(temp_event_loop);
 
     let floor = AabbCentredOrigin {
         position: [0.0, 1.0, 0.0],
-        half_size: [25.0, 0.5, 25.0],
+        half_size: [
+            (GRID_MAX[0] - GRID_MIN[0]) as f32 * 0.5,
+            0.5,
+            (GRID_MAX[2] - GRID_MIN[2]) as f32 * 0.5,
+        ],
     };
     engine
         .physics
@@ -188,9 +255,7 @@ fn main() {
         }
 
         EngineEvent::WinitEvent(Event::MainEventsCleared) => {
-            //update(&mut game, &mut rain);
-
-            //println!("{}", engine.fps_tracker().average_fps());
+            on_update(&mut game, engine)
         }
 
         EngineEvent::PhysicsEvent(PhysicsEvent::BeforeTick) => {
@@ -205,7 +270,7 @@ fn main() {
             event: WindowEvent::KeyboardInput { input, .. },
             ..
         }) => {
-            on_keyboard_input(input, control_flow, engine, &mut game);
+            on_keyboard_input(input, control_flow, engine, &mut game, event_loop);
         }
 
         EngineEvent::WinitEvent(Event::WindowEvent {
@@ -228,14 +293,6 @@ fn main() {
                 return;
             };
 
-            let mut renderer = common_renderer::Methods::new(engine);
-
-            let mut camera = renderer
-                .get_window_specific(window_focused)
-                .unwrap()
-                .camera
-                .clone(); // Cloning is nasty.
-
             let window_renderer = engine
                 .windows_manager
                 .get_renderer_mut(window_focused)
@@ -246,10 +303,12 @@ fn main() {
                 return;
             }
 
+            let value = value as f32 * game.settings.mouse_sensitivity;
+
             match axis {
-                0 => camera.rotation[1] -= value as f32 * game.settings.mouse_sensitivity,
-                1 => camera.rotation[0] -= value as f32 * game.settings.mouse_sensitivity,
-                _ => (),
+                0 => game.focused_creature_mut().on_mouse_movement([0.0, value]),
+                1 => game.focused_creature_mut().on_mouse_movement([value, 0.0]),
+                _ => unreachable!("We do not support mice with more than 2 dimensions. I don't even know if they exist.")
             }
 
             let window_extent = window_renderer.window_size();
@@ -262,11 +321,6 @@ fn main() {
                 ))
                 .unwrap();
             window_renderer.window().set_cursor_visible(false);
-
-            let mut renderer = common_renderer::Methods::new(engine);
-
-            renderer.get_window_specific(window_focused).unwrap().camera = camera;
-            // deal wit hit!!! TODO: this will never work!!!!
         }
 
         EngineEvent::WinitEvent(Event::DeviceEvent {
@@ -292,6 +346,11 @@ fn on_physics_fixed_update_before_physics_tick(game: &mut Game, engine: &mut Eng
         return;
     };
 
+    let creature = &mut game.creatures_manager.creatures[creature_index.0];
+
+    creature.on_physics_fixed_update_before_physics_tick_when_focused(&mut engine.physics.bodies);
+
+    /*
     let motion = match game.movement.wasd_held {
         [true, false, false, false] => (0.0, -1.0),
         [false, false, true, false] => (0.0, 1.0),
@@ -334,11 +393,11 @@ fn on_physics_fixed_update_before_physics_tick(game: &mut Game, engine: &mut Eng
         real_motion.1 * y_rotation_cos + real_motion.0 * y_rotation_sin,
     );
 
-    let creature = creature(*creature_index, engine);
+    //let creature = creature(*creature_index, engine);
+    let creature = game.creatures_manager.creatures[creature_index.0];
 
-    creature
-        .particle
-        .accelerate([real_motion.0 as f32, 0.0, real_motion.1 as f32]);
+    // Replace this garbage, as the creature might have different speeds, or just entirely different controls.
+    creature.accelerate([real_motion.0 as f32, 0.0, real_motion.1 as f32], &mut engine.physics.bodies);
 
     if game.movement.jump_held {
         //if game.player().grounded {
@@ -352,18 +411,103 @@ fn on_physics_fixed_update_before_physics_tick(game: &mut Game, engine: &mut Eng
 
     creature.dampening = [horizontal_dampening, 1.0, horizontal_dampening];
     // y 0.98 originally
+    */
 }
 
-fn on_physics_fixed_update_after_physics_tick(game: &mut Game, engine: &mut Engine) {
-    for (window_id, creature_index) in &game.creatures_manager.creature_controlled_by_window {
-        let creature_position = creature(*creature_index, engine).particle.position;
-        let camera = camera(*window_id, engine);
+fn on_physics_fixed_update_after_physics_tick(game: &mut Game, engine: &mut Engine) {}
 
-        camera.position = add_3d(creature_position, [0.0, -1.0, 0.0]);
+fn on_update(game: &mut Game, engine: &mut Engine) {
+    if game.capture_key_held {
+        if let Some(focused_window) = game.window_focused {
+            // Accounts for it perhaps being the creature selection window.
+            if let Some(creature_index) = game
+                .creatures_manager
+                .creature_controlled_by_window
+                .get(&focused_window)
+            {
+                let creature = &game.creatures_manager.creatures[creature_index.0];
+
+                let mut bodies_within_capture_range =
+                    creature.get_bodies_within_capture_range(&engine.physics.bodies);
+                let mut uncaptured_bodies_within_capture_range =
+                    Vec::with_capacity(bodies_within_capture_range.len());
+
+                for body_index in bodies_within_capture_range {
+                    if !game
+                        .creatures_manager
+                        .captured_creatures
+                        .contains(&engine.physics.bodies[body_index.0].owner().unwrap())
+                    {
+                        uncaptured_bodies_within_capture_range.push(body_index);
+                    }
+                }
+
+                bodies_within_capture_range = uncaptured_bodies_within_capture_range;
+                bodies_within_capture_range.sort();
+
+                // Check if the index.0 is invalid in any way, then always search to see if index.1 is still in the bodies, and if so, correct index.0
+                if let Some(capture_index_selected) = game.capture_index_selected {
+                    let mut invalid_index = false;
+
+                    if capture_index_selected.0 >= bodies_within_capture_range.len() {
+                        invalid_index = true;
+                    } else if bodies_within_capture_range[capture_index_selected.0]
+                        != capture_index_selected.1
+                    {
+                        invalid_index = true;
+                    }
+
+                    if invalid_index {
+                        if let Ok(new_index) =
+                            bodies_within_capture_range.binary_search(&capture_index_selected.1)
+                        {
+                            game.capture_index_selected =
+                                Some((new_index, capture_index_selected.1));
+                        } else {
+                            game.capture_index_selected = None;
+                        }
+                    }
+                }
+
+                game.bodies_within_capture_range = Some(bodies_within_capture_range);
+            }
+        }
+    }
+
+    for (window_id, creature_index) in &game.creatures_manager.creature_controlled_by_window {
+        let creature = &game.creatures_manager.creatures[creature_index.0];
+
+        // Really unfortunate.
+        let mut cloned_camera = camera(*window_id, engine).clone();
+        creature.update_camera(&mut cloned_camera, &engine.physics.bodies);
+
+        let camera = camera(*window_id, engine);
+        *camera = cloned_camera;
 
         camera.light_position[0] = camera.position[0];
         camera.light_position[2] = camera.position[2];
     }
+}
+
+enum Action {
+    HorizontalMovement([f32; 2]),
+    VerticalMovement(f32),
+
+    Capture(bool),
+
+    SpeedModifier(f32),
+
+    PrimaryInteract,
+    SecondaryInteract,
+
+    MoveSelection(i8),
+    // Add unknown with some type that could take keyboard inputs and other input types. Perhaps enum?
+}
+
+impl Action {
+    //fn from_keyboard_input(input: KeyboardInput, manager: InputManager) -> Self {
+
+    //}
 }
 
 fn on_keyboard_input(
@@ -371,19 +515,24 @@ fn on_keyboard_input(
     control_flow: &mut ControlFlow,
     engine: &mut Engine,
     game: &mut Game,
+    event_loop: &EventLoopWindowTarget<()>,
 ) {
     if let Some(key_code) = input.virtual_keycode {
+        let focused_window = game.window_focused.unwrap();
         let window_renderer = engine
             .windows_manager
-            .get_renderer_mut(game.window_focused.unwrap())
+            .get_renderer_mut(focused_window)
             .unwrap();
 
-        match key_code {
-            VirtualKeyCode::W => game.movement.wasd_held[0] = is_pressed(input.state),
-            VirtualKeyCode::A => game.movement.wasd_held[1] = is_pressed(input.state),
-            VirtualKeyCode::S => game.movement.wasd_held[2] = is_pressed(input.state),
-            VirtualKeyCode::D => game.movement.wasd_held[3] = is_pressed(input.state),
+        let focused_creature_index = *game
+            .creatures_manager
+            .creature_controlled_by_window
+            .get(&focused_window)
+            .unwrap();
 
+        game.creatures_manager.creatures[focused_creature_index.0].on_keyboard_input(input);
+
+        match key_code {
             VirtualKeyCode::Backslash => {
                 if is_pressed(input.state) {
                     if let None = window_renderer.window().fullscreen() {
@@ -396,13 +545,97 @@ fn on_keyboard_input(
                 }
             }
 
-            VirtualKeyCode::F => {
-                if is_pressed(input.state) {
-                    game.movement.sprinting = !game.movement.sprinting;
+            VirtualKeyCode::Tab => {
+                if game.capture_key_held && is_pressed(input.state) {
+                    let Some(bodies_within_capture_range) = &game.bodies_within_capture_range
+                    else {
+                        println!("This seems impossible, but perhaps it isn't.");
+                        return;
+                    };
+                    println!(
+                        "bodies_within_capture_range: {:?}",
+                        bodies_within_capture_range
+                    );
+
+                    if bodies_within_capture_range.len() != 0 {
+                        if let Some(ref mut capture_index_selected) =
+                            &mut game.capture_index_selected
+                        {
+                            // Some way to backwards would be nice?
+                            capture_index_selected.0 += 1;
+                            capture_index_selected.0 %= bodies_within_capture_range.len() + 1;
+
+                            if capture_index_selected.0 == bodies_within_capture_range.len() {
+                                game.capture_index_selected = None;
+                            } else {
+                                capture_index_selected.1 =
+                                    bodies_within_capture_range[capture_index_selected.0];
+                            }
+                        } else {
+                            game.capture_index_selected = Some((0, bodies_within_capture_range[0]));
+                        }
+
+                        println!("capture_index_selected: {:?}", game.capture_index_selected);
+                    }
                 }
             }
 
-            VirtualKeyCode::Space => game.movement.jump_held = is_pressed(input.state),
+            VirtualKeyCode::C => {
+                game.capture_key_held = is_pressed(input.state);
+
+                if !game.capture_key_held {
+                    println!("Capture key released!");
+                    println!("capture_index_selected: {:?}", game.capture_index_selected);
+
+                    if let Some(capture_index_selected) = game.capture_index_selected {
+                        let capture_creature_index = engine.physics.bodies
+                            [capture_index_selected.1 .0]
+                            .owner()
+                            .unwrap();
+
+                        // Wrangle the borrow checker into lettings us mutably attempt_capture on the capture creature and mutably give it the spreader.
+                        // This feels like it could be simplified.
+                        let (capture, spreader) =
+                            if focused_creature_index.0 > capture_creature_index.0 {
+                                let (lhs, rhs) = game
+                                    .creatures_manager
+                                    .creatures
+                                    .split_at_mut(focused_creature_index.0);
+
+                                (&mut lhs[capture_creature_index.0], &mut rhs[0])
+                            } else {
+                                let (lhs, rhs) = game
+                                    .creatures_manager
+                                    .creatures
+                                    .split_at_mut(capture_creature_index.0);
+
+                                (&mut rhs[0], &mut lhs[focused_creature_index.0])
+                            };
+
+                        if capture.attempt_capture(
+                            spreader,
+                            capture_index_selected.1,
+                            &mut engine.physics.bodies,
+                        ) {
+                            game.creatures_manager
+                                .captured_creatures
+                                .push(capture_creature_index);
+
+                            let new_window = renderer(engine)
+                                .create_window(WindowConfig::default(), &event_loop);
+
+                            game.creatures_manager
+                                .creature_controlled_by_window
+                                .insert(new_window, capture_creature_index);
+                        }
+                    }
+
+                    game.capture_index_selected = None;
+                    game.bodies_within_capture_range = None;
+                } else {
+                    //println!("Capture key pressed!");
+                }
+            }
 
             VirtualKeyCode::Delete => {
                 if is_pressed(input.state) {
@@ -419,17 +652,24 @@ fn on_keyboard_input(
 
             VirtualKeyCode::P => {
                 if is_pressed(input.state) {
+                    // Unwrapping should be safe, as you have to be focused to input a keycode.
                     let window_id = game.window_focused.unwrap();
 
-                    if let Some(creature_index) = game
+                    if Some(window_id) == game.creatures_manager.creature_selection_window {
+                        return;
+                    }
+
+                    let creature_index = *game
                         .creatures_manager
                         .creature_controlled_by_window
                         .get(&window_id)
-                    {
-                        println!("creature: {:?}", creature(*creature_index, engine));
-                    }
+                        .unwrap();
 
-                    // Unwrapping should be safe, as you have to be focused to input a keycode.
+                    println!("Creature Index: {}", creature_index.0);
+
+                    //println!("creature: {:?}", creature(creature_index, engine));
+                    //println!("collisions: {:?}", collisions(creature_index, engine));
+
                     println!("camera: {:?}", camera(window_id, engine));
                 }
             }
@@ -440,9 +680,67 @@ fn on_keyboard_input(
                 }
             }
 
+            VirtualKeyCode::T => {
+                for _ in 0..500 {
+                    let index = engine.physics.bodies.len();
+
+                    let mut rng = thread_rng();
+
+                    engine.physics.bodies.push(Body::Creature(CreatureBody {
+                        particle: Particle::from_position([
+                            rng.gen_range(GRID_MIN[0] as f32..GRID_MAX[0] as f32),
+                            -10.0,
+                            rng.gen_range(GRID_MIN[2] as f32..GRID_MAX[2] as f32),
+                        ]),
+                        half_size: [0.5, 0.5, 0.5],
+
+                        mass: 1.0,
+                        dampening: [0.9, 1.0, 0.9],
+
+                        grounded: false,
+
+                        // This is allowed to be wrong. This control is just for testing physics.
+                        owner: CreatureIndex(0),
+                    }));
+
+                    let mut renderer = common_renderer::Methods::new(engine);
+
+                    renderer.add_cuboid_colour_from_body_index(index, [0.0, 1.0, 1.0, 1.0]);
+                }
+            }
+
             _ => (),
         }
     }
+}
+
+#[inline]
+fn wasd_to_movement(wasd: [bool; 4]) -> [f32; 2] {
+    match wasd {
+        [true, false, false, false] => [0.0, -1.0],
+        [false, false, true, false] => [0.0, 1.0],
+        [false, false, false, true] => [-1.0, 0.0],
+        [false, true, false, false] => [1.0, 0.0],
+
+        [true, true, false, false] => [0.7, -0.7],
+        [true, false, false, true] => [-0.7, -0.7],
+
+        [false, true, true, false] => [0.7, 0.7],
+        [false, false, true, true] => [-0.7, 0.7],
+
+        _ => [0.0, 0.0],
+    }
+}
+
+#[inline]
+fn movement_in_direction(movement: [f32; 2], rotation_x_y: [f32; 2]) -> [f32; 2] {
+    let y_rotation_cos = rotation_x_y[1].to_radians().cos();
+    let y_rotation_sin = rotation_x_y[1].to_radians().sin();
+
+    [
+        movement[0] * y_rotation_cos - movement[1] * y_rotation_sin,
+        movement[1] * y_rotation_cos + movement[0] * y_rotation_sin,
+    ]
 }
 
 #[inline]
@@ -450,12 +748,23 @@ fn renderer(engine: &mut Engine) -> common_renderer::Methods<Body> {
     common_renderer::Methods::new(engine)
 }
 
-fn creature(index: usize, engine: &mut Engine) -> &mut Creature {
-    let Body::Creature(creature) = &mut engine.physics.bodies[index] else {
-        panic!()
-    };
-    creature
-}
+// fn creature(index: usize, engine: &mut Engine) -> &mut CreatureBody {
+//     let Body::Creature(creature) = &mut engine.physics.bodies[index] else {
+//         panic!("index: {index}")
+//     };
+//     creature
+// }
+
+// fn collisions(index: usize, engine: &mut Engine) -> &[usize] {
+//     let Body::TriggerImmovableCuboid {
+//         aabb: _,
+//         collisions,
+//     } = &engine.physics.bodies[index + 1]
+//     else {
+//         panic!("index: {index}")
+//     };
+//     collisions
+// }
 
 fn camera(window_id: WindowId, engine: &mut Engine) -> &mut Camera {
     &mut engine

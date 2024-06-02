@@ -25,16 +25,45 @@ where
     pub bodies: Vec<B>,
 }
 
-impl<B> Default for Config<f32, B>
-where
-    B: Body<f32>,
-{
+impl<T: math::Float, B: Body<T>> Config<T, B> {
+    /// Does all the sizing and origin and everything from a min position, a max position, and subivision counts.
+    ///
+    /// ??? is up
+    pub fn size_from_min_max_with_subdivisions(
+        min: [isize; 3],
+        max: [isize; 3],
+        subdivisions: [usize; 3],
+    ) -> Self {
+        let world_size = [
+            (max[0] - min[0]) as usize,
+            (max[1] - min[1]) as usize,
+            (max[2] - min[2]) as usize,
+        ]; // maybe correct
+           //println!("world size: {:?}", world_size);
+
+        let cell_size = math::div_3d(world_size, subdivisions); // maybe correct
+                                                                //println!("cell size: {:?}", cell_size);
+
+        Self {
+            grid_size: math::div_3d(world_size, cell_size), // maybe correct
+            grid_origin: [
+                T::from_f64(min[0] as f64),
+                T::from_f64(min[1] as f64),
+                T::from_f64(min[2] as f64),
+            ], // maybe correct
+            cell_size,
+            ..Default::default()
+        }
+    }
+}
+
+impl<T: math::Float, B: Body<T>> Default for Config<T, B> {
     fn default() -> Self {
         Self {
-            gravity: [0.0, 50.0, 0.0],
-            dampening: [0.8, 1.0, 0.8],
+            gravity: [T::from_f64(0.0), T::from_f64(50.0), T::from_f64(0.0)],
+            dampening: [T::from_f64(0.8), T::ONE, T::from_f64(0.8)],
             grid_size: [10; 3],
-            grid_origin: [0.0; 3],
+            grid_origin: [T::ZERO; 3],
             cell_size: [5; 3],
             outside_of_grid_bounds_behaviour: OutsideOfGridBoundsBehaviour::ContinueUpdating,
             bodies: vec![],
@@ -56,12 +85,16 @@ where
 {
     pub gravity: [T; 3],
     pub dampening: [T; 3], // Where 1.0 is no dampening. Perhaps displacement_kept is a better name?
+
     pub bodies: Vec<B>,
+
     pub grid_size: [usize; 3], // This is in cell size units. This should probably be clarified.
     pub cell_size: [usize; 3], // TODO: asap work out how the usize vs isize nonsense will work, as we want this to work for negatives. Perhaps we can plus some sort of offset for the particle?
     pub grid_origin: [T; 3], // Remember that the origin is the bottom left corner of the grid, I think.
     pub grid: Vec<Vec<usize>>,
     pub outside_of_grid_bounds_behaviour: OutsideOfGridBoundsBehaviour<T, B>,
+
+    pub collisions: Vec<(usize, usize)>,
 }
 
 impl<T: math::Float, B: Body<T>> PhysicsSimulation<T> for CpuSolver<T, B> {
@@ -75,7 +108,15 @@ impl<T: math::Float, B: Body<T>> PhysicsSimulation<T> for CpuSolver<T, B> {
         let (collision_sender, collision_receiver) = channel();
         self.detect_collisions_extra_experimental(&collision_sender);
         drop(collision_sender);
-        self.respond_to_collisions(collision_receiver.iter(), delta_time);
+
+        self.collisions.clear();
+        self.collisions.extend(collision_receiver.iter());
+
+        // By these 2 lines remove any duplicate collision pairs, that previously ruined everything.
+        self.collisions.par_sort_unstable();
+        self.collisions.dedup();
+
+        self.respond_to_collisions(delta_time);
 
         for cell in &mut self.grid {
             if cell.capacity() == 0 {
@@ -101,12 +142,16 @@ where
         CpuSolver {
             gravity: config.gravity,
             dampening: config.dampening,
+
             bodies: config.bodies,
+
             grid_size: config.grid_size,
             cell_size: config.cell_size,
             grid_origin: config.grid_origin,
             grid: vec![vec![]; config.grid_size[0] * config.grid_size[1] * config.grid_size[2]],
             outside_of_grid_bounds_behaviour: config.outside_of_grid_bounds_behaviour,
+
+            collisions: vec![],
         }
     }
 
@@ -351,18 +396,18 @@ where
     }
 
     #[inline]
-    fn respond_to_collisions(
-        &mut self,
-        collisions: std::sync::mpsc::Iter<'_, (usize, usize)>,
-        delta_time: T,
-    ) {
-        for (lhs_body_index, rhs_body_index) in collisions {
+    fn respond_to_collisions(&mut self, delta_time: T) {
+        for (lhs_body_index, rhs_body_index) in &self.collisions {
+            let lhs_body_index = *lhs_body_index;
+            let rhs_body_index = *rhs_body_index;
+
             // This code is simple and elegant. By splitting at the largest index, it allows us to safely and &mutably yoink the verlet bodies.
             if lhs_body_index > rhs_body_index {
                 let (lhs_bodies, rhs_bodies) = self.bodies.split_at_mut(lhs_body_index);
                 //rhs_bodies[0].collide(&mut lhs_bodies[rhs_body_index], rhs_body_index, delta_time);
                 rhs_bodies[0].respond_to_collision(
                     &mut lhs_bodies[rhs_body_index],
+                    lhs_body_index,
                     rhs_body_index,
                     delta_time,
                 );
@@ -371,6 +416,7 @@ where
                 //lhs_bodies[lhs_body_index].collide(&mut rhs_bodies[0], rhs_body_index, delta_time);
                 lhs_bodies[lhs_body_index].respond_to_collision(
                     &mut rhs_bodies[0],
+                    lhs_body_index,
                     rhs_body_index,
                     delta_time,
                 );
