@@ -1,11 +1,8 @@
 use clunky::{
-    math::{
-        add_3d, direction_3d_to_signed_number_3d, mul_3d, mul_3d_by_1d, neg_3d, Direction, Float,
-    },
+    math::{direction_3d_to_signed_number_3d, mul_3d, mul_3d_by_1d, neg_3d, Direction},
     physics::physics_3d::{
-        aabb::AabbCentredOrigin,
-        bodies, calculate_collision_impulse, calculate_collision_impulse_with_immovable_rhs,
-        verlet::{self, Particle},
+        aabb::AabbCentredOrigin, bodies, calculate_collision_impulse,
+        calculate_collision_impulse_with_immovable_rhs, verlet::Particle,
     },
 };
 

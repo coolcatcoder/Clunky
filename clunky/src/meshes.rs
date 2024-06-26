@@ -14,7 +14,11 @@ pub const DEBUG_VIEWER: bool = false;
 
 pub const CUBE_GLTF: &[u8] = include_bytes!("./meshes/Box.glb");
 
-pub fn get_indices_from_gltf(gltf: &[u8], mesh_index: usize) -> Vec<u32> {
+/// Gets indices from gltf and converts them to whatever format you want, as long as it implements From<u32>.
+pub fn get_indices_from_gltf<T: TryFrom<u32>>(gltf: &[u8], mesh_index: usize) -> Vec<T>
+where
+    <T as TryFrom<u32>>::Error: std::fmt::Debug,
+{
     let (gltf, buffers, _) = gltf::import_slice(gltf).unwrap();
 
     let mesh = gltf.meshes().nth(mesh_index).unwrap();
@@ -25,7 +29,7 @@ pub fn get_indices_from_gltf(gltf: &[u8], mesh_index: usize) -> Vec<u32> {
     let mut indices = vec![];
 
     for index in reader.read_indices().unwrap().into_u32() {
-        indices.push(index)
+        indices.push(index.try_into().unwrap())
     }
 
     indices

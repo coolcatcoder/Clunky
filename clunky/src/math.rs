@@ -8,7 +8,7 @@
 // This will never be as good as glam and cgmath. Might give up maintaining this, and focus on things I can do! Like physics and premade shaders and such like.
 
 use const_soft_float::soft_f32::SoftF32;
-use std::ops;
+use std::ops::{self, Deref, Mul};
 extern crate test;
 
 /// A basic number.
@@ -547,7 +547,9 @@ pub fn get_squared_magnitude_3d<T: Number>(vector: [T; 3]) -> T {
     vector[0] * vector[0] + vector[1] * vector[1] + vector[2] * vector[2]
 }
 
+/// Gets the magnitude of a 3d number.
 #[inline]
+#[must_use]
 pub fn get_magnitude_3d<T: Float>(vector: [T; 3]) -> T {
     get_squared_magnitude_3d(vector).sqrt()
 }
@@ -569,6 +571,35 @@ pub fn normalise_3d<T: Float>(vector: [T; 3]) -> [T; 3] {
         vector[1] / magnitude,
         vector[2] / magnitude,
     ]
+}
+
+// Gets the squared magnitude of a 2d number.
+#[inline]
+#[must_use]
+pub fn get_squared_magnitude_2d<T: Number>(vector: [T; 2]) -> T {
+    vector[0] * vector[0] + vector[1] * vector[1]
+}
+
+/// Gets the magnitude of a 2d number.
+#[inline]
+#[must_use]
+pub fn get_magnitude_2d<T: Float>(vector: [T; 2]) -> T {
+    get_squared_magnitude_2d(vector).sqrt()
+}
+
+/// Normalises a 3d number.
+/// If the magnitude is 0, it will return 0 and not NaN.
+#[inline]
+#[must_use]
+pub fn normalise_2d<T: Float>(vector: [T; 2]) -> [T; 2] {
+    let magnitude = get_magnitude_2d(vector);
+
+    // We can't let this function return NaN.
+    if magnitude == T::ZERO {
+        return [T::ZERO; 2];
+    }
+
+    [vector[0] / magnitude, vector[1] / magnitude]
 }
 
 /// Multiply a 2d number by another 2d number.
@@ -712,6 +743,24 @@ pub fn direction_3d_to_signed_number_3d<T: SignedNumber>(direction: [Direction; 
     ]
 }
 
+// New Math
+
+pub struct F32x3([f32; 3]);
+
+impl Mul for F32x3 {
+    type Output = Self;
+    #[inline]
+    fn mul(self, rhs: Self) -> Self::Output {
+        Self([
+            self.0[0] * rhs.0[0],
+            self.0[1] * rhs.0[1],
+            self.0[2] * rhs.0[2],
+        ])
+    }
+}
+
+// End of New Math
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -728,12 +777,25 @@ mod tests {
     }
 
     #[bench]
-    fn bench_to_radians(b: &mut Bencher) {
-        b.iter(|| return test::black_box(Degrees(90.0)).to_radians())
+    fn bench_to_radians_test(b: &mut Bencher) {
+        b.iter(|| return test::black_box(Degrees(90.0)).to_radians_test())
     }
 
     #[bench]
-    fn bench_to_radians_test(b: &mut Bencher) {
-        b.iter(|| return test::black_box(Degrees(90.0)).to_radians_test())
+    fn bench_old_mul(b: &mut Bencher) {
+        b.iter(|| {
+            return mul_3d(
+                test::black_box([0.5_f32, 30.2, 8.753]),
+                test::black_box([0.9, 50.2, 97.7531233]),
+            );
+        })
+    }
+
+    #[bench]
+    fn bench_new_mul(b: &mut Bencher) {
+        b.iter(|| {
+            return test::black_box(F32x3([0.5, 30.2, 8.753]))
+                * test::black_box(F32x3([0.9, 50.2, 97.7531233]));
+        })
     }
 }

@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use clunky::{
     lost_code::{FixedUpdate, FpsTracker, MaxSubsteps},
+    math::Float,
     physics::{physics_3d::bodies::CommonBody, PhysicsSimulation},
 };
 use vulkano::{
@@ -274,4 +275,15 @@ impl Allocators {
             ),
         }
     }
+}
+
+pub struct EngineBuilder {
+    event_loop: EventLoop<()>,
+}
+
+pub struct ExperimentalEngine<R, P, F: Float> {
+    pub renderer: R,
+    pub physics: P,
+
+    pub fixed_update: Option<FixedUpdate<F>>,
 }

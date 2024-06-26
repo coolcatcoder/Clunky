@@ -21,15 +21,14 @@ use crate::math::{self, Degrees, Matrix4, Radians};
 pub mod vertex_shader {
     vulkano_shaders::shader! {
         ty: "vertex",
-        path: "src/shaders/colour_3d_instanced_shaders/vertex_shader.vert",
+        path: "src/shaders/instanced_simple_lit_uv_3d/vertex_shader.vert",
     }
 }
-pub use vertex_shader::Camera as CameraUniform;
 
 pub mod fragment_shader {
     vulkano_shaders::shader! {
         ty: "fragment",
-        path: "src/shaders/colour_3d_instanced_shaders/fragment_shader.frag",
+        path: "src/shaders/instanced_simple_lit_uv_3d/fragment_shader.frag",
     }
 }
 
@@ -42,6 +41,9 @@ pub struct Vertex {
 
     #[format(R32G32B32_SFLOAT)]
     pub normal: [f32; 3],
+
+    #[format(R32G32_SFLOAT)]
+    pub uv: [f32; 2],
 }
 
 impl Vertex {
@@ -58,12 +60,17 @@ impl Vertex {
 
         let mut vertices = vec![];
 
-        for (position, normal) in reader
-            .read_positions()
-            .unwrap()
-            .zip(reader.read_normals().unwrap())
-        {
-            vertices.push(Vertex { position, normal });
+        for (position, (normal, uv)) in reader.read_positions().unwrap().zip(
+            reader
+                .read_normals()
+                .unwrap()
+                .zip(reader.read_tex_coords(0).unwrap().into_f32()),
+        ) {
+            vertices.push(Vertex {
+                position,
+                normal,
+                uv,
+            });
         }
 
         vertices
@@ -74,8 +81,8 @@ impl Vertex {
 #[derive(BufferContents, VertexTrait, Copy, Clone, Debug)]
 #[repr(C)]
 pub struct Instance {
-    #[format(R32G32B32A32_SFLOAT)]
-    pub colour: [f32; 4],
+    #[format(R32G32_SFLOAT)]
+    pub uv_offset: [f32; 2],
 
     #[format(R32G32B32A32_SFLOAT)]
     pub model_to_world_0: [f32; 4],
@@ -92,9 +99,9 @@ pub struct Instance {
 
 impl Instance {
     /// Constructs a new Instance.
-    pub const fn new(colour: [f32; 4], model_to_world: math::Matrix4) -> Instance {
+    pub const fn new(uv_offset: [f32; 2], model_to_world: math::Matrix4) -> Instance {
         Instance {
-            colour,
+            uv_offset,
             model_to_world_0: model_to_world.x,
             model_to_world_1: model_to_world.y,
             model_to_world_2: model_to_world.z,

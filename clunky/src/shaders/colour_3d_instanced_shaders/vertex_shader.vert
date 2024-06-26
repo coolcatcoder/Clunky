@@ -22,7 +22,7 @@ layout(location = 5) out float specular_strength;
 layout(location = 6) out vec3 light_colour;
 layout(location = 7) out vec3 light_position;
 
-layout(set = 0, binding = 0) uniform CameraData3D {
+layout(set = 0, binding = 0) uniform Camera {
     vec3 position;
     
     float ambient_strength;
