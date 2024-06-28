@@ -1,19 +1,42 @@
 use std::{collections::HashMap, sync::Arc};
 
 use clunky::{
-    math::Matrix4, meshes, physics::physics_3d::bodies::Body as BodyTrait,
-    shaders::instanced_simple_lit_colour_3d,
+    math::{Matrix4, Radians},
+    meshes,
+    physics::physics_3d::bodies::Body as BodyTrait,
+    shaders::{instanced_simple_lit_colour_3d, instanced_simple_lit_uv_3d},
 };
 use rayon::iter::{IntoParallelRefIterator, ParallelExtend, ParallelIterator};
 use vulkano::{
     buffer::{
         allocator::{SubbufferAllocator, SubbufferAllocatorCreateInfo},
         Buffer, BufferContents, BufferCreateInfo, BufferUsage, Subbuffer,
-    }, command_buffer::{
+    },
+    command_buffer::{
         allocator::StandardCommandBufferAllocator, AutoCommandBufferBuilder, CommandBufferUsage,
         CopyBufferInfo, PrimaryAutoCommandBuffer, PrimaryCommandBufferAbstract,
         RenderPassBeginInfo,
-    }, descriptor_set::{allocator::StandardDescriptorSetAllocator, PersistentDescriptorSet, WriteDescriptorSet}, device::Device, format::{ClearValue, Format}, image::{view::ImageView, Image, ImageCreateInfo, ImageType, ImageUsage}, memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator}, pipeline::{graphics::{input_assembly::{InputAssemblyState, PrimitiveTopology}, multisample::MultisampleState, rasterization::{CullMode, FrontFace, RasterizationState}, viewport::{Viewport, ViewportState}, GraphicsPipelineCreateInfo}, DynamicState, GraphicsPipeline, Pipeline, PipelineBindPoint}, render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass, Subpass}, sync::GpuFuture, DeviceSize
+    },
+    descriptor_set::{
+        allocator::StandardDescriptorSetAllocator, PersistentDescriptorSet, WriteDescriptorSet,
+    },
+    device::Device,
+    format::{ClearValue, Format},
+    image::{view::ImageView, Image, ImageCreateInfo, ImageType, ImageUsage},
+    memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator},
+    pipeline::{
+        graphics::{
+            input_assembly::{InputAssemblyState, PrimitiveTopology},
+            multisample::MultisampleState,
+            rasterization::{CullMode, FrontFace, RasterizationState},
+            viewport::{Viewport, ViewportState},
+            GraphicsPipelineCreateInfo,
+        },
+        DynamicState, GraphicsPipeline, Pipeline, PipelineBindPoint,
+    },
+    render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass, Subpass},
+    sync::GpuFuture,
+    DeviceSize,
 };
 use vulkano_util::{
     context::{VulkanoConfig, VulkanoContext},
@@ -30,8 +53,67 @@ const BACKGROUND_COLOUR: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
 const CUBOID_COLOUR_INSTANCES_STARTING_CAPACITY: usize = 50;
 const POTENTIAL_CUBOID_COLOUR_INSTANCES_STARTING_CAPACITY: usize = 1000;
 
+pub struct Camera3D {
+    pub position: [f32; 3],
+    pub rotation: [f32; 3],
+
+    pub ambient_strength: f32,
+    pub specular_strength: f32,
+    pub light_colour: [f32; 3],
+    pub light_position: [f32; 3],
+
+    pub near_distance: f32,
+    pub far_distance: f32,
+    pub aspect_ratio: f32,
+    pub fov_y: Radians<f32>,
+}
+
+impl Camera3D {
+    // Inline?
+    pub fn to_instanced_simple_lit_uv_3d_camera(&self) -> instanced_simple_lit_uv_3d::Camera {
+        instanced_simple_lit_uv_3d::Camera {
+            position: self.position,
+            rotation: self.rotation,
+
+            ambient_strength: self.ambient_strength,
+            specular_strength: self.specular_strength,
+            light_colour: self.light_colour,
+            light_position: self.light_position,
+
+            near_distance: self.near_distance,
+            far_distance: self.far_distance,
+            aspect_ratio: self.aspect_ratio,
+            fov_y: self.fov_y,
+        }
+    }
+
+    pub fn to_instanced_simple_lit_colour_3d_camera(
+        &self,
+    ) -> instanced_simple_lit_colour_3d::Camera {
+        instanced_simple_lit_colour_3d::Camera {
+            position: self.position,
+            rotation: self.rotation,
+
+            ambient_strength: self.ambient_strength,
+            specular_strength: self.specular_strength,
+            light_colour: self.light_colour,
+            light_position: self.light_position,
+
+            near_distance: self.near_distance,
+            far_distance: self.far_distance,
+            aspect_ratio: self.aspect_ratio,
+            fov_y: self.fov_y,
+        }
+    }
+}
+
+pub enum WindowVariety {
+    Creature(Camera3D),
+}
+
 pub struct WindowSpecific {
     viewport: Viewport,
+    variety: WindowVariety,
 }
 
 pub struct Allocators {
@@ -199,8 +281,83 @@ impl Renderer {
                 .unwrap()
                 .set_viewport(0, [window_specific.viewport.clone()].into_iter().collect())
                 .unwrap();
+
+            match &window_specific.variety {
+                WindowVariety::Creature(camera) => {
+                    let camera_uniform = self
+                        .allocators
+                        .subbuffer_allocator
+                        .allocate_sized()
+                        .unwrap();
+                    *camera_uniform.write().unwrap() = camera
+                        .to_instanced_simple_lit_colour_3d_camera()
+                        .to_uniform();
+                    self.pipelines.bind_instanced_simple_lit_colour_3d(
+                        &mut command_buffer_builder,
+                        &self.allocators,
+                        camera_uniform,
+                    );
+
+                    let cuboid_colour_instance_buffer = self
+                        .allocators
+                        .subbuffer_allocator
+                        .allocate_slice(self.buffers.cuboid_colour_instances.len() as DeviceSize)
+                        .unwrap();
+                    cuboid_colour_instance_buffer
+                        .write()
+                        .unwrap()
+                        .copy_from_slice(&self.buffers.cuboid_colour_instances);
+
+                    command_buffer_builder
+                        .bind_vertex_buffers(
+                            0,
+                            (
+                                self.buffers
+                                    .cuboid_colour_vertices_and_indices
+                                    .vertices
+                                    .clone(),
+                                cuboid_colour_instance_buffer,
+                            ),
+                        )
+                        .unwrap()
+                        .bind_index_buffer(
+                            self.buffers
+                                .cuboid_colour_vertices_and_indices
+                                .indices
+                                .clone(),
+                        )
+                        .unwrap()
+                        .draw_indexed(
+                            self.buffers
+                                .cuboid_colour_vertices_and_indices
+                                .indices
+                                .len() as u32,
+                            self.buffers.cuboid_colour_instances.len() as u32,
+                            0,
+                            0,
+                            0,
+                        )
+                        .unwrap();
+                }
+            }
+
+            command_buffer_builder
+                .end_render_pass(Default::default())
+                .unwrap();
+            let command_buffer = command_buffer_builder.build().unwrap();
+            window_renderer.present(
+                future
+                    .then_execute(self.context.graphics_queue().clone(), command_buffer)
+                    .unwrap()
+                    .boxed(),
+                false,
+            );
         }
     }
+
+    // fn render_creature_window(&self, command_buffer_builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>) {
+    // Maybe not.
+    // }
 }
 
 struct Buffers {
@@ -446,35 +603,28 @@ impl Pipelines {
         }
     }
 
-    fn bind_instanced_simple_lit_colour_3d(&self, command_buffer_builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>, allocators: &Allocators, camera_uniform: Subbuffer<instanced_simple_lit_colour_3d::CameraUniform>) {
+    fn bind_instanced_simple_lit_colour_3d(
+        &self,
+        command_buffer_builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
+        allocators: &Allocators,
+        camera_uniform: Subbuffer<instanced_simple_lit_colour_3d::CameraUniform>,
+    ) {
         command_buffer_builder
-                .bind_pipeline_graphics(
-                    self
-                        .instanced_simple_lit_colour_3d
-                        .clone(),
+            .bind_pipeline_graphics(self.instanced_simple_lit_colour_3d.clone())
+            .unwrap()
+            .bind_descriptor_sets(
+                PipelineBindPoint::Graphics,
+                self.instanced_simple_lit_colour_3d.layout().clone(),
+                0,
+                //TODO: Shouldn't this be persistent, as the name implies? Why is this being created every frame?
+                PersistentDescriptorSet::new(
+                    &allocators.descriptor_set_allocator,
+                    self.instanced_simple_lit_colour_3d.layout().set_layouts()[0].clone(),
+                    [WriteDescriptorSet::buffer(0, camera_uniform)],
+                    [],
                 )
-                .unwrap()
-                .bind_descriptor_sets(
-                    PipelineBindPoint::Graphics,
-                    self
-                        .instanced_simple_lit_colour_3d
-                        .layout()
-                        .clone(),
-                    0,
-                    //TODO: Shouldn't this be persistent, as the name implies? Why is this being created every frame?
-                    PersistentDescriptorSet::new(
-                        &allocators.descriptor_set_allocator,
-                        self
-                            .instanced_simple_lit_colour_3d
-                            .layout()
-                            .set_layouts()
-                            [0]
-                            .clone(),
-                        [WriteDescriptorSet::buffer(0, camera_uniform)],
-                        [],
-                    )
-                    .unwrap(),
-                )
-                .unwrap();
+                .unwrap(),
+            )
+            .unwrap();
     }
 }
