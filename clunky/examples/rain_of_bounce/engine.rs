@@ -3,7 +3,7 @@ use std::sync::Arc;
 use clunky::{
     lost_code::{FixedUpdate, FpsTracker, MaxSubsteps},
     math::Float,
-    physics::{physics_3d::bodies::CommonBody, PhysicsSimulation},
+    physics::PhysicsSimulation,
 };
 use vulkano::{
     buffer::{
@@ -25,7 +25,6 @@ use winit::{
     window::WindowId,
 };
 
-use crate::common_renderer::CommonRenderer;
 
 pub struct Redesign {
     // Physics

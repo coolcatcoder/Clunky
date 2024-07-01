@@ -1,16 +1,14 @@
 use clunky::{
     math::{add_3d, normalise_2d, remap},
     physics::physics_3d::{aabb::AabbCentredOrigin, verlet::Particle},
-    shaders::instanced_simple_lit_colour_3d::Camera,
 };
 use rand::{thread_rng, Rng};
 use winit::event::KeyboardInput;
 
 use crate::{
     body::{Body, Creature as CreatureBody},
-    renderer::{self, Camera3D, Renderer},
-    rotate_2d, rotate_about_x, rotate_about_y, rotate_about_z, ActionState, BodyIndex,
-    CreatureActions, CreatureIndex, Engine,
+    renderer::{Camera3D, Renderer}, rotate_about_x, rotate_about_y, ActionState, BodyIndex,
+    CreatureActions, CreatureIndex,
 };
 
 pub enum CreatureType {

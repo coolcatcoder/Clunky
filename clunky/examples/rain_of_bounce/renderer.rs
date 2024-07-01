@@ -45,7 +45,6 @@ use vulkano::{
 };
 use vulkano_util::{
     context::{VulkanoConfig, VulkanoContext},
-    renderer::VulkanoWindowRenderer,
     window::{VulkanoWindows, WindowDescriptor},
 };
 use winit::{

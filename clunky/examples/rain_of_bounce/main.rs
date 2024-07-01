@@ -2,35 +2,33 @@ use std::collections::HashMap;
 
 use clunky::{
     lost_code::{is_pressed, FixedUpdate, FpsTracker, MaxSubsteps},
-    math::{add_3d, remap, Matrix4},
+    math::{remap, Matrix4},
     physics::{
         physics_3d::{
             aabb::AabbCentredOrigin,
             //bodies::{Body, ImmovableCuboid},
             solver::{self, CpuSolver},
-            verlet::Particle,
         },
         PhysicsSimulation,
     },
     shaders::instanced_simple_lit_colour_3d::{self, Camera},
 };
 use common_renderer::{bits_has, CommonRenderer};
-use engine::{EngineEvent, PhysicsEvent, SimpleEngine};
-use gilrs::{ev::Code, EventType, Gilrs};
-use rand::{thread_rng, Rng};
+use engine::SimpleEngine;
+use gilrs::{EventType, Gilrs};
 use renderer::{Camera3D, Renderer, WindowConfig, WindowVariety};
 use vulkano::swapchain::PresentMode;
 use vulkano_util::window::WindowDescriptor;
 use winit::{
     dpi::PhysicalPosition,
     event::{
-        DeviceEvent, ElementState, Event, KeyboardInput, MouseButton, VirtualKeyCode, WindowEvent,
+        DeviceEvent, Event, KeyboardInput, MouseButton, WindowEvent,
     },
-    event_loop::{ControlFlow, EventLoop, EventLoopWindowTarget},
+    event_loop::{EventLoop, EventLoopWindowTarget},
     window::{Fullscreen, WindowId},
 };
 
-use body::{Body, Creature as CreatureBody};
+use body::Body;
 
 use creature_types::{Burgle, CreatureType};
 
@@ -86,7 +84,7 @@ struct Game {
 
 impl Game {
     fn new() -> (Self, EventLoop<()>) {
-        let (mut renderer, event_loop) = Renderer::new();
+        let (renderer, event_loop) = Renderer::new();
 
         let physics_config = solver::Config {
             ..solver::Config::size_from_min_max_with_subdivisions(

@@ -8,7 +8,7 @@
 // This will never be as good as glam and cgmath. Might give up maintaining this, and focus on things I can do! Like physics and premade shaders and such like.
 
 use const_soft_float::soft_f32::SoftF32;
-use std::ops::{self, Deref, Mul};
+use std::ops::{self, Mul};
 extern crate test;
 
 /// A basic number.
