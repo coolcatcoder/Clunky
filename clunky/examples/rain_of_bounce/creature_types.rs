@@ -8,7 +8,8 @@ use winit::event::KeyboardInput;
 
 use crate::{
     body::{Body, Creature as CreatureBody},
-    renderer, rotate_2d, rotate_about_x, rotate_about_y, rotate_about_z, ActionState, BodyIndex,
+    renderer::{self, Camera3D, Renderer},
+    rotate_2d, rotate_about_x, rotate_about_y, rotate_about_z, ActionState, BodyIndex,
     CreatureActions, CreatureIndex, Engine,
 };
 
@@ -86,7 +87,7 @@ impl CreatureType {
         }
     }
 
-    pub fn update_camera(&self, camera: &mut Camera, bodies: &[Body]) {
+    pub fn update_camera(&self, camera: &mut Camera3D, bodies: &[Body]) {
         match self {
             CreatureType::Burgle(burgle) => {
                 let Body::Creature(body) = &bodies[burgle.body.0] else {
@@ -155,7 +156,8 @@ pub struct Burgle {
 
 impl Burgle {
     pub fn new(
-        engine: &mut Engine,
+        renderer: &mut Renderer,
+        bodies: &mut Vec<Body>,
         position: [f32; 3],
         half_size: [f32; 3],
         trigger_half_size: [f32; 3],
@@ -163,9 +165,9 @@ impl Burgle {
 
         index: CreatureIndex,
     ) -> Burgle {
-        let body_index = engine.physics.bodies.len();
+        let body_index = bodies.len();
 
-        engine.physics.bodies.push(Body::Creature(CreatureBody {
+        bodies.push(Body::Creature(CreatureBody {
             particle: Particle::from_position(position),
             half_size,
 
@@ -176,7 +178,7 @@ impl Burgle {
 
             owner: index,
         }));
-        engine.physics.bodies.push(Body::TriggerImmovableCuboid {
+        bodies.push(Body::TriggerImmovableCuboid {
             aabb: AabbCentredOrigin {
                 position,
                 half_size: trigger_half_size,
@@ -184,8 +186,8 @@ impl Burgle {
             collisions: vec![],
         });
 
-        let mut renderer = renderer(engine);
-        renderer.add_cuboid_colour_from_body_index(body_index, colour);
+        //TODO: store for deletion.
+        renderer.add_removable_cuboid_colour_from_body_index(body_index, colour);
 
         let mut rng = thread_rng();
 

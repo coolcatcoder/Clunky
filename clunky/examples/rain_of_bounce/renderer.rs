@@ -1,9 +1,9 @@
 use std::{collections::HashMap, sync::Arc};
 
 use clunky::{
-    math::{Matrix4, Radians},
+    math::{mul_3d_by_1d, Matrix4, Radians},
     meshes,
-    physics::physics_3d::bodies::Body as BodyTrait,
+    physics::physics_3d::{aabb::AabbCentredOrigin, bodies::Body as BodyTrait},
     shaders::{instanced_simple_lit_colour_3d, instanced_simple_lit_uv_3d},
 };
 use rayon::iter::{IntoParallelRefIterator, ParallelExtend, ParallelIterator};
@@ -14,15 +14,19 @@ use vulkano::{
     },
     command_buffer::{
         allocator::StandardCommandBufferAllocator, AutoCommandBufferBuilder, CommandBufferUsage,
-        CopyBufferInfo, PrimaryAutoCommandBuffer, PrimaryCommandBufferAbstract,
-        RenderPassBeginInfo,
+        CopyBufferInfo, CopyBufferToImageInfo, PrimaryAutoCommandBuffer,
+        PrimaryCommandBufferAbstract, RenderPassBeginInfo,
     },
     descriptor_set::{
         allocator::StandardDescriptorSetAllocator, PersistentDescriptorSet, WriteDescriptorSet,
     },
     device::Device,
     format::{ClearValue, Format},
-    image::{view::ImageView, Image, ImageCreateInfo, ImageType, ImageUsage},
+    image::{
+        sampler::{Sampler, SamplerCreateInfo},
+        view::ImageView,
+        Image, ImageCreateInfo, ImageType, ImageUsage,
+    },
     memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator},
     pipeline::{
         graphics::{
@@ -35,24 +39,30 @@ use vulkano::{
         DynamicState, GraphicsPipeline, Pipeline, PipelineBindPoint,
     },
     render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass, Subpass},
+    swapchain::SwapchainCreateInfo,
     sync::GpuFuture,
     DeviceSize,
 };
 use vulkano_util::{
     context::{VulkanoConfig, VulkanoContext},
     renderer::VulkanoWindowRenderer,
-    window::VulkanoWindows,
+    window::{VulkanoWindows, WindowDescriptor},
 };
-use winit::{event_loop::EventLoop, window::WindowId};
+use winit::{
+    event_loop::{EventLoop, EventLoopWindowTarget},
+    window::WindowId,
+};
 
 use crate::body::Body;
 
 const DEPTH_FORMAT: Format = Format::D32_SFLOAT;
-const BACKGROUND_COLOUR: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
+//const BACKGROUND_COLOUR: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
+const BACKGROUND_COLOUR: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
 
 const CUBOID_COLOUR_INSTANCES_STARTING_CAPACITY: usize = 50;
 const POTENTIAL_CUBOID_COLOUR_INSTANCES_STARTING_CAPACITY: usize = 1000;
 
+#[derive(Clone, Debug)]
 pub struct Camera3D {
     pub position: [f32; 3],
     pub rotation: [f32; 3],
@@ -107,13 +117,51 @@ impl Camera3D {
     }
 }
 
+impl Default for Camera3D {
+    fn default() -> Self {
+        Self {
+            position: [0.0; 3],
+            rotation: [0.0; 3],
+
+            ambient_strength: 0.3,
+            specular_strength: 0.5,
+            light_colour: [0.5; 3],
+            light_position: [0.0, -10.0, 0.0],
+
+            near_distance: 0.01,
+            far_distance: 250.0,
+            aspect_ratio: 1.0,
+            fov_y: Radians(std::f32::consts::FRAC_PI_2),
+        }
+    }
+}
+
+/// This is important window configuration. Vsync is PresentMode.
+pub struct WindowConfig {
+    pub variety: WindowVariety,
+    pub window_descriptor: WindowDescriptor,
+    pub swapchain_create_info_modify: fn(&mut SwapchainCreateInfo),
+}
+
+impl Default for WindowConfig {
+    fn default() -> Self {
+        Self {
+            variety: WindowVariety::Creature(Default::default()),
+            window_descriptor: Default::default(),
+            swapchain_create_info_modify: |_| {},
+        }
+    }
+}
+
+#[derive(Clone)]
 pub enum WindowVariety {
     Creature(Camera3D),
+    Selection,
 }
 
 pub struct WindowSpecific {
-    viewport: Viewport,
-    variety: WindowVariety,
+    pub viewport: Viewport,
+    pub variety: WindowVariety,
 }
 
 pub struct Allocators {
@@ -159,10 +207,11 @@ pub struct Renderer {
     pipelines: Pipelines,
 
     buffers: Buffers,
+    images_and_samplers: ImagesAndSamplers,
 
-    windows_manager: VulkanoWindows,
+    pub windows_manager: VulkanoWindows,
     // Consider faster hash, like ahash?
-    window_specifics: HashMap<WindowId, WindowSpecific>,
+    pub window_specifics: HashMap<WindowId, WindowSpecific>,
 }
 
 impl Renderer {
@@ -173,11 +222,20 @@ impl Renderer {
 
         let mut windows_manager = VulkanoWindows::default();
 
+        //TODO: find a better way of getting the correct format.
+        let temp =
+            windows_manager.create_window(&event_loop, &context, &Default::default(), |_| {});
+        let format = windows_manager
+            .get_primary_renderer()
+            .unwrap()
+            .swapchain_format();
+        windows_manager.remove_renderer(temp);
+
         let render_pass = vulkano::single_pass_renderpass!(
             context.device().clone(),
             attachments: {
                 color: {
-                    format: windows_manager.get_primary_renderer().unwrap().swapchain_format(),
+                    format: format,
                     samples: 1,
                     load_op: Clear,
                     store_op: Store,
@@ -199,6 +257,7 @@ impl Renderer {
         let allocators = Allocators::new(&context);
 
         let buffers = Buffers::new(&allocators, &context);
+        let images_and_samplers = ImagesAndSamplers::new(&context, &allocators);
 
         let pipelines = Pipelines::new(context.device(), &render_pass);
 
@@ -211,6 +270,7 @@ impl Renderer {
             pipelines,
 
             buffers,
+            images_and_samplers,
 
             windows_manager,
             window_specifics: Default::default(),
@@ -219,13 +279,25 @@ impl Renderer {
         (renderer, event_loop)
     }
 
-    pub fn correct_window_size(&mut self, window_id: WindowId, new_viewport_extent: [f32; 2]) {
+    pub fn correct_window_size(&mut self, window_id: WindowId) {
         let window_specific = self.window_specifics.get_mut(&window_id).unwrap();
 
+        let new_viewport_extent = self
+            .windows_manager
+            .get_window(window_id)
+            .unwrap()
+            .inner_size()
+            .into();
+
         window_specific.viewport.extent = new_viewport_extent;
+
+        if let WindowVariety::Creature(camera) = &mut window_specific.variety {
+            camera.aspect_ratio = new_viewport_extent[0] / new_viewport_extent[1];
+        }
     }
 
-    pub fn render(&mut self) {
+    pub fn render(&mut self, bodies: &[Body]) {
+        self.buffers.before_rendering(bodies);
         for (window_id, window_specific) in &mut self.window_specifics {
             let window_renderer = self.windows_manager.get_renderer_mut(*window_id).unwrap();
 
@@ -339,6 +411,9 @@ impl Renderer {
                         )
                         .unwrap();
                 }
+                WindowVariety::Selection => {
+                    todo!("2d menu rendering is not done")
+                }
             }
 
             command_buffer_builder
@@ -353,18 +428,87 @@ impl Renderer {
                 false,
             );
         }
+        self.buffers.after_rendering();
     }
 
-    // fn render_creature_window(&self, command_buffer_builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>) {
-    // Maybe not.
-    // }
+    /// Creates a new window!
+    pub fn create_window(
+        &mut self,
+        event_loop: &EventLoopWindowTarget<()>,
+        config: &WindowConfig,
+    ) -> WindowId {
+        let id = self.windows_manager.create_window(
+            event_loop,
+            &self.context,
+            &config.window_descriptor,
+            config.swapchain_create_info_modify,
+        );
+
+        self.window_specifics.insert(
+            id,
+            WindowSpecific {
+                viewport: Viewport {
+                    offset: [0.0, 0.0],
+                    // Consider getting from window or window descriptor?
+                    extent: [1.0, 1.0],
+                    depth_range: 0.0..=1.0,
+                },
+                variety: config.variety.clone(),
+            },
+        );
+
+        id
+    }
+
+    pub fn remove_window(&mut self, id: WindowId) {
+        self.window_specifics.remove(&id);
+        self.windows_manager.remove_renderer(id);
+    }
+
+    // inline?
+    /// Allows you to add a cuboid colour that will have its instance generated from a body.
+    /// Removable.
+    pub fn add_removable_cuboid_colour_from_body_index(
+        &mut self,
+        body_index: usize,
+        colour: [f32; 4],
+    ) -> usize {
+        self.buffers
+            .cuboid_colour_potential_instances
+            .push(PotentialCuboidColourInstance::PhysicsWithColour { body_index, colour });
+        self.buffers.cuboid_colour_potential_instances.len() - 1
+    }
+
+    // Adds a cuboid colour instance.
+    // Not removable.
+    pub fn add_cuboid_colour(&mut self, instance: instanced_simple_lit_colour_3d::Instance) {
+        self.buffers.cuboid_colour_instances.push(instance);
+    }
+
+    /// Allows you to add a cuboid colour instance created from an AabbCentredOrigin.
+    /// Not removable.
+    pub fn add_cuboid_colour_from_aabb(&mut self, aabb: AabbCentredOrigin<f32>, colour: [f32; 4]) {
+        self.buffers
+            .cuboid_colour_instances
+            .push(instanced_simple_lit_colour_3d::Instance::new(
+                colour,
+                Matrix4::from_translation(aabb.position)
+                    * Matrix4::from_scale(mul_3d_by_1d(aabb.half_size, 2.0)),
+            ));
+    }
 }
 
+//TODO: implement cleaning function when the amount of Nones pile up in potentials, to keep memory use low.
+// To do this, we should have a none counter that gets incremented every time a none is added.
+// Don't do the silly and slow option of constantly checking a very long vec for nones.
+// But how would we deal with indices suddenly being wrong?
+// Perhaps when I know a None index, we just move the next instance into it?
 struct Buffers {
+    //TODO: Get this working with u8 indices.
     cuboid_colour_vertices_and_indices:
-        DeviceVerticesAndIndices<instanced_simple_lit_colour_3d::Vertex, u8>,
+        DeviceVerticesAndIndices<instanced_simple_lit_colour_3d::Vertex, u16>,
     cuboid_colour_instances: Vec<instanced_simple_lit_colour_3d::Instance>,
-    potential_cuboid_colour_instances: Vec<PotentialCuboidColourInstance>,
+    cuboid_colour_potential_instances: Vec<PotentialCuboidColourInstance>,
     // This is only valid during rendering.
     cuboid_colour_drain_start_index: usize,
 }
@@ -390,7 +534,7 @@ impl Buffers {
                 &mut command_buffer_builder,
             ),
             cuboid_colour_instances: Vec::with_capacity(CUBOID_COLOUR_INSTANCES_STARTING_CAPACITY),
-            potential_cuboid_colour_instances: Vec::with_capacity(
+            cuboid_colour_potential_instances: Vec::with_capacity(
                 POTENTIAL_CUBOID_COLOUR_INSTANCES_STARTING_CAPACITY,
             ),
             cuboid_colour_drain_start_index: 0,
@@ -414,7 +558,7 @@ impl Buffers {
         self.cuboid_colour_drain_start_index = self.cuboid_colour_instances.len();
 
         self.cuboid_colour_instances.par_extend(
-            self.potential_cuboid_colour_instances
+            self.cuboid_colour_potential_instances
                 .par_iter()
                 .filter_map(|potential_cuboid_colour_instance| {
                     potential_cuboid_colour_instance.to_instance(bodies)
@@ -446,7 +590,8 @@ impl PotentialCuboidColourInstance {
                 let body = &bodies[*body_index];
                 Some(instanced_simple_lit_colour_3d::Instance::new(
                     *colour,
-                    Matrix4::from_translation(body.position_unchecked()),
+                    Matrix4::from_translation(body.position_unchecked())
+                        * Matrix4::from_scale(mul_3d_by_1d(body.half_size_unchecked(), 2.0)),
                 ))
             }
             Self::None => None,
@@ -564,6 +709,103 @@ impl<V, I> DeviceVerticesAndIndices<V, I> {
             vertices: vertices_device,
         }
     }
+}
+
+struct ImagesAndSamplers {
+    menu_sampler: Arc<Sampler>,
+
+    testing_image: Arc<ImageView>,
+}
+
+impl ImagesAndSamplers {
+    fn new(context: &VulkanoContext, allocators: &Allocators) -> Self {
+        let mut command_buffer_builder = AutoCommandBufferBuilder::primary(
+            &allocators.command_buffer_allocator,
+            context.graphics_queue().queue_family_index(),
+            CommandBufferUsage::OneTimeSubmit,
+        )
+        .unwrap();
+
+        let images_and_samplers = Self {
+            menu_sampler: Sampler::new(
+                context.device().clone(),
+                SamplerCreateInfo {
+                    ..Default::default()
+                },
+            )
+            .unwrap(),
+
+            testing_image: image_from_png(
+                include_bytes!("images/test.png"),
+                &allocators.memory_allocator,
+                &mut command_buffer_builder,
+            ),
+        };
+
+        command_buffer_builder
+            .build()
+            .unwrap()
+            .execute(context.graphics_queue().clone())
+            .unwrap()
+            .then_signal_fence_and_flush()
+            .unwrap()
+            .wait(None)
+            .unwrap();
+
+        images_and_samplers
+    }
+}
+
+fn image_from_png(
+    png_bytes: &[u8],
+    memory_allocator: &Arc<StandardMemoryAllocator>,
+    command_buffer_builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
+) -> Arc<ImageView> {
+    let decoder = png::Decoder::new(png_bytes);
+    let mut reader = decoder.read_info().unwrap();
+    let info = reader.info();
+    let extent = [info.width, info.height, 1];
+
+    let upload_buffer = Buffer::new_slice(
+        memory_allocator.clone(),
+        BufferCreateInfo {
+            usage: BufferUsage::TRANSFER_SRC,
+            ..Default::default()
+        },
+        AllocationCreateInfo {
+            memory_type_filter: MemoryTypeFilter::PREFER_HOST
+                | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
+            ..Default::default()
+        },
+        (info.width * info.height * 4) as DeviceSize,
+    )
+    .unwrap();
+
+    reader
+        .next_frame(&mut upload_buffer.write().unwrap())
+        .unwrap();
+
+    let image = Image::new(
+        memory_allocator.clone(),
+        ImageCreateInfo {
+            image_type: ImageType::Dim2d,
+            format: Format::R8G8B8A8_SRGB,
+            extent,
+            usage: ImageUsage::TRANSFER_DST | ImageUsage::SAMPLED,
+            ..Default::default()
+        },
+        AllocationCreateInfo::default(),
+    )
+    .unwrap();
+
+    command_buffer_builder
+        .copy_buffer_to_image(CopyBufferToImageInfo::buffer_image(
+            upload_buffer,
+            image.clone(),
+        ))
+        .unwrap();
+
+    ImageView::new_default(image).unwrap()
 }
 
 struct Pipelines {
