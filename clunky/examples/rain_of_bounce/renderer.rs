@@ -4,8 +4,11 @@ use clunky::{
     math::{mul_3d_by_1d, Matrix4, Radians},
     meshes,
     physics::physics_3d::{aabb::AabbCentredOrigin, bodies::Body as BodyTrait},
-    shaders::{instanced_simple_lit_colour_3d, instanced_simple_lit_uv_3d},
+    shaders::{
+        instanced_simple_lit_colour_3d, instanced_simple_lit_uv_3d, instanced_unlit_uv_2d_stretch,
+    },
 };
+use png::ColorType;
 use rayon::iter::{IntoParallelRefIterator, ParallelExtend, ParallelIterator};
 use vulkano::{
     buffer::{
@@ -23,9 +26,7 @@ use vulkano::{
     device::Device,
     format::{ClearValue, Format},
     image::{
-        sampler::{Sampler, SamplerCreateInfo},
-        view::ImageView,
-        Image, ImageCreateInfo, ImageType, ImageUsage,
+        sampler::{Sampler, SamplerCreateInfo}, view::ImageView, Image, ImageCreateInfo, ImageFormatInfo, ImageType, ImageUsage
     },
     memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator},
     pipeline::{
@@ -54,9 +55,11 @@ use winit::{
 
 use crate::body::Body;
 
+pub const SQUAROID_GLTF: &[u8] = include_bytes!("meshes/squaroid.glb");
+
 const DEPTH_FORMAT: Format = Format::D32_SFLOAT;
-//const BACKGROUND_COLOUR: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
-const BACKGROUND_COLOUR: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
+const BACKGROUND_COLOUR: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
+//const BACKGROUND_COLOUR: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
 
 const CUBOID_COLOUR_INSTANCES_STARTING_CAPACITY: usize = 50;
 const POTENTIAL_CUBOID_COLOUR_INSTANCES_STARTING_CAPACITY: usize = 1000;
@@ -255,10 +258,10 @@ impl Renderer {
 
         let allocators = Allocators::new(&context);
 
-        let buffers = Buffers::new(&allocators, &context);
-        let images_and_samplers = ImagesAndSamplers::new(&context, &allocators);
-
         let pipelines = Pipelines::new(context.device(), &render_pass);
+
+        let buffers = Buffers::new(&allocators, &context);
+        let images_and_samplers = ImagesAndSamplers::new(&context, &allocators, &pipelines);
 
         let renderer = Self {
             context,
@@ -363,6 +366,7 @@ impl Renderer {
                     *camera_uniform.write().unwrap() = camera
                         .to_instanced_simple_lit_colour_3d_camera()
                         .to_uniform();
+
                     self.pipelines.bind_instanced_simple_lit_colour_3d(
                         &mut command_buffer_builder,
                         &self.allocators,
@@ -411,7 +415,55 @@ impl Renderer {
                         .unwrap();
                 }
                 WindowVariety::Selection => {
-                    todo!("2d menu rendering is not done")
+                    self.pipelines.bind_instanced_unlit_uv_2d_stretch(
+                        &mut command_buffer_builder,
+                        &self
+                            .images_and_samplers
+                            .descriptor_set_menu_sampler_with_testing_image,
+                    );
+
+                    let selection_menu_uv_instances_buffer =
+                        self.allocators
+                            .subbuffer_allocator
+                            .allocate_slice(
+                                self.buffers.selection_menu_uv_instances.len() as DeviceSize
+                            )
+                            .unwrap();
+                    selection_menu_uv_instances_buffer
+                        .write()
+                        .unwrap()
+                        .copy_from_slice(&self.buffers.selection_menu_uv_instances);
+
+                    command_buffer_builder
+                        .bind_vertex_buffers(
+                            0,
+                            (
+                                self.buffers
+                                    .selection_menu_uv_vertices_and_indices
+                                    .vertices
+                                    .clone(),
+                                selection_menu_uv_instances_buffer,
+                            ),
+                        )
+                        .unwrap()
+                        .bind_index_buffer(
+                            self.buffers
+                                .selection_menu_uv_vertices_and_indices
+                                .indices
+                                .clone(),
+                        )
+                        .unwrap()
+                        .draw_indexed(
+                            self.buffers
+                                .selection_menu_uv_vertices_and_indices
+                                .indices
+                                .len() as u32,
+                            self.buffers.selection_menu_uv_instances.len() as u32,
+                            0,
+                            0,
+                            0,
+                        )
+                        .unwrap();
                 }
             }
 
@@ -495,6 +547,11 @@ impl Renderer {
                     * Matrix4::from_scale(mul_3d_by_1d(aabb.half_size, 2.0)),
             ));
     }
+
+    /// Raw access to the instances is useful for ui. For now.
+    pub fn selection_menu_uv_instances_mut(&mut self) -> &mut Vec<instanced_unlit_uv_2d_stretch::Instance> {
+        &mut self.buffers.selection_menu_uv_instances
+    }
 }
 
 //TODO: implement cleaning function when the amount of Nones pile up in potentials, to keep memory use low.
@@ -510,6 +567,10 @@ struct Buffers {
     cuboid_colour_potential_instances: Vec<PotentialCuboidColourInstance>,
     // This is only valid during rendering.
     cuboid_colour_drain_start_index: usize,
+
+    selection_menu_uv_vertices_and_indices:
+        DeviceVerticesAndIndices<instanced_unlit_uv_2d_stretch::Vertex, u16>,
+    selection_menu_uv_instances: Vec<instanced_unlit_uv_2d_stretch::Instance>,
 }
 
 impl Buffers {
@@ -525,6 +586,10 @@ impl Buffers {
             instanced_simple_lit_colour_3d::Vertex::get_array_from_gltf(meshes::CUBE_GLTF, 0);
         let cuboid_colour_indices = meshes::get_indices_from_gltf(meshes::CUBE_GLTF, 0);
 
+        let selection_menu_uv_vertices =
+            instanced_unlit_uv_2d_stretch::Vertex::get_array_from_gltf(SQUAROID_GLTF, 0);
+        let selection_menu_uv_indices = meshes::get_indices_from_gltf(SQUAROID_GLTF, 0);
+
         let buffers = Self {
             cuboid_colour_vertices_and_indices: DeviceVerticesAndIndices::new(
                 cuboid_colour_vertices,
@@ -537,6 +602,15 @@ impl Buffers {
                 POTENTIAL_CUBOID_COLOUR_INSTANCES_STARTING_CAPACITY,
             ),
             cuboid_colour_drain_start_index: 0,
+
+            selection_menu_uv_vertices_and_indices: DeviceVerticesAndIndices::new(
+                selection_menu_uv_vertices,
+                selection_menu_uv_indices,
+                &allocators.memory_allocator,
+                &mut command_buffer_builder,
+            ),
+
+            selection_menu_uv_instances: Vec::with_capacity(30),
         };
 
         command_buffer_builder
@@ -714,10 +788,14 @@ struct ImagesAndSamplers {
     menu_sampler: Arc<Sampler>,
 
     testing_image: Arc<ImageView>,
+
+    // Related descriptor sets.
+    // Should these go in a descriptor sets struct? I don't think so.
+    descriptor_set_menu_sampler_with_testing_image: Arc<PersistentDescriptorSet>,
 }
 
 impl ImagesAndSamplers {
-    fn new(context: &VulkanoContext, allocators: &Allocators) -> Self {
+    fn new(context: &VulkanoContext, allocators: &Allocators, pipelines: &Pipelines) -> Self {
         let mut command_buffer_builder = AutoCommandBufferBuilder::primary(
             &allocators.command_buffer_allocator,
             context.graphics_queue().queue_family_index(),
@@ -725,20 +803,40 @@ impl ImagesAndSamplers {
         )
         .unwrap();
 
+        let menu_sampler = Sampler::new(
+            context.device().clone(),
+            SamplerCreateInfo {
+                ..SamplerCreateInfo::simple_repeat_linear()
+            },
+        )
+        .unwrap();
+
+        let testing_image = image_from_png(
+            include_bytes!("images/test.png"),
+            //include_bytes!("images/image_img.png"),
+            &allocators.memory_allocator,
+            &mut command_buffer_builder,
+        );
+
         let images_and_samplers = Self {
-            menu_sampler: Sampler::new(
-                context.device().clone(),
-                SamplerCreateInfo {
-                    ..Default::default()
-                },
+            menu_sampler: menu_sampler.clone(),
+
+            testing_image: testing_image.clone(),
+
+            descriptor_set_menu_sampler_with_testing_image: PersistentDescriptorSet::new(
+                &allocators.descriptor_set_allocator,
+                pipelines
+                    .instanced_unlit_uv_2d_stretch
+                    .layout()
+                    .set_layouts()[0]
+                    .clone(),
+                [
+                    WriteDescriptorSet::sampler(0, menu_sampler),
+                    WriteDescriptorSet::image_view(1, testing_image),
+                ],
+                [],
             )
             .unwrap(),
-
-            testing_image: image_from_png(
-                include_bytes!("images/test.png"),
-                &allocators.memory_allocator,
-                &mut command_buffer_builder,
-            ),
         };
 
         command_buffer_builder
@@ -763,6 +861,17 @@ fn image_from_png(
     let decoder = png::Decoder::new(png_bytes);
     let mut reader = decoder.read_info().unwrap();
     let info = reader.info();
+
+    let bytes_per_pixel = info.bytes_per_pixel();
+    println!("bytes_per_pixel: {:?}", bytes_per_pixel);
+
+    println!("color_type: {:?}", info.color_type);
+    let format = match info.color_type {
+        ColorType::Rgba => Format::R8G8B8A8_SRGB,
+        ColorType::Rgb => Format::R8G8B8_SRGB,
+        _ => todo!("Currently unsupported image type."),
+    };
+
     let extent = [info.width, info.height, 1];
 
     let upload_buffer = Buffer::new_slice(
@@ -776,7 +885,7 @@ fn image_from_png(
                 | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
             ..Default::default()
         },
-        (info.width * info.height * 4) as DeviceSize,
+        (info.width * info.height * bytes_per_pixel as u32) as DeviceSize,
     )
     .unwrap();
 
@@ -788,7 +897,7 @@ fn image_from_png(
         memory_allocator.clone(),
         ImageCreateInfo {
             image_type: ImageType::Dim2d,
-            format: Format::R8G8B8A8_SRGB,
+            format,
             extent,
             usage: ImageUsage::TRANSFER_DST | ImageUsage::SAMPLED,
             ..Default::default()
@@ -809,6 +918,7 @@ fn image_from_png(
 
 struct Pipelines {
     instanced_simple_lit_colour_3d: Arc<GraphicsPipeline>,
+    instanced_unlit_uv_2d_stretch: Arc<GraphicsPipeline>,
 }
 
 impl Pipelines {
@@ -839,8 +949,33 @@ impl Pipelines {
         )
         .unwrap();
 
+        let instanced_unlit_uv_2d_stretch = GraphicsPipeline::new(
+            device.clone(),
+            None,
+            GraphicsPipelineCreateInfo {
+                viewport_state: Some(ViewportState::default()),
+                rasterization_state: Some(RasterizationState {
+                    cull_mode: CullMode::Back,
+                    front_face: FrontFace::CounterClockwise,
+                    ..Default::default()
+                }),
+                input_assembly_state: Some(InputAssemblyState {
+                    topology: PrimitiveTopology::TriangleList,
+                    ..Default::default()
+                }),
+                multisample_state: Some(MultisampleState::default()),
+                dynamic_state: [DynamicState::Viewport].into_iter().collect(),
+                ..instanced_unlit_uv_2d_stretch::graphics_pipeline_create_info(
+                    device.clone(),
+                    subpass.clone(),
+                )
+            },
+        )
+        .unwrap();
+
         Self {
             instanced_simple_lit_colour_3d,
+            instanced_unlit_uv_2d_stretch,
         }
     }
 
@@ -865,6 +1000,23 @@ impl Pipelines {
                     [],
                 )
                 .unwrap(),
+            )
+            .unwrap();
+    }
+
+    fn bind_instanced_unlit_uv_2d_stretch(
+        &self,
+        command_buffer_builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
+        sampler_and_image_descriptor_set: &Arc<PersistentDescriptorSet>,
+    ) {
+        command_buffer_builder
+            .bind_pipeline_graphics(self.instanced_unlit_uv_2d_stretch.clone())
+            .unwrap()
+            .bind_descriptor_sets(
+                PipelineBindPoint::Graphics,
+                self.instanced_unlit_uv_2d_stretch.layout().clone(),
+                0,
+                sampler_and_image_descriptor_set.clone(),
             )
             .unwrap();
     }

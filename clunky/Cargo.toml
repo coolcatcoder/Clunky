@@ -21,6 +21,7 @@ vulkano-win = "0.34.0"
 vulkano-util = "0.34.0"
 winit = "0.28.6"
 gilrs = "0.10.7"
+glam = "0.28.0"
 
 [dependencies.gltf]
 version = "1.4.0"

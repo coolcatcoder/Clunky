@@ -18,6 +18,7 @@ void main() {
     mat3 model_to_world = mat3(model_to_world_0, model_to_world_1, model_to_world_2);
     gl_Position.xyz = model_to_world * vec3(position, 1.0);
     gl_Position.z = depth;
+    gl_Position.w = 1.0;
 
     uv_out = uv + uv_offset;
 }

@@ -9,4 +9,7 @@ layout(location = 0) out vec4 f_color;
 
 void main() {
     f_color = texture(sampler2D(image, texture_sampler), uv);
+
+    // Debug uv
+    //f_color = vec4(uv[0], 0.0, uv[1], 1.0);
 }

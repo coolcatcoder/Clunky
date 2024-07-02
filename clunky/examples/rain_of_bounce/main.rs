@@ -11,7 +11,7 @@ use clunky::{
         },
         PhysicsSimulation,
     },
-    shaders::instanced_simple_lit_colour_3d::{self, Camera},
+    shaders::{instanced_simple_lit_colour_3d::{self, Camera}, instanced_unlit_uv_2d_stretch},
 };
 use common_renderer::{bits_has, CommonRenderer};
 use engine::SimpleEngine;
@@ -21,9 +21,7 @@ use vulkano::swapchain::PresentMode;
 use vulkano_util::window::WindowDescriptor;
 use winit::{
     dpi::PhysicalPosition,
-    event::{
-        DeviceEvent, Event, KeyboardInput, MouseButton, WindowEvent,
-    },
+    event::{DeviceEvent, Event, KeyboardInput, MouseButton, WindowEvent},
     event_loop::{EventLoop, EventLoopWindowTarget},
     window::{Fullscreen, WindowId},
 };
@@ -164,7 +162,24 @@ fn main() {
 
     let (mut game, event_loop) = Game::new();
 
-    game.renderer.create_window(
+    game.creatures_manager.creature_selection_window = Some(game.renderer.create_window(
+        &event_loop,
+        &WindowConfig {
+            variety: WindowVariety::Selection,
+            window_descriptor: WindowDescriptor {
+                ..Default::default()
+            },
+            swapchain_create_info_modify: |_| {},
+        },
+    ));
+
+    game.renderer.selection_menu_uv_instances_mut().push(instanced_unlit_uv_2d_stretch::Instance::new(
+        [0.0, 0.0],
+        0.0,
+        glam::Affine2::from_translation([0.0,0.0].into())
+    ));
+
+    let test_burgle_window = game.renderer.create_window(
         &event_loop,
         &WindowConfig {
             variety: WindowVariety::Creature(Camera3D {
@@ -197,7 +212,7 @@ fn main() {
         .push(CreatureIndex(0));
 
     game.creatures_manager.creature_controlled_by_window.insert(
-        game.renderer.windows_manager.primary_window_id().unwrap(),
+        test_burgle_window,
         CreatureIndex(0),
     );
 

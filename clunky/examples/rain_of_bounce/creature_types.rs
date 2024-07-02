@@ -7,8 +7,8 @@ use winit::event::KeyboardInput;
 
 use crate::{
     body::{Body, Creature as CreatureBody},
-    renderer::{Camera3D, Renderer}, rotate_about_x, rotate_about_y, ActionState, BodyIndex,
-    CreatureActions, CreatureIndex,
+    renderer::{Camera3D, Renderer},
+    rotate_about_x, rotate_about_y, ActionState, BodyIndex, CreatureActions, CreatureIndex,
 };
 
 pub enum CreatureType {

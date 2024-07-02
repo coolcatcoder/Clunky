@@ -25,7 +25,6 @@ use winit::{
     window::WindowId,
 };
 
-
 pub struct Redesign {
     // Physics
     // Option Renderer
