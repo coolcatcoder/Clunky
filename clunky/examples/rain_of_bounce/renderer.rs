@@ -5,7 +5,8 @@ use clunky::{
     meshes,
     physics::physics_3d::{aabb::AabbCentredOrigin, bodies::Body as BodyTrait},
     shaders::{
-        instanced_simple_lit_colour_3d, instanced_simple_lit_uv_3d, instanced_unlit_uv_2d_stretch,
+        instanced_simple_lit_colour_3d, instanced_simple_lit_uv_3d, instanced_text_sdf,
+        instanced_unlit_uv_2d_stretch,
     },
 };
 use png::ColorType;
@@ -26,7 +27,9 @@ use vulkano::{
     device::Device,
     format::{ClearValue, Format},
     image::{
-        sampler::{Sampler, SamplerCreateInfo}, view::ImageView, Image, ImageCreateInfo, ImageFormatInfo, ImageType, ImageUsage
+        sampler::{Sampler, SamplerCreateInfo},
+        view::ImageView,
+        Image, ImageCreateInfo, ImageFormatInfo, ImageType, ImageUsage,
     },
     memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator},
     pipeline::{
@@ -63,6 +66,8 @@ const BACKGROUND_COLOUR: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
 
 const CUBOID_COLOUR_INSTANCES_STARTING_CAPACITY: usize = 50;
 const POTENTIAL_CUBOID_COLOUR_INSTANCES_STARTING_CAPACITY: usize = 1000;
+
+const BOOKMAN_OLD_STYLE_GLYPH_SIZE: [f32; 2] = [1.0, 1.0]; // TODO: make this correct
 
 #[derive(Clone, Debug)]
 pub struct Camera3D {
@@ -415,6 +420,18 @@ impl Renderer {
                         .unwrap();
                 }
                 WindowVariety::Selection => {
+                    let font_uniform = self
+                        .allocators
+                        .subbuffer_allocator
+                        .allocate_sized()
+                        .unwrap();
+                    *font_uniform.write().unwrap() = instanced_text_sdf::FontUniform {
+                        glyph_size: BOOKMAN_OLD_STYLE_GLYPH_SIZE,
+                        aspect_ratio: window_specific.viewport.extent[0]
+                            / window_specific.viewport.extent[1],
+                    };
+
+                    // UV UI
                     self.pipelines.bind_instanced_unlit_uv_2d_stretch(
                         &mut command_buffer_builder,
                         &self
@@ -459,6 +476,59 @@ impl Renderer {
                                 .indices
                                 .len() as u32,
                             self.buffers.selection_menu_uv_instances.len() as u32,
+                            0,
+                            0,
+                            0,
+                        )
+                        .unwrap();
+
+                    // TEXT
+                    self.pipelines.bind_instanced_text_sdf(
+                        &mut command_buffer_builder,
+                        &self.allocators,
+                        &self
+                            .images_and_samplers
+                            .descriptor_set_text_sdf_sampler_with_testing_text_sdf_image,
+                        font_uniform,
+                    );
+
+                    let selection_menu_text_instances_buffer = self
+                        .allocators
+                        .subbuffer_allocator
+                        .allocate_slice(
+                            self.buffers.selection_menu_text_instances.len() as DeviceSize
+                        )
+                        .unwrap();
+                    selection_menu_text_instances_buffer
+                        .write()
+                        .unwrap()
+                        .copy_from_slice(&self.buffers.selection_menu_text_instances);
+
+                    command_buffer_builder
+                        .bind_vertex_buffers(
+                            0,
+                            (
+                                self.buffers
+                                    .selection_menu_uv_vertices_and_indices
+                                    .vertices
+                                    .clone(),
+                                selection_menu_text_instances_buffer,
+                            ),
+                        )
+                        .unwrap()
+                        .bind_index_buffer(
+                            self.buffers
+                                .selection_menu_uv_vertices_and_indices
+                                .indices
+                                .clone(),
+                        )
+                        .unwrap()
+                        .draw_indexed(
+                            self.buffers
+                                .selection_menu_uv_vertices_and_indices
+                                .indices
+                                .len() as u32,
+                            self.buffers.selection_menu_text_instances.len() as u32,
                             0,
                             0,
                             0,
@@ -549,8 +619,15 @@ impl Renderer {
     }
 
     /// Raw access to the instances is useful for ui. For now.
-    pub fn selection_menu_uv_instances_mut(&mut self) -> &mut Vec<instanced_unlit_uv_2d_stretch::Instance> {
+    pub fn selection_menu_uv_instances_mut(
+        &mut self,
+    ) -> &mut Vec<instanced_unlit_uv_2d_stretch::Instance> {
         &mut self.buffers.selection_menu_uv_instances
+    }
+
+    /// Raw access to the instances is useful for ui. For now.
+    pub fn selection_menu_text_instances_mut(&mut self) -> &mut Vec<instanced_text_sdf::Instance> {
+        &mut self.buffers.selection_menu_text_instances
     }
 }
 
@@ -568,9 +645,11 @@ struct Buffers {
     // This is only valid during rendering.
     cuboid_colour_drain_start_index: usize,
 
+    // These can be used for all uv squaroids, as they all have the same layout.
     selection_menu_uv_vertices_and_indices:
         DeviceVerticesAndIndices<instanced_unlit_uv_2d_stretch::Vertex, u16>,
     selection_menu_uv_instances: Vec<instanced_unlit_uv_2d_stretch::Instance>,
+    selection_menu_text_instances: Vec<instanced_text_sdf::Instance>,
 }
 
 impl Buffers {
@@ -611,6 +690,7 @@ impl Buffers {
             ),
 
             selection_menu_uv_instances: Vec::with_capacity(30),
+            selection_menu_text_instances: Vec::with_capacity(100),
         };
 
         command_buffer_builder
@@ -786,12 +866,15 @@ impl<V, I> DeviceVerticesAndIndices<V, I> {
 
 struct ImagesAndSamplers {
     menu_sampler: Arc<Sampler>,
+    text_sdf_sampler: Arc<Sampler>,
 
     testing_image: Arc<ImageView>,
+    testing_text_sdf_image: Arc<ImageView>,
 
     // Related descriptor sets.
     // Should these go in a descriptor sets struct? I don't think so.
     descriptor_set_menu_sampler_with_testing_image: Arc<PersistentDescriptorSet>,
+    descriptor_set_text_sdf_sampler_with_testing_text_sdf_image: Arc<PersistentDescriptorSet>,
 }
 
 impl ImagesAndSamplers {
@@ -811,17 +894,32 @@ impl ImagesAndSamplers {
         )
         .unwrap();
 
+        let text_sdf_sampler = Sampler::new(
+            context.device().clone(),
+            SamplerCreateInfo {
+                ..SamplerCreateInfo::simple_repeat_linear()
+            },
+        )
+        .unwrap();
+
         let testing_image = image_from_png(
             include_bytes!("images/test.png"),
             //include_bytes!("images/image_img.png"),
             &allocators.memory_allocator,
             &mut command_buffer_builder,
         );
+        let testing_text_sdf_image = image_from_png(
+            include_bytes!("images/font.png"),
+            &allocators.memory_allocator,
+            &mut command_buffer_builder,
+        );
 
         let images_and_samplers = Self {
             menu_sampler: menu_sampler.clone(),
+            text_sdf_sampler: text_sdf_sampler.clone(),
 
             testing_image: testing_image.clone(),
+            testing_text_sdf_image: testing_text_sdf_image.clone(),
 
             descriptor_set_menu_sampler_with_testing_image: PersistentDescriptorSet::new(
                 &allocators.descriptor_set_allocator,
@@ -837,6 +935,17 @@ impl ImagesAndSamplers {
                 [],
             )
             .unwrap(),
+            descriptor_set_text_sdf_sampler_with_testing_text_sdf_image:
+                PersistentDescriptorSet::new(
+                    &allocators.descriptor_set_allocator,
+                    pipelines.instanced_text_sdf.layout().set_layouts()[1].clone(),
+                    [
+                        WriteDescriptorSet::sampler(0, text_sdf_sampler),
+                        WriteDescriptorSet::image_view(1, testing_text_sdf_image),
+                    ],
+                    [],
+                )
+                .unwrap(),
         };
 
         command_buffer_builder
@@ -919,6 +1028,7 @@ fn image_from_png(
 struct Pipelines {
     instanced_simple_lit_colour_3d: Arc<GraphicsPipeline>,
     instanced_unlit_uv_2d_stretch: Arc<GraphicsPipeline>,
+    instanced_text_sdf: Arc<GraphicsPipeline>,
 }
 
 impl Pipelines {
@@ -973,9 +1083,31 @@ impl Pipelines {
         )
         .unwrap();
 
+        let instanced_text_sdf = GraphicsPipeline::new(
+            device.clone(),
+            None,
+            GraphicsPipelineCreateInfo {
+                viewport_state: Some(ViewportState::default()),
+                rasterization_state: Some(RasterizationState {
+                    cull_mode: CullMode::Back,
+                    front_face: FrontFace::CounterClockwise,
+                    ..Default::default()
+                }),
+                input_assembly_state: Some(InputAssemblyState {
+                    topology: PrimitiveTopology::TriangleList,
+                    ..Default::default()
+                }),
+                multisample_state: Some(MultisampleState::default()),
+                dynamic_state: [DynamicState::Viewport].into_iter().collect(),
+                ..instanced_text_sdf::graphics_pipeline_create_info(device.clone(), subpass.clone())
+            },
+        )
+        .unwrap();
+
         Self {
             instanced_simple_lit_colour_3d,
             instanced_unlit_uv_2d_stretch,
+            instanced_text_sdf,
         }
     }
 
@@ -1017,6 +1149,34 @@ impl Pipelines {
                 self.instanced_unlit_uv_2d_stretch.layout().clone(),
                 0,
                 sampler_and_image_descriptor_set.clone(),
+            )
+            .unwrap();
+    }
+
+    fn bind_instanced_text_sdf(
+        &self,
+        command_buffer_builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
+        allocators: &Allocators,
+        sampler_and_image_descriptor_set: &Arc<PersistentDescriptorSet>,
+        font_uniform: Subbuffer<instanced_text_sdf::FontUniform>,
+    ) {
+        command_buffer_builder
+            .bind_pipeline_graphics(self.instanced_text_sdf.clone())
+            .unwrap()
+            .bind_descriptor_sets(
+                PipelineBindPoint::Graphics,
+                self.instanced_text_sdf.layout().clone(),
+                0,
+                (
+                    PersistentDescriptorSet::new(
+                        &allocators.descriptor_set_allocator,
+                        self.instanced_text_sdf.layout().set_layouts()[0].clone(),
+                        [WriteDescriptorSet::buffer(0, font_uniform)],
+                        [],
+                    )
+                    .unwrap(),
+                    sampler_and_image_descriptor_set.clone(),
+                ),
             )
             .unwrap();
     }

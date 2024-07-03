@@ -11,7 +11,10 @@ use clunky::{
         },
         PhysicsSimulation,
     },
-    shaders::{instanced_simple_lit_colour_3d::{self, Camera}, instanced_unlit_uv_2d_stretch},
+    shaders::{
+        instanced_simple_lit_colour_3d::{self, Camera},
+        instanced_text_sdf, instanced_unlit_uv_2d_stretch,
+    },
 };
 use common_renderer::{bits_has, CommonRenderer};
 use engine::SimpleEngine;
@@ -35,6 +38,7 @@ mod common_renderer;
 mod creature_types;
 mod engine;
 mod renderer;
+mod menus;
 
 type Engine = SimpleEngine<CommonRenderer<Body>>;
 type Physics = CpuSolver<f32, Body>;
@@ -52,37 +56,37 @@ const FIXED_DELTA_TIME: f32 = 0.03;
 
 struct CreaturesManager {
     creature_controlled_by_window: HashMap<WindowId, CreatureIndex>,
-    creature_selection_window: Option<WindowId>,
 
     creatures: Vec<CreatureType>,
     captured_creatures: Vec<CreatureIndex>,
+
+    creature_selection_window: WindowId,
 }
 
 struct Settings {
     mouse_sensitivity: f32,
 }
 
-struct Game {
-    renderer: Renderer,
-
-    physics_simulation: Physics,
-    physics_fixed_update: Option<FixedUpdate<f32>>,
-
-    fps: FpsTracker<f32>,
-
-    settings: Settings,
-
+struct Reality {
     creatures_manager: CreaturesManager,
 
-    window_focused: Option<WindowId>,
+    physics_simulation: Physics,
 
-    actions: Option<GameActions>,
-    input_manager: Option<InputManager>,
+    actions: RealityActions,
 }
 
-impl Game {
-    fn new() -> (Self, EventLoop<()>) {
-        let (renderer, event_loop) = Renderer::new();
+impl Reality {
+    fn new(game: &mut Game, event_loop: &EventLoopWindowTarget<()>) -> Self {
+        let selection_window = game.renderer.create_window(
+            &event_loop,
+            &WindowConfig {
+                variety: WindowVariety::Selection,
+                window_descriptor: WindowDescriptor {
+                    ..Default::default()
+                },
+                swapchain_create_info_modify: |_| {},
+            },
+        );
 
         let physics_config = solver::Config {
             ..solver::Config::size_from_min_max_with_subdivisions(
@@ -92,10 +96,167 @@ impl Game {
             )
         };
 
+        let mut reality = Self {
+            creatures_manager: CreaturesManager {
+                creature_controlled_by_window: HashMap::new(),
+                creature_selection_window: selection_window,
+
+                creatures: vec![],
+                captured_creatures: vec![],
+            },
+
+            physics_simulation: CpuSolver::new(physics_config),
+
+            actions: Default::default()
+        };
+    
+        game.renderer.selection_menu_uv_instances_mut().push(
+            instanced_unlit_uv_2d_stretch::Instance::new(
+                [0.0, 0.0],
+                0.0,
+                glam::Affine2::from_translation([1.0, 0.0].into()),
+            ),
+        );
+    
+        game.renderer
+            .selection_menu_text_instances_mut()
+            .push(instanced_text_sdf::Instance::new(
+                [0.0, 0.0],
+                [1.0, 0.0, 1.0, 1.0],
+                0.01,
+                0.2,
+                glam::Affine2::from_translation([0.0, 0.0].into())
+                    * glam::Affine2::from_scale([0.25, 0.25].into()),
+            ));
+        //text_rendering::blah();
+    
+        let test_burgle_window = game.renderer.create_window(
+            &event_loop,
+            &WindowConfig {
+                variety: WindowVariety::Creature(Camera3D {
+                    ..Default::default()
+                }),
+                window_descriptor: WindowDescriptor {
+                    present_mode: PresentMode::Fifo,
+                    transparent: true,
+                    decorations: false,
+                    ..Default::default()
+                },
+                swapchain_create_info_modify: |_| {},
+            },
+        );
+    
+        reality.creatures_manager
+            .creatures
+            .push(CreatureType::Burgle(Burgle::new(
+                &mut game.renderer,
+                &mut reality.physics_simulation.bodies,
+                [0.0; 3],
+                [0.5, 1.0, 0.5],
+                [1.5; 3],
+                [1.0, 0.0, 1.0, 1.0],
+                CreatureIndex(reality.creatures_manager.creatures.len()),
+            )));
+    
+            reality.creatures_manager
+            .captured_creatures
+            .push(CreatureIndex(0));
+    
+            reality.creatures_manager
+            .creature_controlled_by_window
+            .insert(test_burgle_window, CreatureIndex(0));
+    
+        // 2 player test
+        reality.creatures_manager
+            .creatures
+            .push(CreatureType::Burgle(Burgle::new(
+                &mut game.renderer,
+                &mut reality.physics_simulation.bodies,
+                [0.0; 3],
+                [0.5, 1.0, 0.5],
+                [1.5; 3],
+                [1.0, 1.0, 0.0, 1.0],
+                CreatureIndex(reality.creatures_manager.creatures.len()),
+            )));
+    
+        /*
+        game.creatures_manager
+            .captured_creatures
+            .push(CreatureIndex(1));
+        */
+    
+        game.renderer
+            .add_cuboid_colour(instanced_simple_lit_colour_3d::Instance::new(
+                [1.0; 4],
+                Matrix4::from_translation([GRID_MIN[0] as f32, GRID_MIN[1] as f32, GRID_MIN[2] as f32]),
+            ));
+    
+        game.renderer
+            .add_cuboid_colour(instanced_simple_lit_colour_3d::Instance::new(
+                [1.0; 4],
+                Matrix4::from_translation([GRID_MAX[0] as f32, GRID_MAX[1] as f32, GRID_MAX[2] as f32]),
+            ));
+    
+        game.renderer
+            .add_cuboid_colour(instanced_simple_lit_colour_3d::Instance::new(
+                [1.0; 4],
+                Matrix4::from_translation([2.0, 0.0, 0.0]),
+            ));
+    
+        /*
+        let second_player_window =
+            starting_renderer.create_window(WindowConfig::default(), &temp_event_loop);
+    
+        game.creatures_manager
+            .creature_controlled_by_window
+            .insert(second_player_window, CreatureIndex(1));
+        */
+    
+        let floor = AabbCentredOrigin {
+            position: [0.0, 1.0, 0.0],
+            half_size: [
+                (GRID_MAX[0] - GRID_MIN[0]) as f32 * 0.5,
+                0.5,
+                (GRID_MAX[2] - GRID_MIN[2]) as f32 * 0.5,
+            ],
+        };
+        reality.physics_simulation
+            .bodies
+            .push(Body::ImmovableCuboid(floor.clone()));
+    
+        game.renderer
+            .add_cuboid_colour_from_aabb(floor, [1.0, 0.0, 1.0, 1.0]);
+
+        reality
+    }
+}
+
+struct Game {
+    renderer: Renderer,
+
+    physics_fixed_update: Option<FixedUpdate<f32>>,
+
+    fps: FpsTracker<f32>,
+
+    settings: Settings,
+
+    window_focused: Option<WindowId>,
+
+    actions: GameActions,
+    input_manager: InputManager,
+
+    reality: Option<Reality>,
+
+    menu_window: Option<WindowId>,
+}
+
+impl Game {
+    fn new() -> (Self, EventLoop<()>) {
+        let (renderer, event_loop) = Renderer::new();
+
         let game = Game {
             renderer,
 
-            physics_simulation: CpuSolver::new(physics_config),
             physics_fixed_update: Some(FixedUpdate::new(
                 FIXED_DELTA_TIME,
                 MaxSubsteps::WarnAt(100),
@@ -107,49 +268,22 @@ impl Game {
                 mouse_sensitivity: 1.0,
             },
 
-            creatures_manager: CreaturesManager {
-                creature_controlled_by_window: HashMap::new(),
-                creature_selection_window: None,
-
-                creatures: vec![],
-                captured_creatures: vec![],
-            },
-
             window_focused: None,
 
-            actions: Some(Default::default()),
-            input_manager: Some(InputManager {
+            actions: Default::default(),
+            input_manager: InputManager {
                 gilrs: Gilrs::new().unwrap(),
 
                 active_binding: 0,
                 bindings: vec![Bindings::ScanCodeBindings(Default::default())],
-            }),
+            },
+
+            reality: None,
+
+            // TODO: this shouldn't be none, this should be the main menu. This currently doesn't exist though.
+            menu_window: None
         };
         (game, event_loop)
-    }
-
-    fn focused_creature(&self) -> &CreatureType {
-        let focused_window = self.window_focused.unwrap();
-
-        let creature_index = *self
-            .creatures_manager
-            .creature_controlled_by_window
-            .get(&focused_window)
-            .unwrap();
-
-        &self.creatures_manager.creatures[creature_index.0]
-    }
-
-    fn focused_creature_mut(&mut self) -> &mut CreatureType {
-        let focused_window = self.window_focused.unwrap();
-
-        let creature_index = *self
-            .creatures_manager
-            .creature_controlled_by_window
-            .get(&focused_window)
-            .unwrap();
-
-        &mut self.creatures_manager.creatures[creature_index.0]
     }
 }
 
@@ -162,120 +296,7 @@ fn main() {
 
     let (mut game, event_loop) = Game::new();
 
-    game.creatures_manager.creature_selection_window = Some(game.renderer.create_window(
-        &event_loop,
-        &WindowConfig {
-            variety: WindowVariety::Selection,
-            window_descriptor: WindowDescriptor {
-                ..Default::default()
-            },
-            swapchain_create_info_modify: |_| {},
-        },
-    ));
-
-    game.renderer.selection_menu_uv_instances_mut().push(instanced_unlit_uv_2d_stretch::Instance::new(
-        [0.0, 0.0],
-        0.0,
-        glam::Affine2::from_translation([0.0,0.0].into())
-    ));
-
-    let test_burgle_window = game.renderer.create_window(
-        &event_loop,
-        &WindowConfig {
-            variety: WindowVariety::Creature(Camera3D {
-                ..Default::default()
-            }),
-            window_descriptor: WindowDescriptor {
-                present_mode: PresentMode::Fifo,
-                transparent: true,
-                decorations: false,
-                ..Default::default()
-            },
-            swapchain_create_info_modify: |_| {},
-        },
-    );
-
-    game.creatures_manager
-        .creatures
-        .push(CreatureType::Burgle(Burgle::new(
-            &mut game.renderer,
-            &mut game.physics_simulation.bodies,
-            [0.0; 3],
-            [0.5, 1.0, 0.5],
-            [1.5; 3],
-            [1.0, 0.0, 1.0, 1.0],
-            CreatureIndex(game.creatures_manager.creatures.len()),
-        )));
-
-    game.creatures_manager
-        .captured_creatures
-        .push(CreatureIndex(0));
-
-    game.creatures_manager.creature_controlled_by_window.insert(
-        test_burgle_window,
-        CreatureIndex(0),
-    );
-
-    // 2 player test
-    game.creatures_manager
-        .creatures
-        .push(CreatureType::Burgle(Burgle::new(
-            &mut game.renderer,
-            &mut game.physics_simulation.bodies,
-            [0.0; 3],
-            [0.5, 1.0, 0.5],
-            [1.5; 3],
-            [1.0, 1.0, 0.0, 1.0],
-            CreatureIndex(game.creatures_manager.creatures.len()),
-        )));
-
-    /*
-    game.creatures_manager
-        .captured_creatures
-        .push(CreatureIndex(1));
-    */
-
-    game.renderer
-        .add_cuboid_colour(instanced_simple_lit_colour_3d::Instance::new(
-            [1.0; 4],
-            Matrix4::from_translation([GRID_MIN[0] as f32, GRID_MIN[1] as f32, GRID_MIN[2] as f32]),
-        ));
-
-    game.renderer
-        .add_cuboid_colour(instanced_simple_lit_colour_3d::Instance::new(
-            [1.0; 4],
-            Matrix4::from_translation([GRID_MAX[0] as f32, GRID_MAX[1] as f32, GRID_MAX[2] as f32]),
-        ));
-
-    game.renderer
-        .add_cuboid_colour(instanced_simple_lit_colour_3d::Instance::new(
-            [1.0; 4],
-            Matrix4::from_translation([2.0, 0.0, 0.0]),
-        ));
-
-    /*
-    let second_player_window =
-        starting_renderer.create_window(WindowConfig::default(), &temp_event_loop);
-
-    game.creatures_manager
-        .creature_controlled_by_window
-        .insert(second_player_window, CreatureIndex(1));
-    */
-
-    let floor = AabbCentredOrigin {
-        position: [0.0, 1.0, 0.0],
-        half_size: [
-            (GRID_MAX[0] - GRID_MIN[0]) as f32 * 0.5,
-            0.5,
-            (GRID_MAX[2] - GRID_MIN[2]) as f32 * 0.5,
-        ],
-    };
-    game.physics_simulation
-        .bodies
-        .push(Body::ImmovableCuboid(floor.clone()));
-
-    game.renderer
-        .add_cuboid_colour_from_aabb(floor, [1.0, 0.0, 1.0, 1.0]);
+    game.reality = Some(Reality::new(&mut game, &event_loop));
 
     event_loop.run(move |event, event_loop, control_flow| match event {
         Event::WindowEvent {
@@ -301,6 +322,12 @@ fn main() {
             window_id,
         } => {
             game.renderer.correct_window_size(window_id);
+
+            if let Some(creature_selection_window) = game.creatures_manager.creature_selection_window {
+                if window_id == creature_selection_window {
+                    menus::TextManager::on_selection_menu_resize(game.renderer.windows_manager.get_renderer(window_id).unwrap().window().inner_size().into(), game.renderer.selection_menu_text_instances_mut(), &game.creatures_manager)
+                }
+            }
         }
 
         Event::MainEventsCleared => {
@@ -349,7 +376,14 @@ fn main() {
             window_id,
             event: WindowEvent::MouseInput { state, button, .. },
             ..
-        } => match button {
+        } => {
+            if let Some(selection_window) = game.creatures_manager.creature_selection_window {
+                if selection_window == window_id {
+                    return
+                }
+            }
+            
+            match button {
             MouseButton::Left => {
                 if is_pressed(state) {
                     game.focused_creature_mut().actions_mut().primary_interact = true;
@@ -357,7 +391,7 @@ fn main() {
             }
 
             _ => (),
-        },
+        }},
 
         Event::DeviceEvent {
             event: DeviceEvent::MouseMotion { delta },
@@ -436,6 +470,7 @@ fn fixed_update(game: &mut Game) {
 fn on_update(game: &mut Game, event_loop: &EventLoopWindowTarget<()>) {
     let mut input_manager = game.input_manager.take().unwrap();
     while let Some(event) = input_manager.gilrs.next_event() {
+
         //println!("event: {:?}", event);
 
         //let mut input_manager = game.input_manager.take().unwrap();
@@ -887,11 +922,13 @@ struct CreatureActions {
 struct GameActions {
     full_screen: bool,
 
-    // Focus selector?
-    paused: bool,
-
     // Debug:
     log_fps: bool,
+}
+
+#[derive(Default, Debug)]
+struct RealityActions {
+    paused: bool,
 }
 
 #[inline]
