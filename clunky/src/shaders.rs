@@ -2,6 +2,7 @@ pub mod instanced_simple_lit_colour_3d;
 pub mod instanced_simple_lit_uv_3d;
 pub mod instanced_text_sdf;
 pub mod instanced_unlit_uv_2d_stretch;
+pub mod simple_lit_colour_3d;
 
 pub mod colour_2d_vertex_shader {
     vulkano_shaders::shader! {

@@ -694,6 +694,7 @@ pub fn position_from_index_3d<T: Number>(index: T, width: T, height: T) -> [T; 3
     ]
 }
 
+/// Remaps a number from a range to another range.
 #[inline]
 pub fn remap<T: Number>(value: T, original_range: ops::Range<T>, new_range: ops::Range<T>) -> T {
     new_range.start

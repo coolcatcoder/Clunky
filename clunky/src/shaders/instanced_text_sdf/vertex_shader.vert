@@ -5,7 +5,7 @@ layout(location = 0) in vec2 position;
 layout(location = 1) in vec2 uv;
 
 // instance
-layout(location = 2) in vec2 uv_offset;
+layout(location = 2) in vec2 uv_offset; // Add uv scale
 layout(location = 3) in vec4 colour;
 layout(location = 4) in float smoothing;
 layout(location = 5) in float inverse_boldness;

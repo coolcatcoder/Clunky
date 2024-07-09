@@ -21,7 +21,7 @@ use crate::math::{self, Degrees, Matrix4, Radians};
 pub mod vertex_shader {
     vulkano_shaders::shader! {
         ty: "vertex",
-        path: "src/shaders/instanced_simple_lit_colour_3d/vertex_shader.vert",
+        path: "src/shaders/simple_lit_colour_3d/vertex_shader.vert",
     }
 }
 pub use vertex_shader::Camera as CameraUniform;
@@ -29,7 +29,7 @@ pub use vertex_shader::Camera as CameraUniform;
 pub mod fragment_shader {
     vulkano_shaders::shader! {
         ty: "fragment",
-        path: "src/shaders/instanced_simple_lit_colour_3d/fragment_shader.frag",
+        path: "src/shaders/simple_lit_colour_3d/fragment_shader.frag",
     }
 }
 
@@ -42,6 +42,9 @@ pub struct Vertex {
 
     #[format(R32G32B32_SFLOAT)]
     pub normal: [f32; 3],
+
+    #[format(R32G32B32A32_SFLOAT)]
+    pub colour: [f32; 4],
 }
 
 impl Vertex {
@@ -58,48 +61,20 @@ impl Vertex {
 
         let mut vertices = vec![];
 
-        for (position, normal) in reader
-            .read_positions()
-            .unwrap()
-            .zip(reader.read_normals().unwrap())
-        {
-            vertices.push(Vertex { position, normal });
+        for (position, (normal, colour)) in reader.read_positions().unwrap().zip(
+            reader
+                .read_normals()
+                .unwrap()
+                .zip(reader.read_colors(0).unwrap().into_rgba_f32()),
+        ) {
+            vertices.push(Vertex {
+                position,
+                normal,
+                colour,
+            });
         }
 
         vertices
-    }
-}
-
-/// The instance this shader requires.
-#[derive(BufferContents, VertexTrait, Copy, Clone, Debug)]
-#[repr(C)]
-pub struct Instance {
-    #[format(R32G32B32A32_SFLOAT)]
-    pub colour: [f32; 4],
-
-    #[format(R32G32B32A32_SFLOAT)]
-    pub model_to_world_0: [f32; 4],
-
-    #[format(R32G32B32A32_SFLOAT)]
-    pub model_to_world_1: [f32; 4],
-
-    #[format(R32G32B32A32_SFLOAT)]
-    pub model_to_world_2: [f32; 4],
-
-    #[format(R32G32B32A32_SFLOAT)]
-    pub model_to_world_3: [f32; 4],
-}
-
-impl Instance {
-    /// Constructs a new Instance.
-    pub const fn new(colour: [f32; 4], model_to_world: math::Matrix4) -> Instance {
-        Instance {
-            colour,
-            model_to_world_0: model_to_world.x,
-            model_to_world_1: model_to_world.y,
-            model_to_world_2: model_to_world.z,
-            model_to_world_3: model_to_world.w,
-        }
     }
 }
 
@@ -125,7 +100,7 @@ pub fn graphics_pipeline_create_info(
         .entry_point("main")
         .unwrap();
 
-    let vertex_input_state = [Vertex::per_vertex(), Instance::per_instance()]
+    let vertex_input_state = Vertex::per_vertex()
         .definition(&vertex_shader_entrance.info().input_interface)
         .unwrap();
 

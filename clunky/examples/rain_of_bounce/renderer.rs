@@ -6,7 +6,7 @@ use clunky::{
     physics::physics_3d::{aabb::AabbCentredOrigin, bodies::Body as BodyTrait},
     shaders::{
         instanced_simple_lit_colour_3d, instanced_simple_lit_uv_3d, instanced_text_sdf,
-        instanced_unlit_uv_2d_stretch,
+        instanced_unlit_uv_2d_stretch, simple_lit_colour_3d,
     },
 };
 use png::ColorType;
@@ -59,6 +59,7 @@ use winit::{
 use crate::body::Body;
 
 pub const SQUAROID_GLTF: &[u8] = include_bytes!("meshes/squaroid.glb");
+pub const TERRAIN_GLTF: &[u8] = &[]; // temp
 
 const DEPTH_FORMAT: Format = Format::D32_SFLOAT;
 const BACKGROUND_COLOUR: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
@@ -164,6 +165,7 @@ impl Default for WindowConfig {
 pub enum WindowVariety {
     Creature(Camera3D),
     Selection,
+    Menu,
 }
 
 pub struct WindowSpecific {
@@ -213,7 +215,7 @@ pub struct Renderer {
     render_pass: Arc<RenderPass>,
     pipelines: Pipelines,
 
-    buffers: Buffers,
+    pub buffers: Buffers,
     images_and_samplers: ImagesAndSamplers,
 
     pub windows_manager: VulkanoWindows,
@@ -303,7 +305,7 @@ impl Renderer {
         }
     }
 
-    pub fn render(&mut self, bodies: &[Body]) {
+    pub fn render(&mut self, bodies: Option<&[Body]>) {
         self.buffers.before_rendering(bodies);
         for (window_id, window_specific) in &mut self.window_specifics {
             let window_renderer = self.windows_manager.get_renderer_mut(*window_id).unwrap();
@@ -456,7 +458,7 @@ impl Renderer {
                             0,
                             (
                                 self.buffers
-                                    .selection_menu_uv_vertices_and_indices
+                                    .squaroid_uv_vertices_and_indices
                                     .vertices
                                     .clone(),
                                 selection_menu_uv_instances_buffer,
@@ -465,16 +467,13 @@ impl Renderer {
                         .unwrap()
                         .bind_index_buffer(
                             self.buffers
-                                .selection_menu_uv_vertices_and_indices
+                                .squaroid_uv_vertices_and_indices
                                 .indices
                                 .clone(),
                         )
                         .unwrap()
                         .draw_indexed(
-                            self.buffers
-                                .selection_menu_uv_vertices_and_indices
-                                .indices
-                                .len() as u32,
+                            self.buffers.squaroid_uv_vertices_and_indices.indices.len() as u32,
                             self.buffers.selection_menu_uv_instances.len() as u32,
                             0,
                             0,
@@ -509,7 +508,7 @@ impl Renderer {
                             0,
                             (
                                 self.buffers
-                                    .selection_menu_uv_vertices_and_indices
+                                    .squaroid_uv_vertices_and_indices
                                     .vertices
                                     .clone(),
                                 selection_menu_text_instances_buffer,
@@ -518,22 +517,129 @@ impl Renderer {
                         .unwrap()
                         .bind_index_buffer(
                             self.buffers
-                                .selection_menu_uv_vertices_and_indices
+                                .squaroid_uv_vertices_and_indices
                                 .indices
                                 .clone(),
                         )
                         .unwrap()
                         .draw_indexed(
-                            self.buffers
-                                .selection_menu_uv_vertices_and_indices
-                                .indices
-                                .len() as u32,
+                            self.buffers.squaroid_uv_vertices_and_indices.indices.len() as u32,
                             self.buffers.selection_menu_text_instances.len() as u32,
                             0,
                             0,
                             0,
                         )
                         .unwrap();
+                }
+                WindowVariety::Menu => {
+                    let font_uniform = self
+                        .allocators
+                        .subbuffer_allocator
+                        .allocate_sized()
+                        .unwrap();
+                    *font_uniform.write().unwrap() = instanced_text_sdf::FontUniform {
+                        glyph_size: BOOKMAN_OLD_STYLE_GLYPH_SIZE,
+                        aspect_ratio: window_specific.viewport.extent[0]
+                            / window_specific.viewport.extent[1],
+                    };
+
+                    // UV UI
+                    if self.buffers.menu_uv_instances.len() != 0 {
+                        self.pipelines.bind_instanced_unlit_uv_2d_stretch(
+                            &mut command_buffer_builder,
+                            &self
+                                .images_and_samplers
+                                .descriptor_set_menu_sampler_with_testing_image,
+                        );
+
+                        let menu_uv_instances_buffer = self
+                            .allocators
+                            .subbuffer_allocator
+                            .allocate_slice(self.buffers.menu_uv_instances.len() as DeviceSize)
+                            .unwrap();
+                        menu_uv_instances_buffer
+                            .write()
+                            .unwrap()
+                            .copy_from_slice(&self.buffers.menu_uv_instances);
+
+                        command_buffer_builder
+                            .bind_vertex_buffers(
+                                0,
+                                (
+                                    self.buffers
+                                        .squaroid_uv_vertices_and_indices
+                                        .vertices
+                                        .clone(),
+                                    menu_uv_instances_buffer,
+                                ),
+                            )
+                            .unwrap()
+                            .bind_index_buffer(
+                                self.buffers
+                                    .squaroid_uv_vertices_and_indices
+                                    .indices
+                                    .clone(),
+                            )
+                            .unwrap()
+                            .draw_indexed(
+                                self.buffers.squaroid_uv_vertices_and_indices.indices.len() as u32,
+                                self.buffers.menu_uv_instances.len() as u32,
+                                0,
+                                0,
+                                0,
+                            )
+                            .unwrap();
+                    }
+
+                    // TEXT
+                    if self.buffers.menu_text_instances.len() != 0 {
+                        self.pipelines.bind_instanced_text_sdf(
+                            &mut command_buffer_builder,
+                            &self.allocators,
+                            &self
+                                .images_and_samplers
+                                .descriptor_set_text_sdf_sampler_with_testing_text_sdf_image,
+                            font_uniform,
+                        );
+
+                        let menu_text_instances_buffer = self
+                            .allocators
+                            .subbuffer_allocator
+                            .allocate_slice(self.buffers.menu_text_instances.len() as DeviceSize)
+                            .unwrap();
+                        menu_text_instances_buffer
+                            .write()
+                            .unwrap()
+                            .copy_from_slice(&self.buffers.menu_text_instances);
+
+                        command_buffer_builder
+                            .bind_vertex_buffers(
+                                0,
+                                (
+                                    self.buffers
+                                        .squaroid_uv_vertices_and_indices
+                                        .vertices
+                                        .clone(),
+                                    menu_text_instances_buffer,
+                                ),
+                            )
+                            .unwrap()
+                            .bind_index_buffer(
+                                self.buffers
+                                    .squaroid_uv_vertices_and_indices
+                                    .indices
+                                    .clone(),
+                            )
+                            .unwrap()
+                            .draw_indexed(
+                                self.buffers.squaroid_uv_vertices_and_indices.indices.len() as u32,
+                                self.buffers.menu_text_instances.len() as u32,
+                                0,
+                                0,
+                                0,
+                            )
+                            .unwrap();
+                    }
                 }
             }
 
@@ -631,12 +737,12 @@ impl Renderer {
     }
 }
 
-//TODO: implement cleaning function when the amount of Nones pile up in potentials, to keep memory use low.
+//TODO: implement a shrink to fit function when the amount of Nones pile up in potentials, to keep memory use low.
 // To do this, we should have a none counter that gets incremented every time a none is added.
 // Don't do the silly and slow option of constantly checking a very long vec for nones.
 // But how would we deal with indices suddenly being wrong?
 // Perhaps when I know a None index, we just move the next instance into it?
-struct Buffers {
+pub struct Buffers {
     //TODO: Get this working with u8 indices.
     cuboid_colour_vertices_and_indices:
         DeviceVerticesAndIndices<instanced_simple_lit_colour_3d::Vertex, u16>,
@@ -645,14 +751,24 @@ struct Buffers {
     // This is only valid during rendering.
     cuboid_colour_drain_start_index: usize,
 
+    // I imagine that this will be temporary.
+    terrain_colour_vertices_and_indices:
+        DeviceVerticesAndIndices<simple_lit_colour_3d::Vertex, u32>,
+
     // These can be used for all uv squaroids, as they all have the same layout.
-    selection_menu_uv_vertices_and_indices:
+    squaroid_uv_vertices_and_indices:
         DeviceVerticesAndIndices<instanced_unlit_uv_2d_stretch::Vertex, u16>,
-    selection_menu_uv_instances: Vec<instanced_unlit_uv_2d_stretch::Instance>,
-    selection_menu_text_instances: Vec<instanced_text_sdf::Instance>,
+
+    pub selection_menu_uv_instances: Vec<instanced_unlit_uv_2d_stretch::Instance>,
+    pub selection_menu_text_instances: Vec<instanced_text_sdf::Instance>,
+
+    pub menu_uv_instances: Vec<instanced_unlit_uv_2d_stretch::Instance>,
+    pub menu_text_instances: Vec<instanced_text_sdf::Instance>,
 }
 
 impl Buffers {
+    // This only happens once, so I'm considering making this more expensive by reading it a file's bytes (json perhaps?), and simplifying my process.
+    // Why a file though? I should probably just use actual config structs.
     fn new(allocators: &Allocators, context: &VulkanoContext) -> Self {
         let mut command_buffer_builder = AutoCommandBufferBuilder::primary(
             &allocators.command_buffer_allocator,
@@ -664,6 +780,10 @@ impl Buffers {
         let cuboid_colour_vertices =
             instanced_simple_lit_colour_3d::Vertex::get_array_from_gltf(meshes::CUBE_GLTF, 0);
         let cuboid_colour_indices = meshes::get_indices_from_gltf(meshes::CUBE_GLTF, 0);
+
+        let terrain_colour_vertices =
+            simple_lit_colour_3d::Vertex::get_array_from_gltf(TERRAIN_GLTF, 0);
+        let terrain_colour_indices = meshes::get_indices_from_gltf(TERRAIN_GLTF, 0);
 
         let selection_menu_uv_vertices =
             instanced_unlit_uv_2d_stretch::Vertex::get_array_from_gltf(SQUAROID_GLTF, 0);
@@ -682,7 +802,14 @@ impl Buffers {
             ),
             cuboid_colour_drain_start_index: 0,
 
-            selection_menu_uv_vertices_and_indices: DeviceVerticesAndIndices::new(
+            terrain_colour_vertices_and_indices: DeviceVerticesAndIndices::new(
+                terrain_colour_vertices,
+                terrain_colour_indices,
+                &allocators.memory_allocator,
+                &mut command_buffer_builder,
+            ),
+
+            squaroid_uv_vertices_and_indices: DeviceVerticesAndIndices::new(
                 selection_menu_uv_vertices,
                 selection_menu_uv_indices,
                 &allocators.memory_allocator,
@@ -691,6 +818,9 @@ impl Buffers {
 
             selection_menu_uv_instances: Vec::with_capacity(30),
             selection_menu_text_instances: Vec::with_capacity(100),
+
+            menu_uv_instances: Vec::with_capacity(30),
+            menu_text_instances: Vec::with_capacity(100),
         };
 
         command_buffer_builder
@@ -707,8 +837,16 @@ impl Buffers {
     }
 
     /// Turns all potential instances into real instances.
-    fn before_rendering(&mut self, bodies: &[Body]) {
+    fn before_rendering(&mut self, bodies: Option<&[Body]>) {
         self.cuboid_colour_drain_start_index = self.cuboid_colour_instances.len();
+
+        let Some(bodies) = bodies else {
+            if self.cuboid_colour_potential_instances.len() != 0 {
+                unreachable!("If bodies is none, then there should not be any potential instances for rendering.")
+            }
+
+            return;
+        };
 
         self.cuboid_colour_instances.par_extend(
             self.cuboid_colour_potential_instances
@@ -1027,6 +1165,7 @@ fn image_from_png(
 
 struct Pipelines {
     instanced_simple_lit_colour_3d: Arc<GraphicsPipeline>,
+    simple_lit_colour_3d: Arc<GraphicsPipeline>,
     instanced_unlit_uv_2d_stretch: Arc<GraphicsPipeline>,
     instanced_text_sdf: Arc<GraphicsPipeline>,
 }
@@ -1052,6 +1191,30 @@ impl Pipelines {
                 multisample_state: Some(MultisampleState::default()),
                 dynamic_state: [DynamicState::Viewport].into_iter().collect(),
                 ..instanced_simple_lit_colour_3d::graphics_pipeline_create_info(
+                    device.clone(),
+                    subpass.clone(),
+                )
+            },
+        )
+        .unwrap();
+
+        let simple_lit_colour_3d = GraphicsPipeline::new(
+            device.clone(),
+            None,
+            GraphicsPipelineCreateInfo {
+                viewport_state: Some(ViewportState::default()),
+                rasterization_state: Some(RasterizationState {
+                    cull_mode: CullMode::Back,
+                    front_face: FrontFace::CounterClockwise,
+                    ..Default::default()
+                }),
+                input_assembly_state: Some(InputAssemblyState {
+                    topology: PrimitiveTopology::TriangleList,
+                    ..Default::default()
+                }),
+                multisample_state: Some(MultisampleState::default()),
+                dynamic_state: [DynamicState::Viewport].into_iter().collect(),
+                ..simple_lit_colour_3d::graphics_pipeline_create_info(
                     device.clone(),
                     subpass.clone(),
                 )
@@ -1106,6 +1269,7 @@ impl Pipelines {
 
         Self {
             instanced_simple_lit_colour_3d,
+            simple_lit_colour_3d,
             instanced_unlit_uv_2d_stretch,
             instanced_text_sdf,
         }
@@ -1128,6 +1292,32 @@ impl Pipelines {
                 PersistentDescriptorSet::new(
                     &allocators.descriptor_set_allocator,
                     self.instanced_simple_lit_colour_3d.layout().set_layouts()[0].clone(),
+                    [WriteDescriptorSet::buffer(0, camera_uniform)],
+                    [],
+                )
+                .unwrap(),
+            )
+            .unwrap();
+    }
+
+    fn bind_simple_lit_colour_3d(
+        &self,
+        command_buffer_builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
+        allocators: &Allocators,
+        // Same layout as instanced version, so this is fine.
+        camera_uniform: Subbuffer<instanced_simple_lit_colour_3d::CameraUniform>,
+    ) {
+        command_buffer_builder
+            .bind_pipeline_graphics(self.simple_lit_colour_3d.clone())
+            .unwrap()
+            .bind_descriptor_sets(
+                PipelineBindPoint::Graphics,
+                self.simple_lit_colour_3d.layout().clone(),
+                0,
+                //TODO: Shouldn't this be persistent, as the name implies? Why is this being created every frame?
+                PersistentDescriptorSet::new(
+                    &allocators.descriptor_set_allocator,
+                    self.simple_lit_colour_3d.layout().set_layouts()[0].clone(),
                     [WriteDescriptorSet::buffer(0, camera_uniform)],
                     [],
                 )
@@ -1181,3 +1371,71 @@ impl Pipelines {
             .unwrap();
     }
 }
+
+// I don't like macros.
+// Modified version of https://stackoverflow.com/questions/53580165/is-it-possible-to-let-a-macro-expand-to-a-struct-field
+// This sucks. It is hard to read, and hard to edit.
+macro_rules! create_buffer_struct {
+    ( @ $name:ident { } -> ($($result:tt)*) ) => (
+        pub struct $name {
+            $($result)*
+        }
+    );
+
+    // Start field type branches.
+
+    ( @ $name:ident { $param:ident : Instances<$type:ty, capacity:$_:tt>, $($rest:tt)* } -> ($($result:tt)*) ) => (
+        create_buffer_struct!(@ $name { $($rest)* } -> (
+            $($result)*
+            pub $param : Vec<$type>,
+        ));
+    );
+
+    ( @ $name:ident { $param:ident : Instances<$type:ty, capacity:$_:tt>, $($rest:tt)* } -> ($($result:tt)*) ) => (
+        create_buffer_struct!(@ $name { $($rest)* } -> (
+            $($result)*
+            pub $param : Vec<$type>,
+        ));
+    );
+
+    ( @ $name:ident { $param:ident : Option<$type:ty>, $($rest:tt)* } -> ($($result:tt)*) ) => (
+        create_buffer_struct!(@ $name { $($rest)* } -> (
+            $($result)*
+            pub $param : Option<$type>,
+        ));
+    );
+
+    ( @ $name:ident { $param:ident : Vec<$type:ty>, $($rest:tt)* } -> ($($result:tt)*) ) => (
+        create_buffer_struct!(@ $name { $($rest)* } -> (
+            $($result)*
+            pub $param : Vec<$type>,
+        ));
+    );
+
+    ( @ $name:ident { $param:ident : bool, $($rest:tt)* } -> ($($result:tt)*) ) => (
+        create_buffer_struct!(@ $name { $($rest)* } -> (
+            $($result)*
+            pub $param : bool,
+        ));
+    );
+
+    // End field type branches.
+
+    // Default branch, allows any type.
+    ( @ $name:ident { $param:ident : $default:tt, $($rest:tt)* } -> ($($result:tt)*) ) => (
+        create_buffer_struct!(@ $name { $($rest)* } -> (
+            $($result)*
+            pub $param : $default,
+        ));
+    );
+
+    ( $name:ident { $( $param:ident  ($($type:tt)*) ),* $(,)? } ) => (
+        create_buffer_struct!(@ $name { $($param : $($type)*,)* } -> ());
+    );
+}
+
+create_buffer_struct!(MyStruct {
+    name(Option<bool>),
+    name2(Vec<bool>),
+    blah(Instances<u32, capacity:blah>),
+});

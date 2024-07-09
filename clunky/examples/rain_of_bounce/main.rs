@@ -19,13 +19,15 @@ use clunky::{
 use common_renderer::{bits_has, CommonRenderer};
 use engine::SimpleEngine;
 use gilrs::{EventType, Gilrs};
+use input::{Bindings, GameActions, InputManager, RealityActions};
+use menus::{Menu, MenuManager};
 use renderer::{Camera3D, Renderer, WindowConfig, WindowVariety};
 use vulkano::swapchain::PresentMode;
 use vulkano_util::window::WindowDescriptor;
 use winit::{
     dpi::PhysicalPosition,
     event::{DeviceEvent, Event, KeyboardInput, MouseButton, WindowEvent},
-    event_loop::{EventLoop, EventLoopWindowTarget},
+    event_loop::{ControlFlow, EventLoop, EventLoopWindowTarget},
     window::{Fullscreen, WindowId},
 };
 
@@ -37,8 +39,9 @@ mod body;
 mod common_renderer;
 mod creature_types;
 mod engine;
-mod renderer;
+mod input;
 mod menus;
+mod renderer;
 
 type Engine = SimpleEngine<CommonRenderer<Body>>;
 type Physics = CpuSolver<f32, Body>;
@@ -71,6 +74,7 @@ struct Reality {
     creatures_manager: CreaturesManager,
 
     physics_simulation: Physics,
+    physics_fixed_update: Option<FixedUpdate<f32>>,
 
     actions: RealityActions,
 }
@@ -106,10 +110,14 @@ impl Reality {
             },
 
             physics_simulation: CpuSolver::new(physics_config),
+            physics_fixed_update: Some(FixedUpdate::new(
+                FIXED_DELTA_TIME,
+                MaxSubsteps::WarnAt(100),
+            )),
 
-            actions: Default::default()
+            actions: Default::default(),
         };
-    
+
         game.renderer.selection_menu_uv_instances_mut().push(
             instanced_unlit_uv_2d_stretch::Instance::new(
                 [0.0, 0.0],
@@ -117,7 +125,7 @@ impl Reality {
                 glam::Affine2::from_translation([1.0, 0.0].into()),
             ),
         );
-    
+
         game.renderer
             .selection_menu_text_instances_mut()
             .push(instanced_text_sdf::Instance::new(
@@ -129,7 +137,7 @@ impl Reality {
                     * glam::Affine2::from_scale([0.25, 0.25].into()),
             ));
         //text_rendering::blah();
-    
+
         let test_burgle_window = game.renderer.create_window(
             &event_loop,
             &WindowConfig {
@@ -145,8 +153,9 @@ impl Reality {
                 swapchain_create_info_modify: |_| {},
             },
         );
-    
-        reality.creatures_manager
+
+        reality
+            .creatures_manager
             .creatures
             .push(CreatureType::Burgle(Burgle::new(
                 &mut game.renderer,
@@ -157,17 +166,20 @@ impl Reality {
                 [1.0, 0.0, 1.0, 1.0],
                 CreatureIndex(reality.creatures_manager.creatures.len()),
             )));
-    
-            reality.creatures_manager
+
+        reality
+            .creatures_manager
             .captured_creatures
             .push(CreatureIndex(0));
-    
-            reality.creatures_manager
+
+        reality
+            .creatures_manager
             .creature_controlled_by_window
             .insert(test_burgle_window, CreatureIndex(0));
-    
+
         // 2 player test
-        reality.creatures_manager
+        reality
+            .creatures_manager
             .creatures
             .push(CreatureType::Burgle(Burgle::new(
                 &mut game.renderer,
@@ -178,40 +190,48 @@ impl Reality {
                 [1.0, 1.0, 0.0, 1.0],
                 CreatureIndex(reality.creatures_manager.creatures.len()),
             )));
-    
+
         /*
         game.creatures_manager
             .captured_creatures
             .push(CreatureIndex(1));
         */
-    
+
         game.renderer
             .add_cuboid_colour(instanced_simple_lit_colour_3d::Instance::new(
                 [1.0; 4],
-                Matrix4::from_translation([GRID_MIN[0] as f32, GRID_MIN[1] as f32, GRID_MIN[2] as f32]),
+                Matrix4::from_translation([
+                    GRID_MIN[0] as f32,
+                    GRID_MIN[1] as f32,
+                    GRID_MIN[2] as f32,
+                ]),
             ));
-    
+
         game.renderer
             .add_cuboid_colour(instanced_simple_lit_colour_3d::Instance::new(
                 [1.0; 4],
-                Matrix4::from_translation([GRID_MAX[0] as f32, GRID_MAX[1] as f32, GRID_MAX[2] as f32]),
+                Matrix4::from_translation([
+                    GRID_MAX[0] as f32,
+                    GRID_MAX[1] as f32,
+                    GRID_MAX[2] as f32,
+                ]),
             ));
-    
+
         game.renderer
             .add_cuboid_colour(instanced_simple_lit_colour_3d::Instance::new(
                 [1.0; 4],
                 Matrix4::from_translation([2.0, 0.0, 0.0]),
             ));
-    
+
         /*
         let second_player_window =
             starting_renderer.create_window(WindowConfig::default(), &temp_event_loop);
-    
+
         game.creatures_manager
             .creature_controlled_by_window
             .insert(second_player_window, CreatureIndex(1));
         */
-    
+
         let floor = AabbCentredOrigin {
             position: [0.0, 1.0, 0.0],
             half_size: [
@@ -220,10 +240,11 @@ impl Reality {
                 (GRID_MAX[2] - GRID_MIN[2]) as f32 * 0.5,
             ],
         };
-        reality.physics_simulation
+        reality
+            .physics_simulation
             .bodies
             .push(Body::ImmovableCuboid(floor.clone()));
-    
+
         game.renderer
             .add_cuboid_colour_from_aabb(floor, [1.0, 0.0, 1.0, 1.0]);
 
@@ -233,8 +254,6 @@ impl Reality {
 
 struct Game {
     renderer: Renderer,
-
-    physics_fixed_update: Option<FixedUpdate<f32>>,
 
     fps: FpsTracker<f32>,
 
@@ -247,20 +266,15 @@ struct Game {
 
     reality: Option<Reality>,
 
-    menu_window: Option<WindowId>,
+    menu_manager: MenuManager,
 }
 
 impl Game {
     fn new() -> (Self, EventLoop<()>) {
         let (renderer, event_loop) = Renderer::new();
 
-        let game = Game {
+        let mut game = Game {
             renderer,
-
-            physics_fixed_update: Some(FixedUpdate::new(
-                FIXED_DELTA_TIME,
-                MaxSubsteps::WarnAt(100),
-            )),
 
             fps: FpsTracker::new(),
 
@@ -274,15 +288,18 @@ impl Game {
             input_manager: InputManager {
                 gilrs: Gilrs::new().unwrap(),
 
-                active_binding: 0,
-                bindings: vec![Bindings::ScanCodeBindings(Default::default())],
+                active_bindings: 0,
+                all_bindings: vec![Bindings::default()],
             },
 
             reality: None,
 
-            // TODO: this shouldn't be none, this should be the main menu. This currently doesn't exist though.
-            menu_window: None
+            menu_manager: MenuManager::new(),
         };
+
+        game.menu_manager
+            .set_menu(Menu::Main, &mut game.renderer, &event_loop);
+
         (game, event_loop)
     }
 }
@@ -294,11 +311,43 @@ fn main() {
     let blah = bits_has(0b010, 0b110);
     println!("{blah}");
 
+    menus::blah();
+
     let (mut game, event_loop) = Game::new();
 
-    game.reality = Some(Reality::new(&mut game, &event_loop));
+    // Temp:
+    game.input_manager.all_bindings[0].add_australian_keyboard_default();
 
-    event_loop.run(move |event, event_loop, control_flow| match event {
+    //game.reality = Some(Reality::new(&mut game, &event_loop));
+
+    event_loop.run(move |event, event_loop, control_flow| {
+        // Sometimes window events that happen just before a window gets deleted, will only be recieved after the deletion.
+        if let Event::WindowEvent { window_id, .. } = event {
+            if matches!(game.renderer.window_specifics.get(&window_id), None) {
+                println!("Window event for a non-existant window.");
+                return;
+            }
+        }
+
+        // When a window gets removed, window_focused needs to be set to none.
+        // Surely there is a better way than this?
+        if let Some(window_focused) = game.window_focused {
+            if matches!(game.renderer.window_specifics.get(&window_focused), None) {
+                game.window_focused = None;
+            }
+        }
+
+        handle_event(event, event_loop, control_flow, &mut game)
+    })
+}
+
+fn handle_event(
+    event: Event<()>,
+    event_loop: &EventLoopWindowTarget<()>,
+    control_flow: &mut ControlFlow,
+    game: &mut Game,
+) {
+    match event {
         Event::WindowEvent {
             window_id,
             event: WindowEvent::CloseRequested,
@@ -306,14 +355,22 @@ fn main() {
         } => {
             let window_specific = game.renderer.window_specifics.get(&window_id).unwrap();
 
-            if matches!(window_specific.variety, WindowVariety::Selection) {
-                todo!("Display an are you sure window.");
-            } else {
-                game.renderer.remove_window(window_id);
-
-                game.creatures_manager
-                    .creature_controlled_by_window
-                    .remove(&window_id);
+            match window_specific.variety {
+                WindowVariety::Creature(_) => {
+                    game.reality
+                        .as_mut()
+                        .unwrap()
+                        .creatures_manager
+                        .creature_controlled_by_window
+                        .remove(&window_id)
+                        .unwrap();
+                }
+                WindowVariety::Selection => {
+                    todo!("display an are you sure window?");
+                }
+                WindowVariety::Menu => {
+                    todo!("Depends on what menu.")
+                }
             }
         }
 
@@ -321,42 +378,86 @@ fn main() {
             event: WindowEvent::Resized(..) | WindowEvent::ScaleFactorChanged { .. },
             window_id,
         } => {
+            let extent: [f32; 2] = game
+                .renderer
+                .windows_manager
+                .get_window(window_id)
+                .unwrap()
+                .inner_size()
+                .into();
+
             game.renderer.correct_window_size(window_id);
 
-            if let Some(creature_selection_window) = game.creatures_manager.creature_selection_window {
-                if window_id == creature_selection_window {
-                    menus::TextManager::on_selection_menu_resize(game.renderer.windows_manager.get_renderer(window_id).unwrap().window().inner_size().into(), game.renderer.selection_menu_text_instances_mut(), &game.creatures_manager)
+            if !matches!(game.menu_manager.menu(), Menu::None) {
+                game.menu_manager.resize(extent, &mut game.renderer);
+            }
+
+            if let Some(reality) = &game.reality {
+                if window_id == reality.creatures_manager.creature_selection_window {
+                    menus::TextManager::on_selection_menu_resize(
+                        game.renderer
+                            .windows_manager
+                            .get_renderer(window_id)
+                            .unwrap()
+                            .window()
+                            .inner_size()
+                            .into(),
+                        game.renderer.selection_menu_text_instances_mut(),
+                        &reality.creatures_manager,
+                    )
                 }
             }
         }
 
         Event::MainEventsCleared => {
-            let mut physics_fixed_update = game.physics_fixed_update.take().unwrap();
-            physics_fixed_update.update(|| fixed_update(&mut game));
-            game.physics_fixed_update = Some(physics_fixed_update);
-            on_update(&mut game, event_loop);
-            game.renderer.render(&game.physics_simulation.bodies);
+            if matches!(&mut game.reality, Some(_)) {
+                let mut physics_fixed_update = game
+                    .reality
+                    .as_mut()
+                    .unwrap()
+                    .physics_fixed_update
+                    .take()
+                    .unwrap();
+                physics_fixed_update.update(|| fixed_update(game));
+                game.reality.as_mut().unwrap().physics_fixed_update = Some(physics_fixed_update);
+            }
+
+            on_update(game, event_loop);
+
+            let bodies: Option<&[Body]> = if let Some(reality) = &game.reality {
+                Some(&reality.physics_simulation.bodies)
+            } else {
+                None
+            };
+
+            game.renderer.render(bodies);
             game.fps.update();
         }
 
         Event::WindowEvent {
             event: WindowEvent::KeyboardInput { input, .. },
-            ..
+            window_id,
         } => {
-            let mut input_manager = game.input_manager.take().unwrap();
-            let mut game_actions = game.actions.take().unwrap();
-            if let Bindings::ScanCodeBindings(bindings) =
-                &mut input_manager.bindings[input_manager.active_binding]
-            {
-                let creature_actions = game.focused_creature_mut().actions_mut();
-                bindings.modify_actions_with_keyboard_input(
-                    input,
-                    &mut game_actions,
-                    creature_actions,
-                )
+            game.input_manager.all_bindings[game.input_manager.active_bindings]
+                .modify_game_actions_with_keyboard_input(&mut game.actions, input);
+
+            if let Some(reality) = &mut game.reality {
+                game.input_manager.all_bindings[game.input_manager.active_bindings]
+                    .modify_reality_actions_with_keyboard_input(&mut reality.actions, input);
+
+                if window_id == reality.creatures_manager.creature_selection_window {
+                    todo!()
+                } else if let Some(creature_id) = reality
+                    .creatures_manager
+                    .creature_controlled_by_window
+                    .get(&window_id)
+                {
+                    let creature_actions =
+                        reality.creatures_manager.creatures[creature_id.0].actions_mut();
+                    game.input_manager.all_bindings[game.input_manager.active_bindings]
+                        .modify_creature_actions_with_keyboard_input(creature_actions, input);
+                }
             }
-            game.input_manager = Some(input_manager);
-            game.actions = Some(game_actions);
         }
 
         Event::WindowEvent {
@@ -377,21 +478,68 @@ fn main() {
             event: WindowEvent::MouseInput { state, button, .. },
             ..
         } => {
-            if let Some(selection_window) = game.creatures_manager.creature_selection_window {
-                if selection_window == window_id {
-                    return
-                }
-            }
-            
-            match button {
-            MouseButton::Left => {
-                if is_pressed(state) {
-                    game.focused_creature_mut().actions_mut().primary_interact = true;
-                }
-            }
+            let window_specific = game.renderer.window_specifics.get(&window_id).unwrap();
 
-            _ => (),
-        }},
+            match window_specific.variety {
+                WindowVariety::Creature(_) => match button {
+                    MouseButton::Left => {
+                        if is_pressed(state) {
+                            let focused_creature_id = *game
+                                .reality
+                                .as_ref()
+                                .unwrap()
+                                .creatures_manager
+                                .creature_controlled_by_window
+                                .get(&window_id)
+                                .unwrap();
+                            game.reality.as_mut().unwrap().creatures_manager.creatures
+                                [focused_creature_id.0]
+                                .actions_mut()
+                                .primary_interact = true;
+                        }
+                    }
+
+                    _ => (),
+                },
+                WindowVariety::Selection => {
+                    println!("To do!");
+                }
+                WindowVariety::Menu => {
+                    if !is_pressed(state) {
+                        game.menu_manager.on_click();
+                    }
+                }
+            }
+        }
+
+        Event::WindowEvent {
+            event: WindowEvent::CursorMoved { position, .. },
+            window_id,
+        } => {
+            //println!("{:?}", position);
+            let window = game.renderer.windows_manager.get_window(window_id).unwrap();
+            let window_size: [f32; 2] = window.inner_size().into();
+            // somehow convert from physical position to fragment position
+
+            let window_specific = game.renderer.window_specifics.get(&window_id).unwrap();
+
+            match window_specific.variety {
+                WindowVariety::Menu => {
+                    let fragment_position = [
+                        remap(position.x as f32, 0.0..window_size[0], -1.0..1.0),
+                        remap(position.y as f32, 0.0..window_size[1], -1.0..1.0),
+                    ];
+                    //println!("fragment position: {:?}", fragment_position);
+
+                    game.menu_manager
+                        .on_cursor_moved(fragment_position, &mut game.renderer);
+                }
+                WindowVariety::Selection => {
+                    // Todo
+                }
+                _ => (),
+            }
+        }
 
         Event::DeviceEvent {
             event: DeviceEvent::MouseMotion { delta },
@@ -407,159 +555,85 @@ fn main() {
                 .get_renderer_mut(window_focused)
                 .unwrap();
 
-            if game.actions.as_ref().unwrap().paused {
-                window_renderer.window().set_cursor_visible(true);
-                return;
-            }
+            let window_specific = game.renderer.window_specifics.get(&window_focused).unwrap();
 
             let delta = [
                 delta.1 as f32 * game.settings.mouse_sensitivity,
                 delta.0 as f32 * game.settings.mouse_sensitivity,
             ];
 
-            //game.focused_creature_mut().on_mouse_motion(delta);
+            match window_specific.variety {
+                WindowVariety::Creature(_) => {
+                    let reality = game.reality.as_mut().unwrap();
+                    if reality.actions.paused {
+                        window_renderer.window().set_cursor_visible(true);
+                        return;
+                    }
 
-            let focused_window = game.window_focused.unwrap();
+                    let creature_id = reality
+                        .creatures_manager
+                        .creature_controlled_by_window
+                        .get(&window_focused)
+                        .unwrap();
+                    let creature = &mut reality.creatures_manager.creatures[creature_id.0];
 
-            let creature_index = *game
-                .creatures_manager
-                .creature_controlled_by_window
-                .get(&focused_window)
-                .unwrap();
+                    creature.on_mouse_motion(delta);
 
-            game.creatures_manager.creatures[creature_index.0].on_mouse_motion(delta);
+                    let window_extent = window_renderer.window_size();
 
-            let window_extent = window_renderer.window_size();
-
-            window_renderer
-                .window()
-                .set_cursor_position(PhysicalPosition::new(
-                    window_extent[0] / 2.0,
-                    window_extent[1] / 2.0,
-                ))
-                .unwrap();
-            window_renderer.window().set_cursor_visible(false);
+                    window_renderer
+                        .window()
+                        .set_cursor_position(PhysicalPosition::new(
+                            window_extent[0] / 2.0,
+                            window_extent[1] / 2.0,
+                        ))
+                        .unwrap();
+                    window_renderer.window().set_cursor_visible(false);
+                }
+                _ => (),
+            }
         }
 
         _ => (),
-    })
+    }
 }
 
 fn fixed_update(game: &mut Game) {
-    let Some(window_focused) = game.window_focused else {
-        return;
-    };
+    let reality = game.reality.as_mut().unwrap();
 
-    let Some(creature_index) = game
-        .creatures_manager
-        .creature_controlled_by_window
-        .get(&window_focused)
-    else {
-        return;
-    };
+    if let Some(window_focused) = game.window_focused {
+        if let Some(creature) = reality
+            .creatures_manager
+            .creature_controlled_by_window
+            .get(&window_focused)
+        {
+            let creature = &mut reality.creatures_manager.creatures[creature.0];
 
-    let creature = &mut game.creatures_manager.creatures[creature_index.0];
+            creature.on_physics_fixed_update_before_physics_tick_when_focused(
+                &mut reality.physics_simulation.bodies,
+            );
+        }
+    }
 
-    creature.on_physics_fixed_update_before_physics_tick_when_focused(
-        &mut game.physics_simulation.bodies,
-    );
-
-    game.physics_simulation.update(FIXED_DELTA_TIME);
+    reality.physics_simulation.update(FIXED_DELTA_TIME);
 }
 
 fn on_update(game: &mut Game, event_loop: &EventLoopWindowTarget<()>) {
-    let mut input_manager = game.input_manager.take().unwrap();
-    while let Some(event) = input_manager.gilrs.next_event() {
+    if matches!(game.menu_manager.menu(), Menu::Main) {
+        if game.menu_manager.buttons()[0].pressed {
+            game.menu_manager
+                .set_menu(Menu::None, &mut game.renderer, event_loop);
+            game.reality = Some(Reality::new(game, event_loop));
+        }
+    }
 
+    while let Some(event) = game.input_manager.gilrs.next_event() {
         //println!("event: {:?}", event);
-
-        //let mut input_manager = game.input_manager.take().unwrap();
-        let mut game_actions = game.actions.take().unwrap();
-        if let Bindings::GamepadCodeBindings(bindings) =
-            &mut input_manager.bindings[input_manager.active_binding]
-        {
-            let creature_actions = game.focused_creature_mut().actions_mut();
-            bindings.modify_actions_with_gamepad_event_type(
-                event.event,
-                &mut game_actions,
-                creature_actions,
-            )
-        }
-        //game.input_manager = Some(input_manager);
-        game.actions = Some(game_actions);
-    }
-    game.input_manager = Some(input_manager);
-
-    // ((capture, capture's body index), spreader)
-    let mut capture_attempts = vec![];
-    for creature_index in &game.creatures_manager.captured_creatures {
-        let creature = &mut game.creatures_manager.creatures[creature_index.0];
-
-        creature.update(
-            &game.physics_simulation.bodies,
-            &game.creatures_manager.captured_creatures,
-            &mut capture_attempts,
-        );
-    }
-    for ((capture_index, body_index), spreader_index) in capture_attempts {
-        // Wrangle the borrow checker into lettings us mutably attempt_capture on the capture creature and mutably give it the spreader.
-        // This feels like it could be simplified.
-        let (capture, spreader) = if spreader_index > capture_index {
-            let (lhs, rhs) = game
-                .creatures_manager
-                .creatures
-                .split_at_mut(spreader_index.0);
-
-            (&mut lhs[capture_index.0], &mut rhs[0])
-        } else {
-            let (lhs, rhs) = game
-                .creatures_manager
-                .creatures
-                .split_at_mut(capture_index.0);
-
-            (&mut rhs[0], &mut lhs[spreader_index.0])
-        };
-
-        if capture.attempt_capture(spreader, body_index, &mut game.physics_simulation.bodies) {
-            game.creatures_manager
-                .captured_creatures
-                .push(capture_index);
-
-            let new_window = game
-                .renderer
-                .create_window(&event_loop, &WindowConfig::default());
-
-            game.creatures_manager
-                .creature_controlled_by_window
-                .insert(new_window, capture_index);
-        }
     }
 
-    for (window_id, creature_index) in &game.creatures_manager.creature_controlled_by_window {
-        let creature = &game.creatures_manager.creatures[creature_index.0];
-
-        let WindowVariety::Creature(camera) = &mut game
-            .renderer
-            .window_specifics
-            .get_mut(&window_id)
-            .unwrap()
-            .variety
-        else {
-            unreachable!()
-        };
-
-        creature.update_camera(camera, &game.physics_simulation.bodies);
-
-        camera.light_position[0] = camera.position[0];
-        camera.light_position[2] = camera.position[2];
-
-        //println!("camera: {:?}", camera);
-    }
-
-    let mut game_actions = game.actions.take().unwrap();
     if let Some(focused_window) = game.window_focused {
-        if game_actions.full_screen {
-            game_actions.full_screen = false;
+        if game.actions.full_screen {
+            game.actions.full_screen = false;
 
             let window = game
                 .renderer
@@ -574,361 +648,84 @@ fn on_update(game: &mut Game, event_loop: &EventLoopWindowTarget<()>) {
             });
         }
 
-        if game_actions.log_fps {
-            game_actions.log_fps = false;
+        if game.actions.log_fps {
+            game.actions.log_fps = false;
             println!("fps: {}", game.fps.average_fps());
         }
     }
-    game.actions = Some(game_actions);
-}
 
-#[derive(Default, Debug)]
-enum ActionState {
-    #[default]
-    None,
-    Do,
-    End,
-}
+    let Some(reality) = &mut game.reality else {
+        return;
+    };
 
-// So inflexible. If only there was a better way...
-enum GamepadMovement<T> {
-    Stick([T; 2]),
-    Buttons([T; 4]),
-}
+    // ((capture, capture's body index), spreader)
+    let mut capture_attempts = vec![];
+    for creature_index in &reality.creatures_manager.captured_creatures {
+        let creature = &mut reality.creatures_manager.creatures[creature_index.0];
 
-struct GamepadCodeBindings {
-    horizontal_movement: GamepadMovement<u32>,
+        creature.update(
+            &reality.physics_simulation.bodies,
+            &reality.creatures_manager.captured_creatures,
+            &mut capture_attempts,
+        );
+    }
+    for ((capture_index, body_index), spreader_index) in capture_attempts {
+        // Wrangle the borrow checker into lettings us mutably attempt_capture on the capture creature and mutably give it the spreader.
+        // This feels like it could be simplified.
+        let (capture, spreader) = if spreader_index > capture_index {
+            let (lhs, rhs) = reality
+                .creatures_manager
+                .creatures
+                .split_at_mut(spreader_index.0);
 
-    // Should be stick or buttons.
-    up_movement: u32,
-    down_movement: u32,
+            (&mut lhs[capture_index.0], &mut rhs[0])
+        } else {
+            let (lhs, rhs) = reality
+                .creatures_manager
+                .creatures
+                .split_at_mut(capture_index.0);
 
-    capture: (u32, bool),
+            (&mut rhs[0], &mut lhs[spreader_index.0])
+        };
 
-    speed_modifier: (u32, bool),
+        if capture.attempt_capture(spreader, body_index, &mut reality.physics_simulation.bodies) {
+            reality
+                .creatures_manager
+                .captured_creatures
+                .push(capture_index);
 
-    primary_interact: u32,
-    secondary_interact: u32,
+            //TODO: Setting as to whether we should auto open newly captured creatures?
+            let new_window = game
+                .renderer
+                .create_window(&event_loop, &WindowConfig::default());
 
-    // Should be stick or buttons.
-    positive_move_selection: u32,
-    negative_move_selection: u32,
-
-    full_screen: u32,
-}
-
-impl GamepadCodeBindings {
-    #[rustfmt::skip]
-    fn modify_actions_with_gamepad_event_type(
-        &mut self,
-        input: EventType,
-        game_actions: &mut GameActions,
-        creature_actions: &mut CreatureActions,
-    ) {
-        match input {
-            EventType::ButtonPressed(_, code) => {
-                let code = code.into_u32();
-                println!("ButtonPressed({})", code);
-
-                if code == self.up_movement {
-                    creature_actions.movement[1] = -1.0;
-                }
-
-                else if code == self.capture.0 {
-                    if self.capture.1 {
-                        creature_actions.capture = match creature_actions.capture {
-                            ActionState::Do => ActionState::End,
-                            ActionState::None => ActionState::Do,
-                            ActionState::End => {
-                                println!("End should always be used. This should never happen.");
-                                ActionState::End
-                            }
-                        };
-                    } else {
-                        creature_actions.capture = ActionState::Do;
-                    }
-                }
-
-                else if code == self.speed_modifier.0 {
-                    if self.speed_modifier.1 {
-                        creature_actions.speed_modifier = if creature_actions.speed_modifier == 1.0 {
-                            0.0
-                        } else {
-                            1.0
-                        };
-                    } else {
-                        creature_actions.speed_modifier = 1.0;
-                    }
-                }
-
-                else if code == self.positive_move_selection {
-                    creature_actions.move_selection = 1;
-                } else if code == self.negative_move_selection {
-                    creature_actions.move_selection = -1;
-                }
-            }
-            EventType::ButtonReleased(_, code) => {
-                let code = code.into_u32();
-                println!("ButtonReleased({})", code);
-
-                if code == self.up_movement {
-                    creature_actions.movement[1] = 0.0;
-                }
-
-                else if code == self.capture.0 && !self.capture.1 {
-                    creature_actions.capture = ActionState::End;
-                }
-
-                else if code == self.speed_modifier.0 && !self.speed_modifier.1 {
-                    creature_actions.speed_modifier = 0.0;
-                }
-            }
-
-            EventType::AxisChanged(_, value, code) => {
-                let code = code.into_u32();
-                println!("AxisChanged(code:{},value:{})", code, value);
-
-                if code == self.speed_modifier.0 && !self.speed_modifier.1 {
-                    creature_actions.speed_modifier = remap(-value, -1.0..1.0, 0.0..1.0);
-                }
-
-                else if let GamepadMovement::Stick(horizontal_movement) = self.horizontal_movement {
-                    if code == horizontal_movement[0] {
-                        creature_actions.movement[0] = -value;
-                    } else if code == horizontal_movement[1] {
-                        creature_actions.movement[2] = -value;
-                    }
-                }
-            }
-            _ => (),
+            reality
+                .creatures_manager
+                .creature_controlled_by_window
+                .insert(new_window, capture_index);
         }
     }
 
-    fn default_attack() -> Self {
-        Self {
-            horizontal_movement: GamepadMovement::Stick([196608, 196609]),
+    for (window_id, creature_index) in &reality.creatures_manager.creature_controlled_by_window {
+        let creature = &reality.creatures_manager.creatures[creature_index.0];
 
-            up_movement: 65824,
-            down_movement: 0,
+        let WindowVariety::Creature(camera) = &mut game
+            .renderer
+            .window_specifics
+            .get_mut(&window_id)
+            .unwrap()
+            .variety
+        else {
+            unreachable!()
+        };
 
-            capture: (65826, true),
+        creature.update_camera(camera, &reality.physics_simulation.bodies);
 
-            speed_modifier: (196610, false),
-            //speed_modifier: (65832, true),
-            primary_interact: 0,
-            secondary_interact: 0,
+        camera.light_position[0] = camera.position[0];
+        camera.light_position[2] = camera.position[2];
 
-            positive_move_selection: 65828,
-            negative_move_selection: 65827,
-
-            full_screen: 0,
-        }
+        //println!("camera: {:?}", camera);
     }
-}
-
-impl Default for GamepadCodeBindings {
-    fn default() -> Self {
-        Self {
-            horizontal_movement: GamepadMovement::Stick([196608, 196609]),
-
-            up_movement: 65824,
-            down_movement: 0,
-
-            capture: (65826, true),
-
-            speed_modifier: (196610, false),
-            //speed_modifier: (65832, true),
-            primary_interact: 0,
-            secondary_interact: 0,
-
-            positive_move_selection: 65828,
-            negative_move_selection: 65827,
-
-            full_screen: 0,
-        }
-    }
-}
-
-struct ScanCodeBindings {
-    forwards_movement: u32,
-    backwards_movement: u32,
-    left_movement: u32,
-    right_movement: u32,
-    up_movement: u32,
-    down_movement: u32,
-
-    capture: u32,
-
-    speed_modifier: u32,
-
-    primary_interact: u32,
-    secondary_interact: u32,
-
-    positive_move_selection: u32,
-    negative_move_selection: u32,
-
-    full_screen: u32,
-    pause: u32,
-
-    log_fps: u32,
-}
-
-impl ScanCodeBindings {
-    #[rustfmt::skip]
-    fn modify_actions_with_keyboard_input(
-        &mut self,
-        input: KeyboardInput,
-        game_actions: &mut GameActions,
-        creature_actions: &mut CreatureActions,
-    ) {
-        //println!("scancode: {}", input.scancode);
-
-        if input.scancode == self.forwards_movement {
-            if is_pressed(input.state) {
-                creature_actions.movement[2] = 1.0;
-            } else {
-                creature_actions.movement[2] = 0.0;
-            }
-        } else if input.scancode == self.backwards_movement {
-            if is_pressed(input.state) {
-                creature_actions.movement[2] = -1.0;
-            } else {
-                creature_actions.movement[2] = 0.0;
-            }
-        } else if input.scancode == self.left_movement {
-            if is_pressed(input.state) {
-                creature_actions.movement[0] = -1.0;
-            } else {
-                creature_actions.movement[0] = 0.0;
-            }
-        } else if input.scancode == self.right_movement {
-            if is_pressed(input.state) {
-                creature_actions.movement[0] = 1.0;
-            } else {
-                creature_actions.movement[0] = 0.0;
-            }
-        } else if input.scancode == self.up_movement {
-            if is_pressed(input.state) {
-                creature_actions.movement[1] = -1.0;
-            } else {
-                creature_actions.movement[1] = 0.0;
-            }
-        } else if input.scancode == self.down_movement {
-            if is_pressed(input.state) {
-                creature_actions.movement[1] = 1.0;
-            } else {
-                creature_actions.movement[1] = 0.0;
-            }
-        }
-
-        else if input.scancode == self.capture {
-            if is_pressed(input.state) {
-                creature_actions.capture = ActionState::Do;
-            } else {
-                creature_actions.capture = ActionState::End;
-            }
-        }
-
-        else if input.scancode == self.positive_move_selection {
-            if is_pressed(input.state) {
-                creature_actions.move_selection = 1;
-            }
-        } else if input.scancode == self.negative_move_selection {
-            if is_pressed(input.state) {
-                creature_actions.move_selection = -1;
-            }
-        }
-
-        else if input.scancode == self.full_screen {
-            if is_pressed(input.state) {
-                game_actions.full_screen = true;
-            }
-        } else if input.scancode == self.pause {
-            if is_pressed(input.state) {
-                game_actions.paused = !game_actions.paused;
-            }
-        }
-
-        else if input.scancode == self.log_fps {
-            if is_pressed(input.state) {
-                game_actions.log_fps = true;
-            }
-        }
-    }
-}
-
-impl Default for ScanCodeBindings {
-    fn default() -> Self {
-        Self {
-            forwards_movement: 17,
-            backwards_movement: 31,
-            left_movement: 30,
-            right_movement: 32,
-            up_movement: 57,
-            down_movement: 42,
-
-            capture: 46,
-
-            speed_modifier: 33,
-
-            primary_interact: 19,
-            secondary_interact: 20,
-
-            positive_move_selection: 16,
-            negative_move_selection: 18,
-
-            full_screen: 43,
-            pause: 1,
-
-            log_fps: 25,
-        }
-    }
-}
-
-enum Bindings {
-    ScanCodeBindings(ScanCodeBindings),
-    GamepadCodeBindings(GamepadCodeBindings),
-}
-
-struct InputManager {
-    gilrs: Gilrs,
-
-    active_binding: usize,
-    // Vec so people can easily switch between bindings.
-    bindings: Vec<Bindings>,
-    //TODO: add creature specific bindings?
-
-    //TODO: add default bindings when switching to controllers or keyboards, with specific names.
-}
-
-// Up to the bindings to use stuff as press and hold, or toggle.
-#[derive(Default, Debug)]
-struct CreatureActions {
-    // Local space. Vertical should only be -1.0 or 1.0.
-    movement: [f32; 3],
-
-    capture: ActionState,
-
-    // from 0-1
-    speed_modifier: f32,
-
-    primary_interact: bool,
-    secondary_interact: bool,
-
-    move_selection: i8,
-}
-
-#[derive(Default, Debug)]
-struct GameActions {
-    full_screen: bool,
-
-    // Debug:
-    log_fps: bool,
-}
-
-#[derive(Default, Debug)]
-struct RealityActions {
-    paused: bool,
 }
 
 #[inline]

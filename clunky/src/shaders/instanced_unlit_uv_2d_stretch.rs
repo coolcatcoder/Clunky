@@ -107,6 +107,13 @@ impl Instance {
             model_to_world_2: model_to_world.z_axis.into(),
         }
     }
+
+    pub fn set_model_to_world(&mut self, model_to_world: glam::Affine2) {
+        let model_to_world = glam::Mat3::from(model_to_world);
+        self.model_to_world_0 = model_to_world.x_axis.into();
+        self.model_to_world_1 = model_to_world.y_axis.into();
+        self.model_to_world_2 = model_to_world.z_axis.into();
+    }
 }
 
 /// Gives you a GraphicsPipelineCreateInfo with everything specific to this shader.

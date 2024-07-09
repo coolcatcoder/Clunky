@@ -6,7 +6,7 @@ use vulkano::{
     pipeline::{
         graphics::{
             color_blend::{AttachmentBlend, ColorBlendAttachmentState, ColorBlendState},
-            depth_stencil::{CompareOp, DepthState, DepthStencilState},
+            depth_stencil::DepthStencilState,
             vertex_input::{Vertex as VertexTrait, VertexDefinition},
             GraphicsPipelineCreateInfo,
         },
@@ -15,8 +15,6 @@ use vulkano::{
     },
     render_pass::Subpass,
 };
-
-use crate::math::{self, Degrees, Matrix4, Radians};
 
 pub mod vertex_shader {
     vulkano_shaders::shader! {
@@ -121,6 +119,13 @@ impl Instance {
             model_to_world_1: model_to_world.y_axis.into(),
             model_to_world_2: model_to_world.z_axis.into(),
         }
+    }
+
+    pub fn set_model_to_world(&mut self, model_to_world: glam::Affine2) {
+        let model_to_world = glam::Mat3::from(model_to_world);
+        self.model_to_world_0 = model_to_world.x_axis.into();
+        self.model_to_world_1 = model_to_world.y_axis.into();
+        self.model_to_world_2 = model_to_world.z_axis.into();
     }
 }
 
