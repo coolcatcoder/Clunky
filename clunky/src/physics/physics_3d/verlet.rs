@@ -14,6 +14,15 @@ where
     pub acceleration: [T; 3],
 }
 
+// I am interested in an experimental particle that uses integers.
+struct Experiment {
+    position: [u16; 3],
+    // Perhaps this could be even smaller, and just have a lower precision, which I think would be fine.
+    previous_position: [u16; 3],
+
+    acceleration: [u16; 3],
+}
+
 impl<T> Particle<T>
 where
     T: math::Number,
